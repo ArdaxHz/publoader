@@ -115,11 +115,8 @@ def print_error(error_response: requests.Response):
         print(error_response.status_code)
 
 
-def login_to_md(session: requests.Session):
+def login_to_md(session: requests.Session, config: Dict[str, Dict[str, str]]):
     """Login to MangaDex using the credentials found in the env file."""
-    config = configparser.ConfigParser()
-    config.read('config.ini')
-
     username = config["MangaDex Credentials"]["mangadex_username"]
     password = config["MangaDex Credentials"]["mangadex_password"]
 
@@ -378,8 +375,8 @@ def get_mplus_updates(manga_series: List[int], posted_chapters: List[int], last_
     """Get latest chapter updates."""
     updates = []
 
-    logging.info('Looking for tracked manga updates.')
-    print('Getting manga updates.')
+    logging.info('Looking for tracked manga new chapters.')
+    print('Getting new chapters.')
     for manga in manga_series:
         manga_response = request_from_api(manga_id=manga)
         if manga_response is not None:
@@ -469,17 +466,21 @@ def open_database(database_path: Path) -> sqlite3.Connection:
 
 
 if __name__ == '__main__':
+
     root_path = Path('.')
+    config = configparser.ConfigParser()
     database_path = root_path.joinpath('chapters').with_suffix('.db')
     last_run_path = root_path.joinpath('last_run').with_suffix('.txt')
     manga_map_path = root_path.joinpath('manga').with_suffix('.json')
+    config_file_path = root_path.joinpath('config').with_suffix('.ini')
+    config.read(config_file_path)
 
     # Open required files
     last_run = check_last_run(last_run_path)
     manga_id_map = open_manga_id_map(manga_map_path)
     database_connection = open_database(database_path)
     fill_backlog = check_table_exists(database_connection)
-    uploader_account_id = manga_id_map["MangaDex Credentials"]["mangadex_userid"]
+    uploader_account_id = config["MangaDex Credentials"]["mangadex_userid"]
 
     # Get already posted chapters
     posted_chapters = database_connection.execute("SELECT * FROM chapters").fetchall()
@@ -492,7 +493,7 @@ if __name__ == '__main__':
     updates = get_mplus_updates(manga_map_mplus_ids, posted_chapters_ids, last_run)
 
     session = requests.Session()
-    login_to_md(session)
+    login_to_md(session, config)
 
     # Start deleting expired chapters
     if not fill_backlog:
@@ -595,6 +596,8 @@ if __name__ == '__main__':
                 logging.error(error_message)
                 print(error_message)
                 remove_upload_session(session, upload_session_id)
+
+            time.sleep(3)
 
         skipped_chapters_message = f'Skipped {skipped} chapters out of {len(chapters)} for manga {mangadex_manga_id}: {mplus_manga_id}.'
         logging.info(skipped_chapters_message)
