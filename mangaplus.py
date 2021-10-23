@@ -20,6 +20,7 @@ mplus_base_api_url = "https://jumpg-webapi.tokyo-cdn.com"
 mangaplus_chapter_url = 'https://mangaplus.shueisha.co.jp/viewer/{}'
 http_error_codes = {"400": "Bad request.", "401": "Unauthorised.", "403": "Forbidden.", "404": "Not found.", "429": "Too many requests."}
 md_upload_api_url = 'https://api.mangadex.org/upload'
+md_auth_api_url = 'https://api.mangadex.org/auth'
 mplus_language_map = {'0': 'en', '1': 'es-la', '2': 'fr', '3': 'id', '4': 'pt-br', '5': 'ru', '6': 'th'}
 mplus_group = '4f1de6a2-f0c5-4ac5-bce5-02c7dbb67deb'
 logging.basicConfig(filename='mplus_md_uploader.log', encoding='utf-8', level=logging.DEBUG,
@@ -113,36 +114,6 @@ def print_error(error_response: requests.Response):
     except KeyError:
         logging.warning(f'KeyError: {error_response.status_code}.')
         print(error_response.status_code)
-
-
-def login_to_md(session: requests.Session, config: Dict[str, Dict[str, str]]):
-    """Login to MangaDex using the credentials found in the env file."""
-    username = config["MangaDex Credentials"]["mangadex_username"]
-    password = config["MangaDex Credentials"]["mangadex_password"]
-
-    print(username, password)
-
-    if username == '' or password == '':
-        critical_message = 'Login details missing.'
-        logging.critical(critical_message)
-        raise Exception(critical_message)
-
-    login_response = session.post('https://api.mangadex.org/auth/login', json={"username": username, "password": password})
-
-    if login_response.status_code != 200:
-        print_error(login_response)
-        login_response_error_message = f"Couldn't login, mangadex returned an error {login_response.status_code}."
-        logging.critical(login_response_error_message)
-        raise Exception(login_response_error_message)
-
-    # Update requests session with headers to always be logged in
-    login_response_json = convert_json(login_response)
-    if login_response_json is None:
-        raise Exception("Couldn't convert login api response into a json.")
-
-    session_token = login_response_json["token"]["session"]
-    session.headers.update({"Authorization": f"Bearer {session_token}"})
-    logging.info(f'Logged into mangadex.')
 
 
 def remove_upload_session(session: requests.Session, upload_session_id: str):
@@ -386,6 +357,60 @@ def get_mplus_updates(manga_series: List[int], posted_chapters: List[int], last_
     return updates
 
 
+def login_to_md(session: requests.Session, config: Dict[str, Dict[str, str]]):
+    """Login to MangaDex using the credentials found in the env file."""
+    username = config["MangaDex Credentials"]["mangadex_username"]
+    password = config["MangaDex Credentials"]["mangadex_password"]
+
+    print(username, password)
+
+    if username == '' or password == '':
+        critical_message = 'Login details missing.'
+        logging.critical(critical_message)
+        raise Exception(critical_message)
+
+    login_response = session.post(f'{md_auth_api_url}/login', json={"username": username, "password": password})
+
+    if login_response.status_code != 200:
+        login_response_error_message = f"Couldn't login, mangadex returned an error {login_response.status_code}."
+        logging.critical(login_response_error_message)
+        print_error(login_response)
+        raise Exception(login_response_error_message)
+
+    # Update requests session with headers to always be logged in
+    login_response_json = convert_json(login_response)
+    if login_response_json is None:
+        login_response_json_message = "Couldn't convert login api response into a json."
+        logging.error(login_response_json_message)
+        raise Exception(login_response_json_message)
+
+    session_token = login_response_json["token"]["session"]
+    session.headers.update({"Authorization": f"Bearer {session_token}"})
+    logging.info(f'Logged into mangadex.')
+
+
+def check_logged_in(session: requests.Session, config: Dict[str, Dict[str, str]]):
+    """Check if still logged into mangadex."""
+    auth_check_response = session.get(f'{md_auth_api_url}/check')
+
+    if auth_check_response.status_code != 200:
+        logging.warning(f"Checking if logged in returned {auth_check_response.status_code}.")
+        print_error(auth_check_response)
+        return
+
+    auth_data = convert_json(auth_check_response)
+    if auth_data is None:
+        return
+
+    if auth_data["isAuthenticated"]:
+        return
+
+    logging.info('Login token expired, logging in again.')
+    login_to_md(session, config)
+
+    time.sleep(1)
+
+
 def update_database(database_connection: sqlite3.Connection, chapter: Chapter, succesful_upload_id: Optional[str]=None):
     """Update the database with the new chapter."""
     print('Updating database.')
@@ -519,6 +544,7 @@ if __name__ == '__main__':
         skipped = 0
         for chapter in chapters:
             # Delete existing upload session if exists
+            check_logged_in(session, config)
             delete_exising_upload_session(session)
             mplus_manga_id = chapter.manga_id
             chapter_number = chapter.chapter_number
