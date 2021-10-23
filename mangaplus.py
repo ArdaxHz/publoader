@@ -385,7 +385,7 @@ def get_mplus_updates(manga_series: List[int], posted_chapters: List[int], last_
         if manga_response is not None:
             manga_response_parsed = get_proto_response(manga_response)
             updated_chapters = get_latest_chapters(manga_response_parsed, posted_chapters, last_run)
-            print(updated_chapters)
+            # print(updated_chapters)
             updates.extend(updated_chapters)
     return updates
 
@@ -479,6 +479,7 @@ if __name__ == '__main__':
     manga_id_map = open_manga_id_map(manga_map_path)
     database_connection = open_database(database_path)
     fill_backlog = check_table_exists(database_connection)
+    uploader_account_id = manga_id_map["MangaDex Credentials"]["mangadex_userid"]
 
     # Get already posted chapters
     posted_chapters = database_connection.execute("SELECT * FROM chapters").fetchall()
@@ -523,9 +524,9 @@ if __name__ == '__main__':
             chapter_language = mplus_language_map[str(chapter.chapter_language)]
 
             regexed_chapter_title = str()
-            regexed_chapter_title_regex = re.compile(r'^chapter \d+\: (.+)$')
+            regexed_chapter_title_regex = re.compile(r'^chapter \d+\: (.+)$', re.IGNORECASE)
             regexed_chapter_title_match = regexed_chapter_title_regex.match(chapter.chapter_title)
-            if regexed_chapter_title_match:
+            if regexed_chapter_title_match is not None:
                 regexed_chapter_title = regexed_chapter_title_match.group(1)
 
             # Skip duplicate chapters
