@@ -593,18 +593,18 @@ if __name__ == '__main__':
                 print(error_message)
                 remove_upload_session(session, upload_session_id)
 
-        # Make sure background process of deleting expired chapters is finished
-        if not fill_backlog:
-            for process in chapter_delete_processes:
-                if process is not None:
-                    process.join()
+    # Make sure background process of deleting expired chapters is finished
+    if not fill_backlog:
+        for process in chapter_delete_processes:
+            if process is not None:
+                process.join()
 
-        # Save and close database
-        database_connection.commit()
-        database_connection.close()
-        logging.info('Saved and closed database.')
+    # Save and close database
+    database_connection.commit()
+    database_connection.close()
+    logging.info('Saved and closed database.')
 
-        # Save last run as now
-        with open(last_run_path, 'w') as last_run_fp:
-            last_run_path.write_text(str(int(datetime.timestamp(datetime.now()))))
-        logging.info('Saved last run time.')
+    # Save last run as now
+    with open(last_run_path, 'w') as last_run_fp:
+        last_run_path.write_text(str(int(datetime.timestamp(datetime.now()))))
+    logging.info('Saved last run time.')
