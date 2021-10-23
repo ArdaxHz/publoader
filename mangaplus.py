@@ -204,15 +204,16 @@ def get_latest_chapters(manga_response: response_pb.Response, posted_chapters: L
 
     # Go through the last three chapters
     for chapter in chapters[-3:]:
-        # Chapter id is not posted and the 
-        if chapter.chapter_id not in posted_chapters and (datetime.fromtimestamp(chapter.start_timestamp) + timedelta(hours=24)) <= datetime.fromtimestamp(last_run):
+        # Chapter id is not in database and chapter release isn't before last run time
+        chapter_timestamp = datetime.fromtimestamp(chapter.start_timestamp)
+        if chapter.chapter_id not in posted_chapters and chapter_timestamp + timedelta(hours=24) >= datetime.fromtimestamp(last_run):
             previous_chapter = get_previous_chapter(chapters, chapter)
-            if chapter.chapter_number == "ex":
+            if chapter.chapter_number.strip('#') == "ex":
                 if previous_chapter is None:
-                    continue                
+                    continue
                 previous_chapter_number = str(previous_chapter.chapter_number)
                 chapter_number = f"{previous_chapter_number.lstrip('#').lstrip('0')}.5"
-            elif chapter.chapter_number == "One-Shot":
+            elif chapter.chapter_number.strip('#') == "One-Shot":
                 chapter_number = None
             else:
                 chapter_number = str(chapter.chapter_number.lstrip('#')).lstrip('0')
