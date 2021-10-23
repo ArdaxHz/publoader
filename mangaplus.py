@@ -349,7 +349,7 @@ def remove_old_chapters(session: requests.Session, databse_connection: sqlite3.C
 
 
 def delete_expired_chapters(posted_chapters: List[Dict[str, int]], session: requests.Session, database_connection: sqlite3.Connection) -> List[multiprocessing.Process]:
-    """Delete expired chapters from mangadex and the database."""
+    """Delete expired chapters from mangadex."""
     chapter_delete_processes = []
     logging.info(f'Started deleting exired chapters process.')
     print('Deleting expired chapters.')
@@ -514,6 +514,7 @@ if __name__ == '__main__':
             "order[createdAt]": "desc",
         })
 
+        skipped = 0
         for chapter in chapters:
             # Delete existing upload session if exists
             delete_exising_upload_session(session)
@@ -530,7 +531,7 @@ if __name__ == '__main__':
             # Skip duplicate chapters
             duplicate_chapter_found = False
             for md_chapter in manga_chapters:
-                if md_chapter["attributes"]["chapter"] == chapter_number and md_chapter["attributes"]["translatedLanguage"] == chapter_language and md_chapter["attributes"]["externalUrl"] is not None and md_chapter["attributes"]["title"] in (chapter.chapter_title, regexed_chapter_title):
+                if md_chapter["attributes"]["chapter"] == chapter_number and md_chapter["attributes"]["translatedLanguage"] == chapter_language and md_chapter["attributes"]["externalUrl"] is not None and md_chapter["attributes"]["title"].lower() in (chapter.chapter_title.lower(), regexed_chapter_title.lower()):
                     dupe_chapter_message = f'Manga: {mangadex_manga_id}: {mplus_manga_id}, chapter: {chapter_number}, language: {chapter_language} already exists on mangadex, skipping.'
                     logging.info(dupe_chapter_message)
                     print(dupe_chapter_message)
@@ -538,6 +539,7 @@ if __name__ == '__main__':
                     break
 
             if duplicate_chapter_found:
+                skipped += 1
                 continue
 
             # Start the upload session
@@ -592,6 +594,10 @@ if __name__ == '__main__':
                 logging.error(error_message)
                 print(error_message)
                 remove_upload_session(session, upload_session_id)
+
+        skipped_chapters_message = f'Skipped {skipped} chapters out of {len(chapters)} for manga {mangadex_manga_id}: {mplus_manga_id}.'
+        logging.info(skipped_chapters_message)
+        print(skipped_chapters_message)
 
     # Make sure background process of deleting expired chapters is finished
     if not fill_backlog:
