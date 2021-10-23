@@ -116,8 +116,12 @@ def print_error(error_response: requests.Response):
 def login_to_md(session: requests.Session):
     """Login to MangaDex using the credentials found in the env file."""
     config = configparser.ConfigParser()
-    username = config["MangaDex Credentials"]["MANGADEX_USERNAME"]
-    password = config["MangaDex Credentials"]["MANGADEX_PASSWORD"]
+    config.read('config.ini')
+
+    username = config["MangaDex Credentials"]["mangadex_username"]
+    password = config["MangaDex Credentials"]["mangadex_password"]
+
+    print(username, password)
 
     if username == '' or password == '':
         critical_message = 'Login details missing.'
@@ -396,7 +400,6 @@ def open_database(database_path: Path) -> sqlite3.Connection:
 
 
 if __name__ == '__main__':
-
     root_path = Path('.')
     database_path = root_path.joinpath('chapters').with_suffix('.db')
     last_run_path = root_path.joinpath('last_run').with_suffix('.txt')
@@ -464,7 +467,7 @@ if __name__ == '__main__':
                     raise Exception(chapter_commit_response_json_message)
 
                 succesful_upload_id = chapter_commit_response_json["data"]["id"]
-                succesful_upload_message = f"Committed {succesful_upload_id}."
+                succesful_upload_message = f"Committed {succesful_upload_id} for Manga {manga_id}."
                 logging.info(succesful_upload_message)
                 print(succesful_upload_message)
                 update_database(database_connection, chapter, succesful_upload_id)
