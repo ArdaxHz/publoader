@@ -3,6 +3,7 @@ import json
 import logging
 import math
 import multiprocessing
+import re
 import sqlite3
 import time
 from dataclasses import dataclass, field
@@ -503,7 +504,7 @@ if __name__ == '__main__':
         try:
             updated_manga_chapters[md_id].append(chapter)
         except (KeyError, ValueError, AttributeError):
-            updated_manga_chapters[md_id] = chapter
+            updated_manga_chapters[md_id] = [chapter]
 
     for mangadex_manga_id in updated_manga_chapters:
         chapters = updated_manga_chapters[mangadex_manga_id]
@@ -516,15 +517,21 @@ if __name__ == '__main__':
         for chapter in chapters:
             # Delete existing upload session if exists
             delete_exising_upload_session(session)
+            mplus_manga_id = chapter.manga_id
             chapter_number = chapter.chapter_number
             chapter_language = mplus_language_map[str(chapter.chapter_language)]
-            mplus_manga_id = chapter.manga_id
+
+            regexed_chapter_title = str()
+            regexed_chapter_title_regex = re.compile(r'^chapter \d+\: (.+)$')
+            regexed_chapter_title_match = regexed_chapter_title_regex.match(chapter.chapter_title)
+            if regexed_chapter_title_match:
+                regexed_chapter_title = regexed_chapter_title_match.group(1)
 
             # Skip duplicate chapters
             duplicate_chapter_found = False
             for md_chapter in manga_chapters:
-                if md_chapter["attributes"]["chapter"] == chapter_number and md_chapter["attributes"]["translatedLanguage"] == chapter_language and md_chapter["attributes"]["externalUrl"] is not None:
-                    dupe_chapter_message = f'Manga {mangadex_manga_id}: {mplus_manga_id}, chapter {chapter_number}, language {chapter_language} already exists on mangadex, skipping.'
+                if md_chapter["attributes"]["chapter"] == chapter_number and md_chapter["attributes"]["translatedLanguage"] == chapter_language and md_chapter["attributes"]["externalUrl"] is not None and md_chapter["attributes"]["title"] in (chapter.chapter_title, regexed_chapter_title):
+                    dupe_chapter_message = f'Manga: {mangadex_manga_id}: {mplus_manga_id}, chapter: {chapter_number}, language: {chapter_language} already exists on mangadex, skipping.'
                     logging.info(dupe_chapter_message)
                     print(dupe_chapter_message)
                     duplicate_chapter_found = True
