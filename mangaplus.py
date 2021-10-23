@@ -331,7 +331,7 @@ def request_from_api(manga_id: Optional[int]=None, updated: bool=False) -> Optio
     return None
 
 
-def remove_old_chapters(session: requests.Session, databse_connection: sqlite3.Connection, chapter: Dict[int, Optional[str]]):
+def remove_old_chapters(session: requests.Session, chapter: Dict[int, Optional[str]]):
     """Check if the chapters expired and remove off mangadex if they are."""
     if datetime.fromtimestamp(chapter["chapter_expire"]) <= datetime.now() and chapter["md_chapter_id"] is not None:
         logging.info(f'{chapter["md_chapter_id"]} expired, deleting.')
@@ -341,17 +341,15 @@ def remove_old_chapters(session: requests.Session, databse_connection: sqlite3.C
             print_error(delete_reponse)
             return
         logging.info(f'Deleted {chapter["md_chapter_id"]}.')
-        # databse_connection.execute('DELETE FROM chapters WHERE chapter_id=(?)', (chapter["chapter_id"]))
-        # databse_connection.commit()
 
 
-def delete_expired_chapters(posted_chapters: List[Dict[str, int]], session: requests.Session, database_connection: sqlite3.Connection) -> List[multiprocessing.Process]:
+def delete_expired_chapters(posted_chapters: List[Dict[str, int]], session: requests.Session) -> List[multiprocessing.Process]:
     """Delete expired chapters from mangadex."""
     chapter_delete_processes = []
     logging.info(f'Started deleting exired chapters process.')
     print('Deleting expired chapters.')
     for chapter_to_delete in posted_chapters:
-        process = multiprocessing.Process(target=remove_old_chapters, args=(session, database_connection, chapter_to_delete))
+        process = multiprocessing.Process(target=remove_old_chapters, args=(session, dict(chapter_to_delete)))
         process.start()
         chapter_delete_processes.append(process)
     return chapter_delete_processes
@@ -382,6 +380,7 @@ def get_mplus_updates(manga_series: List[int], posted_chapters: List[int], last_
         if manga_response is not None:
             manga_response_parsed = get_proto_response(manga_response)
             updated_chapters = get_latest_chapters(manga_response_parsed, posted_chapters, last_run)
+            logging.info(updated_chapters)
             # print(updated_chapters)
             updates.extend(updated_chapters)
     return updates
@@ -394,6 +393,7 @@ def update_database(database_connection: sqlite3.Connection, chapter: Chapter, s
     database_connection.execute('INSERT INTO chapters (chapter_id, timestamp, chapter_expire, chapter_language, chapter_title, chapter_number, mplus_manga_id, md_chapter_id) VALUES (?,?,?,?,?,?,?,?)',
                 (chapter.chapter_id, chapter.chapter_timestamp, chapter.chapter_expire, chapter.chapter_language, chapter.chapter_title, chapter.chapter_number, chapter.manga_id, succesful_upload_id))
     database_connection.commit()
+    print('Updated database.')
 
 
 def make_tables(database_connection: sqlite3.Connection):
@@ -497,7 +497,7 @@ if __name__ == '__main__':
 
     # Start deleting expired chapters
     if not fill_backlog:
-        chapter_delete_processes = delete_expired_chapters(posted_chapters, session, database_connection)
+        chapter_delete_processes = delete_expired_chapters(posted_chapters, session)
 
     # Sort each chapter 
     updated_manga_chapters = {}
@@ -578,7 +578,7 @@ if __name__ == '__main__':
                         raise Exception(chapter_commit_response_json_message)
 
                     succesful_upload_id = chapter_commit_response_json["data"]["id"]
-                    succesful_upload_message = f"Committed {succesful_upload_id} for manga {mangadex_manga_id}: {mplus_manga_id}."
+                    succesful_upload_message = f"Committed {succesful_upload_id} for manga {mangadex_manga_id}: {mplus_manga_id} chapter {chapter_number}."
                     logging.info(succesful_upload_message)
                     print(succesful_upload_message)
                     update_database(database_connection, chapter, succesful_upload_id)
