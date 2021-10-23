@@ -136,7 +136,8 @@ def login_to_md(session: requests.Session):
     login_response_json = convert_json(login_response)
     if login_response_json is None:
         raise Exception("Couldn't convert login api response into a json.")
-    session_token = ["token"]["session"]
+
+    session_token = login_response_json["token"]["session"]
     session.headers.update({"Authorization": f"Bearer {session_token}"})
     logging.info(f'Logged into mangadex.')
 
@@ -159,7 +160,7 @@ def delete_exising_upload_session(session: requests.Session):
                 logging.warning(f"Couldn't convert exising upload session response into a json, retrying.")
                 time.sleep(1)
                 continue
-            remove_upload_session(session, ["data"]["id"])
+            remove_upload_session(session, existing_session_json["data"]["id"])
             return
         else:
             removal_retry += 1
