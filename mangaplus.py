@@ -349,7 +349,7 @@ if __name__ == '__main__':
         while commit_retries < 5:
             chapter_commit_response = session.post(f'{md_upload_api_url}/{upload_session_id}/commit',
                 json={"chapterDraft":
-                    {"volume": None, "chapter": chapter.chapter_number, "title": chapter.chapter_title, "translatedLanguage": mplus_language_map[str(chapter.chapter_language)]}, "externalUrl": mangaplus_chapter_url.format(chapter.chapter_id)
+                    {"volume": None, "chapter": chapter.chapter_number, "title": chapter.chapter_title, "translatedLanguage": mplus_language_map[str(chapter.chapter_language)], "externalUrl": mangaplus_chapter_url.format(chapter.chapter_id)}, "pageOrder": []
                 })
 
             if chapter_commit_response.status_code == 200:
