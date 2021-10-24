@@ -59,6 +59,36 @@ class Chapter:
     manga_id:int = field(default=None)
 
 
+root_path = Path('.')
+database_path = root_path.joinpath('chapters').with_suffix('.db')
+
+
+def open_database(database_path: Path) -> sqlite3.Connection:
+    """Open the database."""
+    database_connection = sqlite3.connect(database_path)
+    database_connection.row_factory = sqlite3.Row
+    logging.info('Opened database.')
+    return database_connection
+
+
+def check_table_exists(database_connection: sqlite3.Connection) -> bool:
+    """Check if the table exists."""
+    table_exist = database_connection.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='chapters'")
+
+    fill_backlog = False
+    # Table doesn't exist, fill backlog without posting to mangadex
+    if not table_exist.fetchall():
+        logging.error("Database table doesn't exist, making new one.")
+        print("Table doesn't exist, making new one.")
+        make_tables(database_connection)
+        fill_backlog = True
+    return fill_backlog
+
+
+database_connection = open_database(database_path)
+fill_backlog = check_table_exists(database_connection)
+
+
 def convert_json(response_to_convert: requests.Response) -> Optional[Dict]:
     """Convert the api response into a parsable json."""
     critical_decode_error_message = "Couldn't convert mangadex api response into a json."
@@ -139,6 +169,9 @@ def delete_exising_upload_session(session: requests.Session):
                 time.sleep(1)
                 continue
             remove_upload_session(session, existing_session_json["data"]["id"])
+            return
+        elif existing_session.status_code == 404:
+            logging.info("No existing upload session found.")
             return
         else:
             removal_retry += 1
@@ -331,17 +364,21 @@ def remove_old_chapters(session: requests.Session, chapter: Dict[int, Optional[s
         database_connection.execute("""INSERT INTO deleted_chapters SELECT * FROM chapters WHERE chapter_id=(?)""", (chapter["chapter_id"],))
         database_connection.execute("""DELETE FROM chapters WHERE chapter_id=(?)""", (chapter["chapter_id"],))
         database_connection.commit()
+
         if chapter["md_chapter_id"] is not None:
             logging.info(f'{chapter["md_chapter_id"]} expired, deleting.')
             delete_reponse = session.delete(f'https://api.mangadex.org/chapter/{chapter["md_chapter_id"]}')
             if delete_reponse.status_code != 200:
-                logging.warning(f'Couldn\'t delete expired chapter {chapter["md_chapter_id"]}.')
+                logging.warning(f"Couldn't delete expired chapter {chapter['md_chapter_id']}.")
                 print_error(delete_reponse)
                 return
-            logging.info(f'Deleted {chapter["md_chapter_id"]}.')
+
+            delete_chapter_message = f'Deleted {chapter["md_chapter_id"]}.'
+            logging.info(delete_chapter_message)
+            print(delete_chapter_message)
 
 
-def delete_expired_chapters(posted_chapters: List[Dict[str, int]], session: requests.Session) -> List[multiprocessing.Process]:
+def delete_expired_chapters(posted_chapters: List[Dict[str, int]], session: requests.Session):
     """Delete expired chapters from mangadex."""
     chapter_delete_processes = []
     logging.info(f'Started deleting exired chapters process.')
@@ -350,7 +387,11 @@ def delete_expired_chapters(posted_chapters: List[Dict[str, int]], session: requ
         process = multiprocessing.Process(target=remove_old_chapters, args=(session, dict(chapter_to_delete)))
         process.start()
         chapter_delete_processes.append(process)
-    return chapter_delete_processes
+        time.sleep(3)
+
+    for process in chapter_delete_processes:
+        if process is not None:
+            process.join()
 
 
 def get_mplus_updated_manga(tracked_manga: List[int]) -> List[Manga]:
@@ -453,8 +494,9 @@ def update_database(database_connection: sqlite3.Connection, chapter: Chapter, s
                                 {"md_id": succesful_upload_id, "mplus_id": chapter_id})
     else:
         logging.info(f'Adding new chapter to database: {chapter}.')
-        database_connection.execute('INSERT INTO chapters (chapter_id, timestamp, chapter_expire, chapter_language, chapter_title, chapter_number, mplus_manga_id, md_chapter_id) VALUES (?,?,?,?,?,?,?,?)',
-                    (chapter_id, chapter.chapter_timestamp, chapter.chapter_expire, chapter.chapter_language, chapter.chapter_title, chapter.chapter_number, chapter.manga_id, succesful_upload_id))
+        database_connection.execute('''INSERT INTO chapters (chapter_id, timestamp, chapter_expire, chapter_language, chapter_title, chapter_number, mplus_manga_id, md_chapter_id) VALUES
+                                                            (:chapter_id, :timestamp, :chapter_expire, :chapter_language, :chapter_title, :chapter_number, :mplus_manga_id, :md_chapter_id)''',
+                    {"chapter_id": chapter_id, "timestamp": chapter.chapter_timestamp, "chapter_expire": chapter.chapter_expire, "chapter_language": chapter.chapter_language, "chapter_title": chapter.chapter_title, "chapter_number": chapter.chapter_number, "mplus_manga_id": chapter.manga_id, "md_chapter_id": succesful_upload_id})
     database_connection.commit()
     print('Updated database.')
 
@@ -512,36 +554,8 @@ def open_manga_id_map(manga_map_path: Path) -> Optional[Dict[str, List[int]]]:
     return manga_map
 
 
-def check_table_exists(database_connection: sqlite3.Connection) -> bool:
-    """Check if the table exists."""
-    table_exist = database_connection.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='chapters'")
-
-    fill_backlog = False
-    # Table doesn't exist, fill backlog without posting to mangadex
-    if not table_exist.fetchall():
-        logging.error("Database table doesn't exist, making new one.")
-        print("Table doesn't exist, making new one.")
-        make_tables(database_connection)
-        fill_backlog = True
-    return fill_backlog
-
-
-def open_database(database_path: Path) -> sqlite3.Connection:
-    """Open the database."""
-    database_connection = sqlite3.connect(database_path)
-    database_connection.row_factory = sqlite3.Row
-    logging.info('Opened database.')
-    return database_connection
-
-
 def check_for_duplicate_chapter(database_connection: sqlite3.Connection, manga_chapters: List[Dict], chapter, mangadex_manga_id: UUID, mplus_manga_id: int, chapter_number: str, chapter_language: str) -> bool:
     """Check for duplicate chapters on mangadex."""
-    regexed_chapter_title = str()
-    regexed_chapter_title_regex = re.compile(r'^chapter \d+\: (.+)$', re.IGNORECASE)
-    regexed_chapter_title_match = regexed_chapter_title_regex.match(chapter.chapter_title)
-    if regexed_chapter_title_match is not None:
-        regexed_chapter_title = regexed_chapter_title_match.group(1)
-
     # Skip duplicate chapters
     for md_chapter in manga_chapters:
         if md_chapter["attributes"]["chapter"] == chapter_number and md_chapter["attributes"]["translatedLanguage"] == chapter_language and md_chapter["attributes"]["externalUrl"] is not None:
@@ -562,7 +576,12 @@ def create_upload_session(mangadex_manga_id: UUID, chapter_number: str, manga_ge
         delete_exising_upload_session(session)
         # Start the upload session
         upload_session_response = session.post(f'{md_upload_api_url}/begin', json={"manga": mangadex_manga_id, "groups": [mplus_group]})
-        if upload_session_response.status_code != 200:
+        if upload_session_response.status_code == 401:
+            login_to_md(session, config)
+            chapter_upload_session_retry += 1
+            time.sleep(1)
+            continue
+        elif upload_session_response.status_code != 200:
             print_error(upload_session_response)
             logging.error(f"Couldn't create an upload session for {mangadex_manga_id}, chapter {chapter_number}.")
             print("Couldn't create an upload session.")
@@ -615,6 +634,8 @@ def commit_chapter(chapter, upload_session_id: UUID, mangadex_manga_id: UUID, mp
             update_database(database_connection, chapter, succesful_upload_id)
             commit_retries == upload_retry_total
             return True
+        elif chapter_commit_response.status_code == 401:
+            login_to_md(session, config)
         else:
             logging.warning(f"Failed to commit {upload_session_id}, retrying.")
             print_error(chapter_commit_response)
@@ -684,8 +705,6 @@ def upload_chapters():
 
 if __name__ == '__main__':
 
-    root_path = Path('.')
-    database_path = root_path.joinpath('chapters').with_suffix('.db')
     last_run_path = root_path.joinpath('last_run').with_suffix('.txt')
     manga_map_path = root_path.joinpath('manga').with_suffix('.json')
     config_file_path = root_path.joinpath('config').with_suffix('.ini')
@@ -697,8 +716,6 @@ if __name__ == '__main__':
     # Open required files
     last_run = check_last_run(last_run_path)
     manga_id_map = open_manga_id_map(manga_map_path)
-    database_connection = open_database(database_path)
-    fill_backlog = check_table_exists(database_connection)
     uploader_account_id = config["MangaDex Credentials"]["mangadex_userid"]
     upload_retry_total = 3
 
@@ -708,19 +725,26 @@ if __name__ == '__main__':
     manga_map_mplus_ids = [mplus_id for md_id in manga_id_map for mplus_id in manga_id_map[md_id]]
     logging.info('Retrieved posted chapters from database and got mangaplus ids from manga id map file.')
 
+    session = requests.Session()
+    login_to_md(session, config)
+
+    # Start deleting expired chapters
+    chapter_delete_processes = None
+    if not fill_backlog:
+        try:
+            chapter_delete_processes = multiprocessing.Process(target=delete_expired_chapters, args=([dict(k) for k in posted_chapters], session))
+            chapter_delete_processes.start()
+        except:
+            pass
+
     # Get new manga and chapter updates
     updated_manga = get_mplus_updated_manga(manga_map_mplus_ids)
     updates = get_mplus_updates(manga_map_mplus_ids, posted_chapters_ids, last_run)
 
-    session = requests.Session()
-    login_to_md(session, config)
-    pool = multiprocessing.Pool()
-
-    # Start deleting expired chapters
-    if not fill_backlog:
-        chapter_delete_processes = pool.apply_async(func=delete_expired_chapters, args=([dict(k) for k in posted_chapters], session))
-
     upload_chapters()
+
+    if chapter_delete_processes is not None:
+        chapter_delete_processes.join()
 
     # Save and close database
     database_connection.commit()
