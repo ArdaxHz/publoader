@@ -493,11 +493,12 @@ def open_database(database_path: Path) -> sqlite3.Connection:
 if __name__ == '__main__':
 
     root_path = Path('.')
-    config = configparser.ConfigParser()
     database_path = root_path.joinpath('chapters').with_suffix('.db')
     last_run_path = root_path.joinpath('last_run').with_suffix('.txt')
     manga_map_path = root_path.joinpath('manga').with_suffix('.json')
     config_file_path = root_path.joinpath('config').with_suffix('.ini')
+
+    config = configparser.ConfigParser()
     config.read(config_file_path)
 
     # Open required files
@@ -559,7 +560,7 @@ if __name__ == '__main__':
             # Skip duplicate chapters
             duplicate_chapter_found = False
             for md_chapter in manga_chapters:
-                if md_chapter["attributes"]["chapter"] == chapter_number and md_chapter["attributes"]["translatedLanguage"] == chapter_language and md_chapter["attributes"]["externalUrl"] is not None and md_chapter["attributes"]["title"].lower() in (chapter.chapter_title.lower(), regexed_chapter_title.lower()):
+                if md_chapter["attributes"]["chapter"] == chapter_number and md_chapter["attributes"]["translatedLanguage"] == chapter_language and md_chapter["attributes"]["externalUrl"] is not None:
                     dupe_chapter_message = f'Manga: {mangadex_manga_id}: {mplus_manga_id}, chapter: {chapter_number}, language: {chapter_language} already exists on mangadex, skipping.'
                     logging.info(dupe_chapter_message)
                     print(dupe_chapter_message)
@@ -567,6 +568,7 @@ if __name__ == '__main__':
                     break
 
             if duplicate_chapter_found:
+                update_database(database_connection, chapter)
                 skipped += 1
                 continue
 
