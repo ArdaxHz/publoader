@@ -211,6 +211,7 @@ def get_chapters(session: requests.Session, **params) -> list:
 
         iteration += 1
 
+    time.sleep(3)
     print('Finished going through the pages.')
     return chapters
 
@@ -256,7 +257,7 @@ def get_latest_chapters(manga_response: response_pb.Response, posted_chapters: L
                 # There may be multiple extra chapters before the last numbered chapter
                 # Use index difference as decimal to avoid not uploading non-dupes
                 try:
-                    chapter_difference = list(chapters).index(int(chapter)) - list(chapters).index(int(previous_chapter))
+                    chapter_difference = list(chapters).index(chapter) - list(chapters).index(previous_chapter)
                     if chapter_difference > 1:
                         chapter_decimal = chapter_difference
                 except (ValueError, IndexError):
@@ -426,12 +427,26 @@ def check_logged_in(session: requests.Session, config: Dict[str, Dict[str, str]]
     time.sleep(1)
 
 
-def update_database(database_connection: sqlite3.Connection, chapter: Chapter, succesful_upload_id: Optional[str]=None):
+def update_database(database_connection: sqlite3.Connection, posted_chapters_ids: List[int], chapter: Chapter, succesful_upload_id: Optional[str]=None):
     """Update the database with the new chapter."""
     print('Updating database.')
-    logging.info(f'Adding new chapter to database: {chapter}.')
-    database_connection.execute('INSERT INTO chapters (chapter_id, timestamp, chapter_expire, chapter_language, chapter_title, chapter_number, mplus_manga_id, md_chapter_id) VALUES (?,?,?,?,?,?,?,?)',
-                (chapter.chapter_id, chapter.chapter_timestamp, chapter.chapter_expire, chapter.chapter_language, chapter.chapter_title, chapter.chapter_number, chapter.manga_id, succesful_upload_id))
+    chapter_id = chapter.chapter_id
+
+    chapter_id_exists = database_connection.execute('SELECT * FROM chapters WHERE EXISTS(SELECT 1 FROM chapters WHERE chapter_id=(?))', (chapter_id,))
+    chapter_id_exists_dict = chapter_id_exists.fetchone()
+    try:
+        logging.info(f'Adding new chapter to database: {chapter}.')
+        database_connection.execute('INSERT INTO chapters (chapter_id, timestamp, chapter_expire, chapter_language, chapter_title, chapter_number, mplus_manga_id, md_chapter_id) VALUES (?,?,?,?,?,?,?,?)',
+                    (chapter_id, chapter.chapter_timestamp, chapter.chapter_expire, chapter.chapter_language, chapter.chapter_title, chapter.chapter_number, chapter.manga_id, succesful_upload_id))
+    except sqlite3.IntegrityError:
+        try:
+            if chapter_id_exists_dict["md_chapter_id"] is None:
+                print('Updating database with new mangadex chapter id.')
+                logging.info(f'Updating existing record in the database: {chapter}.')
+                database_connection.execute('UPDATE chapters SET md_chapter_id=:md_id WHERE chapter_id=:mplus_id',
+                                    {"md_id": succesful_upload_id, "mplus_id": chapter_id})
+        except (AttributeError, KeyError, ValueError) as e:
+            print(e)
     database_connection.commit()
     print('Updated database.')
 
@@ -537,10 +552,11 @@ if __name__ == '__main__':
 
     session = requests.Session()
     login_to_md(session, config)
+    pool = multiprocessing.Pool()
 
     # Start deleting expired chapters
     if not fill_backlog:
-        chapter_delete_processes = delete_expired_chapters(posted_chapters, session)
+        chapter_delete_processes = pool.apply_async(func=delete_expired_chapters, args=([dict(k) for k in posted_chapters], session))
 
     # Sort each chapter by manga
     updated_manga_chapters = {}
@@ -576,9 +592,11 @@ if __name__ == '__main__':
                 regexed_chapter_title = regexed_chapter_title_match.group(1)
 
             # Skip duplicate chapters
+            dupe_chapter_id = None
             duplicate_chapter_found = False
             for md_chapter in manga_chapters:
                 if md_chapter["attributes"]["chapter"] == chapter_number and md_chapter["attributes"]["translatedLanguage"] == chapter_language and md_chapter["attributes"]["externalUrl"] is not None:
+                    dupe_chapter_id = md_chapter["id"]
                     dupe_chapter_message = f'Manga: {mangadex_manga_id}: {mplus_manga_id}, chapter: {chapter_number}, language: {chapter_language} already exists on mangadex, skipping.'
                     logging.info(dupe_chapter_message)
                     print(dupe_chapter_message)
@@ -587,7 +605,7 @@ if __name__ == '__main__':
 
             # Add duplicate chapter to database to avoid checking it again in the future
             if duplicate_chapter_found:
-                update_database(database_connection, chapter)
+                update_database(database_connection, posted_chapters_ids, chapter, dupe_chapter_id)
                 skipped += 1
                 continue
 
@@ -647,7 +665,7 @@ if __name__ == '__main__':
                     succesful_upload_message = f"Committed {succesful_upload_id} for {manga_generic_error_message}."
                     logging.info(succesful_upload_message)
                     print(succesful_upload_message)
-                    update_database(database_connection, chapter, succesful_upload_id)
+                    update_database(database_connection, posted_chapters_ids, chapter, succesful_upload_id)
                     commit_retries == upload_retry_total
                     break
                 else:
@@ -664,17 +682,12 @@ if __name__ == '__main__':
                 remove_upload_session(session, upload_session_id)
                 skipped += 1
 
-            time.sleep(3)
+            time.sleep(2)
 
         skipped_chapters_message = f'Skipped {skipped} chapters out of {len(chapters)} for manga {mangadex_manga_id}: {mplus_manga_id}.'
         logging.info(skipped_chapters_message)
         print(skipped_chapters_message)
-
-    # Make sure background process of deleting expired chapters is finished
-    if not fill_backlog:
-        for process in chapter_delete_processes:
-            if process is not None:
-                process.join()
+        time.sleep(3)
 
     # Save and close database
     database_connection.commit()
