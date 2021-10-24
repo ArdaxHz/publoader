@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, Optional, List
+from uuid import UUID
 
 import requests
 
@@ -58,8 +59,7 @@ class Chapter:
     manga_id:int = field(default=None)
 
 
-
-def convert_json(response_to_convert: requests.Response) -> Optional[dict]:
+def convert_json(response_to_convert: requests.Response) -> Optional[Dict]:
     """Convert the api response into a parsable json."""
     critical_decode_error_message = "Couldn't convert mangadex api response into a json."
     try:
@@ -71,7 +71,7 @@ def convert_json(response_to_convert: requests.Response) -> Optional[dict]:
     except AttributeError:
         logging.critical(f"Api response doesn't have load as json method, trying to load as json manually.")
         try:
-            converted_response = json.loads(response_to_convert)
+            converted_response = json.loads(response_to_convert.content)
         except json.JSONDecodeError:
             logging.critical(critical_decode_error_message)        
             print(critical_decode_error_message)
@@ -83,22 +83,25 @@ def convert_json(response_to_convert: requests.Response) -> Optional[dict]:
 
 def print_error(error_response: requests.Response):
     """Print the errors the site returns."""
+    error_converting_json_log_message = "{} when converting error_response into json."
+    error_converting_json_print_message = f"{error_response.status_code}: Couldn't convert api reposnse into json."
+
     # Api didn't return json object
     try:
         error_json = error_response.json()
     except json.JSONDecodeError as e:
-        logging.warning(f"{e} when converting error_response into json.")
-        print(error_response.status_code)
+        logging.warning(error_converting_json_log_message.format(e))
+        print(error_converting_json_print_message)
         return
     # Maybe already a json object
     except AttributeError:
         logging.warning(f"error_response is already a json.")
         # Try load as a json object
         try:
-            error_json = json.loads(error_response)
+            error_json = json.loads(error_response.content)
         except json.JSONDecodeError as e:
-            logging.warning(f"{e} when converting error_response into json.")
-            print(error_response.status_code)
+            logging.warning(error_converting_json_log_message.format(e))
+            print(error_converting_json_print_message)
             return
 
     # Api response doesn't follow the normal api error format
@@ -112,8 +115,9 @@ def print_error(error_response: requests.Response):
         logging.warning(f'Error: {errors}.')
         print(f'Error: {errors}.')
     except KeyError:
-        logging.warning(f'KeyError: {error_response.status_code}.')
-        print(error_response.status_code)
+        keyerror_message = f'KeyError: {error_response.status_code}.'
+        logging.warning(keyerror_message)
+        print(keyerror_message)
 
 
 def remove_upload_session(session: requests.Session, upload_session_id: str):
@@ -266,9 +270,11 @@ def get_latest_chapters(manga_response: response_pb.Response, posted_chapters: L
                 chapter_number = f"{previous_chapter_number.lstrip('#').lstrip('0')}.{chapter_decimal}"
             elif chapter_number == "One-Shot":
                 chapter_number = None
-            else:
-                chapter_number = str(chapter_number.lstrip('#')).lstrip('0')
-            
+
+            chapter_number_split = chapter_number.split(',')
+            chapter_number = chapter_number_split[-1]
+            chapter_number = str(chapter_number.lstrip('#')).lstrip('0')
+
             updated_chapters.append(Chapter(chapter_id=chapter.chapter_id, chapter_timestamp=chapter.start_timestamp,
                 chapter_title=chapter.chapter_name, chapter_expire=chapter.end_timestamp, chapter_number=chapter_number, chapter_language=manga_chapters.manga.language, manga_id=manga_chapters.manga.manga_id))
 
@@ -314,20 +320,25 @@ def request_from_api(manga_id: Optional[int]=None, updated: bool=False) -> Optio
 
     if response.status_code == 200:
         return response.content
-    return None
+    return
 
 
 def remove_old_chapters(session: requests.Session, chapter: Dict[int, Optional[str]]):
     """Check if the chapters expired and remove off mangadex if they are."""
     # If the expiry date of the chapter is less than the current time and the md chapter id is available, try delete
-    if datetime.fromtimestamp(chapter["chapter_expire"]) <= datetime.now() and chapter["md_chapter_id"] is not None:
-        logging.info(f'{chapter["md_chapter_id"]} expired, deleting.')
-        delete_reponse = session.delete(f'https://api.mangadex.org/chapter/{chapter["md_chapter_id"]}')
-        if delete_reponse.status_code != 200:
-            logging.warning(f'Couldn\'t delete expired chapter {chapter["md_chapter_id"]}.')
-            print_error(delete_reponse)
-            return
-        logging.info(f'Deleted {chapter["md_chapter_id"]}.')
+    if datetime.fromtimestamp(chapter["chapter_expire"]) <= datetime.now():
+        logging.info(f'Moving {chapter} from chapters table to deleted_chapters table.')
+        database_connection.execute("""INSERT INTO deleted_chapters SELECT * FROM chapters WHERE chapter_id=(?)""", (chapter["chapter_id"],))
+        database_connection.execute("""DELETE FROM chapters WHERE chapter_id=(?)""", (chapter["chapter_id"],))
+        database_connection.commit()
+        if chapter["md_chapter_id"] is not None:
+            logging.info(f'{chapter["md_chapter_id"]} expired, deleting.')
+            delete_reponse = session.delete(f'https://api.mangadex.org/chapter/{chapter["md_chapter_id"]}')
+            if delete_reponse.status_code != 200:
+                logging.warning(f'Couldn\'t delete expired chapter {chapter["md_chapter_id"]}.')
+                print_error(delete_reponse)
+                return
+            logging.info(f'Deleted {chapter["md_chapter_id"]}.')
 
 
 def delete_expired_chapters(posted_chapters: List[Dict[str, int]], session: requests.Session) -> List[multiprocessing.Process]:
@@ -356,7 +367,7 @@ def get_mplus_updated_manga(tracked_manga: List[int]) -> List[Manga]:
     return updates
 
 
-def get_mplus_updates(manga_series: List[int], posted_chapters: List[int], last_run: int) -> List[Chapter]:
+def get_mplus_updates(manga_series: List[int], posted_chapters_ids: List[int], last_run: int) -> List[Chapter]:
     """Get latest chapter updates."""
     updates = []
 
@@ -366,7 +377,7 @@ def get_mplus_updates(manga_series: List[int], posted_chapters: List[int], last_
         manga_response = request_from_api(manga_id=manga)
         if manga_response is not None:
             manga_response_parsed = get_proto_response(manga_response)
-            updated_chapters = get_latest_chapters(manga_response_parsed, posted_chapters, last_run)
+            updated_chapters = get_latest_chapters(manga_response_parsed, posted_chapters_ids, last_run)
             logging.info(updated_chapters)
             # print(updated_chapters)
             updates.extend(updated_chapters)
@@ -427,34 +438,29 @@ def check_logged_in(session: requests.Session, config: Dict[str, Dict[str, str]]
     time.sleep(1)
 
 
-def update_database(database_connection: sqlite3.Connection, posted_chapters_ids: List[int], chapter: Chapter, succesful_upload_id: Optional[str]=None):
+def update_database(database_connection: sqlite3.Connection, chapter: Chapter, succesful_upload_id: Optional[str]=None):
     """Update the database with the new chapter."""
     print('Updating database.')
     chapter_id = chapter.chapter_id
 
     chapter_id_exists = database_connection.execute('SELECT * FROM chapters WHERE EXISTS(SELECT 1 FROM chapters WHERE chapter_id=(?))', (chapter_id,))
     chapter_id_exists_dict = chapter_id_exists.fetchone()
-    try:
+    if chapter_id_exists_dict is not None:
+        if dict(chapter_id_exists_dict).get('md_chapter_id', None) is None:
+            print('Updating database with new mangadex chapter id.')
+            logging.info(f'Updating existing record in the database: {chapter}.')
+            database_connection.execute('UPDATE chapters SET md_chapter_id=:md_id WHERE chapter_id=:mplus_id',
+                                {"md_id": succesful_upload_id, "mplus_id": chapter_id})
+    else:
         logging.info(f'Adding new chapter to database: {chapter}.')
         database_connection.execute('INSERT INTO chapters (chapter_id, timestamp, chapter_expire, chapter_language, chapter_title, chapter_number, mplus_manga_id, md_chapter_id) VALUES (?,?,?,?,?,?,?,?)',
                     (chapter_id, chapter.chapter_timestamp, chapter.chapter_expire, chapter.chapter_language, chapter.chapter_title, chapter.chapter_number, chapter.manga_id, succesful_upload_id))
-    except sqlite3.IntegrityError:
-        try:
-            if chapter_id_exists_dict["md_chapter_id"] is None:
-                print('Updating database with new mangadex chapter id.')
-                logging.info(f'Updating existing record in the database: {chapter}.')
-                database_connection.execute('UPDATE chapters SET md_chapter_id=:md_id WHERE chapter_id=:mplus_id',
-                                    {"md_id": succesful_upload_id, "mplus_id": chapter_id})
-        except (AttributeError, KeyError, ValueError) as e:
-            print(e)
     database_connection.commit()
     print('Updated database.')
 
 
 def make_tables(database_connection: sqlite3.Connection):
     """Make the database table."""
-    # con.execute('''CREATE TABLE IF NOT EXISTS manga
-    #             (manga_id INTEGER NOT NULL PRIMARY KEY, manga_name TEXT NULL, md_manga_id TEXT NOT NULL)''')
     logging.warning("Creating new tables for database.")
     database_connection.execute('''CREATE TABLE IF NOT EXISTS chapters
                 (chapter_id         INTEGER NOT NULL PRIMARY KEY,
@@ -465,7 +471,15 @@ def make_tables(database_connection: sqlite3.Connection):
                 chapter_number      TEXT NOT NULL,
                 mplus_manga_id      INTEGER NOT NULL,
                 md_chapter_id       TEXT NULL)''')
-                # FOREIGN KEY (mplus_manga_id) REFERENCES manga(manga_id))
+    database_connection.execute('''CREATE TABLE IF NOT EXISTS deleted_chapters
+                (chapter_id         INTEGER NOT NULL PRIMARY KEY,
+                timestamp           INTEGER NOT NULL,
+                chapter_expire      INTEGER NOT NULL,
+                chapter_language    INTEGER NOT NULL,
+                chapter_title       TEXT NULL,
+                chapter_number      TEXT NOT NULL,
+                mplus_manga_id      INTEGER NOT NULL,
+                md_chapter_id       TEXT NULL)''')
     database_connection.commit()
 
 
@@ -520,6 +534,154 @@ def open_database(database_path: Path) -> sqlite3.Connection:
     return database_connection
 
 
+def check_for_duplicate_chapter(database_connection: sqlite3.Connection, manga_chapters: List[Dict], chapter, mangadex_manga_id: UUID, mplus_manga_id: int, chapter_number: str, chapter_language: str) -> bool:
+    """Check for duplicate chapters on mangadex."""
+    regexed_chapter_title = str()
+    regexed_chapter_title_regex = re.compile(r'^chapter \d+\: (.+)$', re.IGNORECASE)
+    regexed_chapter_title_match = regexed_chapter_title_regex.match(chapter.chapter_title)
+    if regexed_chapter_title_match is not None:
+        regexed_chapter_title = regexed_chapter_title_match.group(1)
+
+    # Skip duplicate chapters
+    for md_chapter in manga_chapters:
+        if md_chapter["attributes"]["chapter"] == chapter_number and md_chapter["attributes"]["translatedLanguage"] == chapter_language and md_chapter["attributes"]["externalUrl"] is not None:
+            dupe_chapter_message = f'Manga: {mangadex_manga_id}: {mplus_manga_id}, chapter: {chapter_number}, language: {chapter_language} already exists on mangadex, skipping.'
+            logging.info(dupe_chapter_message)
+            print(dupe_chapter_message)
+            # Add duplicate chapter to database to avoid checking it again in the future
+            update_database(database_connection, chapter, md_chapter["id"])
+            return True
+    return False
+
+
+def create_upload_session(mangadex_manga_id: UUID, chapter_number: str, manga_generic_error_message: str) -> Optional[Dict]:
+    """Try create an upload session 3 times."""
+    chapter_upload_session_retry = 0
+    chapter_upload_session_successful = False
+    while chapter_upload_session_retry < upload_retry_total:
+        delete_exising_upload_session(session)
+        # Start the upload session
+        upload_session_response = session.post(f'{md_upload_api_url}/begin', json={"manga": mangadex_manga_id, "groups": [mplus_group]})
+        if upload_session_response.status_code != 200:
+            print_error(upload_session_response)
+            logging.error(f"Couldn't create an upload session for {mangadex_manga_id}, chapter {chapter_number}.")
+            print("Couldn't create an upload session.")
+            chapter_upload_session_retry += 1
+            time.sleep(1)
+            continue
+
+        upload_session_response_json = convert_json(upload_session_response)
+        if upload_session_response_json is not None:
+            chapter_upload_session_successful = True
+            chapter_upload_session_retry == upload_retry_total
+            return upload_session_response_json
+
+        upload_session_response_json_message = f"Couldn't convert successful upload session creation into a json, retrying. {manga_generic_error_message}."
+        logging.error(upload_session_response_json_message)
+        print(upload_session_response_json_message)
+        chapter_upload_session_retry += 1
+        time.sleep(1)             
+
+    # Couldn't create an upload session, skip the chapter
+    if not chapter_upload_session_successful:
+        upload_session_response_json_message = f"Couldn't create an upload session for {manga_generic_error_message}."
+        logging.error(upload_session_response_json_message)
+        print(upload_session_response_json_message)
+        return
+
+
+def commit_chapter(chapter, upload_session_id: UUID, mangadex_manga_id: UUID, mplus_manga_id: int, manga_generic_error_message: str, chapter_number: str, chapter_language: str) -> bool:
+    """Try commit the chapter to mangadex."""
+    commit_retries = 0
+    succesful_upload = False
+    while commit_retries < upload_retry_total:
+        chapter_commit_response = session.post(f'{md_upload_api_url}/{upload_session_id}/commit',
+            json={"chapterDraft":
+                {"volume": None, "chapter": chapter_number, "title": chapter.chapter_title, "translatedLanguage": chapter_language, "externalUrl": mangaplus_chapter_url.format(chapter.chapter_id)}, "pageOrder": []
+            })
+
+        if chapter_commit_response.status_code == 200:
+            succesful_upload = True
+            chapter_commit_response_json = convert_json(chapter_commit_response)
+            if chapter_commit_response_json is None:
+                chapter_commit_response_json_message = f"Couldn't convert successful chapter commit api response into a json"
+                logging.critical(chapter_commit_response_json_message)
+                raise Exception(chapter_commit_response_json_message)
+
+            succesful_upload_id = chapter_commit_response_json["data"]["id"]
+            succesful_upload_message = f"Committed {succesful_upload_id} for {manga_generic_error_message}."
+            logging.info(succesful_upload_message)
+            print(succesful_upload_message)
+            update_database(database_connection, chapter, succesful_upload_id)
+            commit_retries == upload_retry_total
+            return True
+        else:
+            logging.warning(f"Failed to commit {upload_session_id}, retrying.")
+            print_error(chapter_commit_response)
+
+        commit_retries += 1
+        time.sleep(1)
+
+    if not succesful_upload:
+        error_message = f"Couldn't commit {upload_session_id}, manga {mangadex_manga_id}: {mplus_manga_id} chapter {chapter_number}."
+        logging.error(error_message)
+        print(error_message)
+        remove_upload_session(session, upload_session_id)
+        return False
+
+
+def upload_chapters():
+    """Go through each new chapter and upload it to mangadex."""
+    # Sort each chapter by manga
+    updated_manga_chapters = {}
+    for chapter in updates:
+        md_id = get_md_id(manga_id_map, chapter.manga_id)
+        try:
+            updated_manga_chapters[md_id].append(chapter)
+        except (KeyError, ValueError, AttributeError):
+            updated_manga_chapters[md_id] = [chapter]
+
+    for mangadex_manga_id in updated_manga_chapters:
+        # Get each manga's uploaded chapters on mangadex
+        chapters = updated_manga_chapters[mangadex_manga_id]
+        manga_chapters = get_chapters(session, **{
+            "groups[]": [mplus_group],
+            "manga": mangadex_manga_id,
+            "order[createdAt]": "desc",
+        })
+
+        skipped = 0
+        for chapter in chapters:
+            # Delete existing upload session if exists
+            check_logged_in(session, config)
+            mplus_manga_id = chapter.manga_id
+            chapter_number = chapter.chapter_number
+            chapter_language = mplus_language_map[str(chapter.chapter_language)]
+            manga_generic_error_message = f'manga {mangadex_manga_id}: {mplus_manga_id}, chapter {chapter_number}, language {chapter_language}'
+
+            duplicate_chapter = check_for_duplicate_chapter(database_connection, manga_chapters, chapter, mangadex_manga_id, mplus_manga_id, chapter_number, chapter_language)
+            if duplicate_chapter:
+                skipped += 1
+                continue           
+
+            upload_session_response_json = create_upload_session(mangadex_manga_id, chapter_number, manga_generic_error_message)
+            if upload_session_response_json is None:
+                skipped += 1
+                continue
+
+            upload_session_id = upload_session_response_json["data"]["id"]
+            chapter_committed = commit_chapter(chapter, upload_session_id, mangadex_manga_id, mplus_manga_id, manga_generic_error_message, chapter_number, chapter_language)
+            if not chapter_committed:
+                skipped += 1
+
+            time.sleep(2)
+
+        skipped_chapters_message = f'Skipped {skipped} chapters out of {len(chapters)} for manga {mangadex_manga_id}: {mplus_manga_id}.'
+        logging.info(skipped_chapters_message)
+        print(skipped_chapters_message)
+        time.sleep(3)
+
+
 if __name__ == '__main__':
 
     root_path = Path('.')
@@ -558,136 +720,7 @@ if __name__ == '__main__':
     if not fill_backlog:
         chapter_delete_processes = pool.apply_async(func=delete_expired_chapters, args=([dict(k) for k in posted_chapters], session))
 
-    # Sort each chapter by manga
-    updated_manga_chapters = {}
-    for chapter in updates:
-        md_id = get_md_id(manga_id_map, chapter.manga_id)
-        try:
-            updated_manga_chapters[md_id].append(chapter)
-        except (KeyError, ValueError, AttributeError):
-            updated_manga_chapters[md_id] = [chapter]
-
-    for mangadex_manga_id in updated_manga_chapters:
-        # Get each manga's uploaded chapters on mangadex
-        chapters = updated_manga_chapters[mangadex_manga_id]
-        manga_chapters = get_chapters(session, **{
-            "groups[]": [mplus_group],
-            "manga": mangadex_manga_id,
-            "order[createdAt]": "desc",
-        })
-
-        skipped = 0
-        for chapter in chapters:
-            # Delete existing upload session if exists
-            check_logged_in(session, config)
-            mplus_manga_id = chapter.manga_id
-            chapter_number = chapter.chapter_number
-            chapter_language = mplus_language_map[str(chapter.chapter_language)]
-            manga_generic_error_message = f'manga {mangadex_manga_id}: {mplus_manga_id}, chapter {chapter_number}, language {chapter_language}'
-
-            regexed_chapter_title = str()
-            regexed_chapter_title_regex = re.compile(r'^chapter \d+\: (.+)$', re.IGNORECASE)
-            regexed_chapter_title_match = regexed_chapter_title_regex.match(chapter.chapter_title)
-            if regexed_chapter_title_match is not None:
-                regexed_chapter_title = regexed_chapter_title_match.group(1)
-
-            # Skip duplicate chapters
-            dupe_chapter_id = None
-            duplicate_chapter_found = False
-            for md_chapter in manga_chapters:
-                if md_chapter["attributes"]["chapter"] == chapter_number and md_chapter["attributes"]["translatedLanguage"] == chapter_language and md_chapter["attributes"]["externalUrl"] is not None:
-                    dupe_chapter_id = md_chapter["id"]
-                    dupe_chapter_message = f'Manga: {mangadex_manga_id}: {mplus_manga_id}, chapter: {chapter_number}, language: {chapter_language} already exists on mangadex, skipping.'
-                    logging.info(dupe_chapter_message)
-                    print(dupe_chapter_message)
-                    duplicate_chapter_found = True
-                    break
-
-            # Add duplicate chapter to database to avoid checking it again in the future
-            if duplicate_chapter_found:
-                update_database(database_connection, posted_chapters_ids, chapter, dupe_chapter_id)
-                skipped += 1
-                continue
-
-            # Try create an upload session 3 times
-            chapter_upload_session_retry = 0
-            chapter_upload_session_successful = False
-            while chapter_upload_session_retry < upload_retry_total:
-                delete_exising_upload_session(session)
-                # Start the upload session
-                upload_session_response = session.post(f'{md_upload_api_url}/begin', json={"manga": mangadex_manga_id, "groups": [mplus_group]})
-                if upload_session_response.status_code != 200:
-                    print_error(upload_session_response)
-                    logging.error(f"Couldn't create an upload session for {mangadex_manga_id}, chapter {chapter_number}.")
-                    print("Couldn't create an upload session.")
-                    chapter_upload_session_retry += 1
-                    time.sleep(1)
-                    continue
-
-                upload_session_response_json = convert_json(upload_session_response)
-                if upload_session_response_json is not None:
-                    chapter_upload_session_successful = True
-                    chapter_upload_session_retry == upload_retry_total
-                    break
-
-                upload_session_response_json_message = f"Couldn't convert successful upload session creation into a json, retrying. {manga_generic_error_message}."
-                logging.error(upload_session_response_json_message)
-                print(upload_session_response_json_message)
-                chapter_upload_session_retry += 1
-                time.sleep(1)             
-
-            # Couldn't create an upload session, skip the chapter
-            if not chapter_upload_session_successful:
-                upload_session_response_json_message = f"Couldn't create an upload session for {manga_generic_error_message}."
-                logging.error(upload_session_response_json_message)
-                print(upload_session_response_json_message)
-                skipped += 1
-                continue
-
-            upload_session_id = upload_session_response_json["data"]["id"]
-            commit_retries = 0
-            succesful_upload = False
-            while commit_retries < upload_retry_total:
-                chapter_commit_response = session.post(f'{md_upload_api_url}/{upload_session_id}/commit',
-                    json={"chapterDraft":
-                        {"volume": None, "chapter": chapter_number, "title": chapter.chapter_title, "translatedLanguage": chapter_language, "externalUrl": mangaplus_chapter_url.format(chapter.chapter_id)}, "pageOrder": []
-                    })
-
-                if chapter_commit_response.status_code == 200:
-                    succesful_upload = True
-                    chapter_commit_response_json = convert_json(chapter_commit_response)
-                    if chapter_commit_response_json is None:
-                        chapter_commit_response_json_message = f"Couldn't convert successful chapter commit api response into a json"
-                        logging.critical(chapter_commit_response_json_message)
-                        raise Exception(chapter_commit_response_json_message)
-
-                    succesful_upload_id = chapter_commit_response_json["data"]["id"]
-                    succesful_upload_message = f"Committed {succesful_upload_id} for {manga_generic_error_message}."
-                    logging.info(succesful_upload_message)
-                    print(succesful_upload_message)
-                    update_database(database_connection, posted_chapters_ids, chapter, succesful_upload_id)
-                    commit_retries == upload_retry_total
-                    break
-                else:
-                    logging.warning(f"Failed to commit {upload_session_id}, retrying.")
-                    print_error(chapter_commit_response)
-
-                commit_retries += 1
-                time.sleep(1)
-
-            if not succesful_upload:
-                error_message = f"Couldn't commit {upload_session_id}, manga {mangadex_manga_id}: {mplus_manga_id} chapter {chapter_number}."
-                logging.error(error_message)
-                print(error_message)
-                remove_upload_session(session, upload_session_id)
-                skipped += 1
-
-            time.sleep(2)
-
-        skipped_chapters_message = f'Skipped {skipped} chapters out of {len(chapters)} for manga {mangadex_manga_id}: {mplus_manga_id}.'
-        logging.info(skipped_chapters_message)
-        print(skipped_chapters_message)
-        time.sleep(3)
+    upload_chapters()
 
     # Save and close database
     database_connection.commit()
