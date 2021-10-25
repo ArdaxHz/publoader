@@ -130,7 +130,7 @@ def print_error(error_response: requests.Response):
 
     # Api response doesn't follow the normal api error format
     try:
-        errors = [f'{e["status"]}: {e["detail"]}' for e in error_json["errors"] if e["detail"] is not None and e["status"] is not None]
+        errors = [f'{e["status"]}: {e["detail"] if e["detail"] is not None else ""}' for e in error_json["errors"]]
         errors = ', '.join(errors)
 
         if not errors:
@@ -366,25 +366,28 @@ def remove_old_chapters(session: requests.Session, chapter: Dict[int, Optional[s
         if chapter["md_chapter_id"] is not None:
             logging.info(f'{chapter["md_chapter_id"]} expired, deleting.')
             delete_reponse = session.delete(f'https://api.mangadex.org/chapter/{chapter["md_chapter_id"]}')
-            if delete_reponse.status_code in (401, 403, 404):
-                logging.info(f"{chapter['md_chapter_id']} already deleted.")
-                delete_from_database(chapter)
-                time.sleep(6)
-                return
+            if delete_reponse.status_code == 404:
+                notfound_message = f"{chapter['md_chapter_id']} already deleted."
+                logging.info(notfound_message)
+                print(notfound_message)
+            elif delete_reponse.status_code == 403:
+                unauthorised_message = f"You're not authorised to delete {chapter['md_chapter_id']}."
+                logging.info(unauthorised_message)
+                print(unauthorised_message)
             elif delete_reponse.status_code != 200:
                 logging.warning(f"Couldn't delete expired chapter {chapter['md_chapter_id']}.")
                 print_error(delete_reponse)
                 time.sleep(6)
                 return
 
-            delete_from_database(chapter)
-            delete_chapter_message = f'Deleted {chapter["md_chapter_id"]}.'
-            logging.info(delete_chapter_message)
-            print(delete_chapter_message)
-            time.sleep(6)
-            return
+            if delete_reponse.status_code == 200:
+                delete_chapter_message = f'Deleted {chapter["md_chapter_id"]}.'
+                logging.info(delete_chapter_message)
+                print(delete_chapter_message)
 
         delete_from_database(chapter)
+        time.sleep(6)
+        return
 
 
 def delete_expired_chapters(posted_chapters: List[Dict[str, int]], session: requests.Session):
