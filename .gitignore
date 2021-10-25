@@ -2,4 +2,4 @@
 __pycache__
 config.ini
 last_run.txt
-mplus_md_uploader.log
+*.log

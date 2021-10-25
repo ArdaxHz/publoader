@@ -62,13 +62,9 @@ class Chapter:
 root_path = Path('.')
 database_path = root_path.joinpath('chapters').with_suffix('.db')
 
-
-def open_database(database_path: Path) -> sqlite3.Connection:
-    """Open the database."""
-    database_connection = sqlite3.connect(database_path)
-    database_connection.row_factory = sqlite3.Row
-    logging.info('Opened database.')
-    return database_connection
+database_connection = database_connection = sqlite3.connect(database_path)
+database_connection.row_factory = sqlite3.Row
+logging.info('Opened database.')
 
 
 def check_table_exists(database_connection: sqlite3.Connection) -> bool:
@@ -84,8 +80,6 @@ def check_table_exists(database_connection: sqlite3.Connection) -> bool:
         fill_backlog = True
     return fill_backlog
 
-
-database_connection = open_database(database_path)
 fill_backlog = check_table_exists(database_connection)
 
 
@@ -356,26 +350,41 @@ def request_from_api(manga_id: Optional[int]=None, updated: bool=False) -> Optio
     return
 
 
+def delete_from_database(chapter: dict):
+    """Move the chapter from the chapters table to the deleted_chapters table."""
+    database_connection.execute("""INSERT INTO deleted_chapters SELECT * FROM chapters WHERE chapter_id=(?)""", (chapter["chapter_id"],))
+    database_connection.execute("""DELETE FROM chapters WHERE chapter_id=(?)""", (chapter["chapter_id"],))
+    database_connection.commit()
+
+
 def remove_old_chapters(session: requests.Session, chapter: Dict[int, Optional[str]]):
     """Check if the chapters expired and remove off mangadex if they are."""
     # If the expiry date of the chapter is less than the current time and the md chapter id is available, try delete
     if datetime.fromtimestamp(chapter["chapter_expire"]) <= datetime.now():
         logging.info(f'Moving {chapter} from chapters table to deleted_chapters table.')
-        database_connection.execute("""INSERT INTO deleted_chapters SELECT * FROM chapters WHERE chapter_id=(?)""", (chapter["chapter_id"],))
-        database_connection.execute("""DELETE FROM chapters WHERE chapter_id=(?)""", (chapter["chapter_id"],))
-        database_connection.commit()
 
         if chapter["md_chapter_id"] is not None:
             logging.info(f'{chapter["md_chapter_id"]} expired, deleting.')
             delete_reponse = session.delete(f'https://api.mangadex.org/chapter/{chapter["md_chapter_id"]}')
-            if delete_reponse.status_code != 200:
+            if delete_reponse.status_code in (401, 403, 404):
+                logging.info(f"{chapter['md_chapter_id']} already deleted.")
+                delete_from_database(chapter)
+                time.sleep(6)
+                return
+            elif delete_reponse.status_code != 200:
                 logging.warning(f"Couldn't delete expired chapter {chapter['md_chapter_id']}.")
                 print_error(delete_reponse)
+                time.sleep(6)
                 return
 
+            delete_from_database(chapter)
             delete_chapter_message = f'Deleted {chapter["md_chapter_id"]}.'
             logging.info(delete_chapter_message)
             print(delete_chapter_message)
+            time.sleep(6)
+            return
+
+        delete_from_database(chapter)
 
 
 def delete_expired_chapters(posted_chapters: List[Dict[str, int]], session: requests.Session):
@@ -384,14 +393,8 @@ def delete_expired_chapters(posted_chapters: List[Dict[str, int]], session: requ
     logging.info(f'Started deleting exired chapters process.')
     print('Deleting expired chapters.')
     for chapter_to_delete in posted_chapters:
-        process = multiprocessing.Process(target=remove_old_chapters, args=(session, dict(chapter_to_delete)))
-        process.start()
+        process = remove_old_chapters(session, dict(chapter_to_delete))
         chapter_delete_processes.append(process)
-        time.sleep(3)
-
-    for process in chapter_delete_processes:
-        if process is not None:
-            process.join()
 
 
 def get_mplus_updated_manga(tracked_manga: List[int]) -> List[Manga]:
@@ -744,7 +747,7 @@ if __name__ == '__main__':
     upload_chapters()
 
     if chapter_delete_processes is not None:
-        chapter_delete_processes.join()
+        chapter_delete_processes.join(6)
 
     # Save and close database
     database_connection.commit()
