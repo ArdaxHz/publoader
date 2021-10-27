@@ -273,7 +273,7 @@ def get_latest_chapters(manga_response: response_pb.Response, posted_chapters: L
     for chapter in chapters:
         # Chapter id is not in database and chapter release isn't before last run time
         chapter_timestamp = datetime.fromtimestamp(chapter.start_timestamp)
-        if chapter.chapter_id not in posted_chapters:
+        if chapter.chapter_id not in posted_chapters and datetime.fromtimestamp(chapter.end_timestamp) >= datetime.now():
             previous_chapter = get_previous_chapter(chapters, chapter)
             chapter_number = chapter.chapter_number
             if chapter_number is not None:
