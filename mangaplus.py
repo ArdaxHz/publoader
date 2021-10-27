@@ -160,17 +160,19 @@ def delete_exising_upload_session(session: requests.Session):
             if existing_session_json is None:
                 removal_retry += 1
                 logging.warning(f"Couldn't convert exising upload session response into a json, retrying.")
-                time.sleep(1)
+                time.sleep(3)
                 continue
             remove_upload_session(session, existing_session_json["data"]["id"])
+            time.sleep(3)
             return
         elif existing_session.status_code == 404:
             logging.info("No existing upload session found.")
+            time.sleep(3)
             return
         else:
             removal_retry += 1
             logging.warning(f"Couldn't delete the exising upload session, retrying.")
-            time.sleep(1)
+            time.sleep(3)
 
     logging.error("Exising upload session not deleted.")
 
@@ -233,7 +235,7 @@ def get_chapters(session: requests.Session, **params) -> list:
 
         # Wait every 5 pages
         if iteration % 5 == 0 and pages != 5:
-            time.sleep(3)
+            time.sleep(5)
 
         # End the loop when all the pages have been gone through
         # Offset 10000 is the highest you can go, any higher returns an error
@@ -242,8 +244,8 @@ def get_chapters(session: requests.Session, **params) -> list:
 
         iteration += 1
 
-    time.sleep(3)
     print('Finished going through the pages.')
+    time.sleep(3)
     return chapters
 
 
@@ -482,7 +484,7 @@ def check_logged_in(session: requests.Session, config: Dict[str, Dict[str, str]]
     logging.info('Login token expired, logging in again.')
     login_to_md(session, config)
 
-    time.sleep(1)
+    time.sleep(2)
 
 
 def update_database(database_connection: sqlite3.Connection, chapter: Chapter, succesful_upload_id: Optional[str]=None):
@@ -585,14 +587,14 @@ def create_upload_session(mangadex_manga_id: UUID, chapter_number: str, manga_ge
         if upload_session_response.status_code == 401:
             login_to_md(session, config)
             chapter_upload_session_retry += 1
-            time.sleep(1)
+            time.sleep(3)
             continue
         elif upload_session_response.status_code != 200:
             print_error(upload_session_response)
             logging.error(f"Couldn't create an upload session for {mangadex_manga_id}, chapter {chapter_number}.")
             print("Couldn't create an upload session.")
             chapter_upload_session_retry += 1
-            time.sleep(1)
+            time.sleep(3)
             continue
 
         upload_session_response_json = convert_json(upload_session_response)
@@ -605,13 +607,14 @@ def create_upload_session(mangadex_manga_id: UUID, chapter_number: str, manga_ge
         logging.error(upload_session_response_json_message)
         print(upload_session_response_json_message)
         chapter_upload_session_retry += 1
-        time.sleep(1)             
+        time.sleep(3)
 
     # Couldn't create an upload session, skip the chapter
     if not chapter_upload_session_successful:
         upload_session_response_json_message = f"Couldn't create an upload session for {manga_generic_error_message}."
         logging.error(upload_session_response_json_message)
         print(upload_session_response_json_message)
+        time.sleep(3)
         return
 
 
@@ -647,13 +650,14 @@ def commit_chapter(chapter, upload_session_id: UUID, mangadex_manga_id: UUID, mp
             print_error(chapter_commit_response)
 
         commit_retries += 1
-        time.sleep(1)
+        time.sleep(3)
 
     if not succesful_upload:
         error_message = f"Couldn't commit {upload_session_id}, manga {mangadex_manga_id}: {mplus_manga_id} chapter {chapter_number}."
         logging.error(error_message)
         print(error_message)
         remove_upload_session(session, upload_session_id)
+        time.sleep(3)
         return False
 
 
