@@ -311,7 +311,7 @@ def get_latest_chapters(manga_response: response_pb.Response, posted_chapters: L
 
             updated_chapters.append(Chapter(chapter_id=chapter.chapter_id, chapter_timestamp=chapter.start_timestamp,
                 chapter_title=chapter.chapter_name, chapter_expire=chapter.end_timestamp, chapter_number=chapter_number,
-                chapter_language=mplus_language_map.get(str(chapter.chapter_language), "NULL"), manga_id=manga_chapters.manga.manga_id))
+                chapter_language=mplus_language_map.get(str(manga_chapters.manga.language), "NULL"), manga_id=manga_chapters.manga.manga_id))
 
     return updated_chapters
 
