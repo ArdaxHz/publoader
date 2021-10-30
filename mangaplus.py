@@ -80,6 +80,30 @@ class Chapter:
     manga_id:int = field(default=None)
 
 
+def make_tables(database_connection: sqlite3.Connection):
+    """Make the database table."""
+    logging.warning("Creating new tables for database.")
+    database_connection.execute('''CREATE TABLE IF NOT EXISTS chapters
+                (chapter_id         INTEGER NOT NULL PRIMARY KEY,
+                timestamp           INTEGER NOT NULL,
+                chapter_expire      INTEGER NOT NULL,
+                chapter_language    INTEGER NOT NULL,
+                chapter_title       TEXT NULL,
+                chapter_number      TEXT NOT NULL,
+                mplus_manga_id      INTEGER NOT NULL,
+                md_chapter_id       TEXT NULL)''')
+    database_connection.execute('''CREATE TABLE IF NOT EXISTS deleted_chapters
+                (chapter_id         INTEGER NOT NULL PRIMARY KEY,
+                timestamp           INTEGER NOT NULL,
+                chapter_expire      INTEGER NOT NULL,
+                chapter_language    INTEGER NOT NULL,
+                chapter_title       TEXT NULL,
+                chapter_number      TEXT NOT NULL,
+                mplus_manga_id      INTEGER NOT NULL,
+                md_chapter_id       TEXT NULL)''')
+    database_connection.commit()
+
+
 def check_table_exists(database_connection: sqlite3.Connection) -> bool:
     """Check if the table exists."""
     table_exist = database_connection.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='chapters'")
@@ -530,30 +554,6 @@ def update_database(database_connection: sqlite3.Connection, chapter: Chapter, s
                     "mplus_manga_id": chapter.manga_id, "md_chapter_id": succesful_upload_id})
     database_connection.commit()
     print('Updated database.')
-
-
-def make_tables(database_connection: sqlite3.Connection):
-    """Make the database table."""
-    logging.warning("Creating new tables for database.")
-    database_connection.execute('''CREATE TABLE IF NOT EXISTS chapters
-                (chapter_id         INTEGER NOT NULL PRIMARY KEY,
-                timestamp           INTEGER NOT NULL,
-                chapter_expire      INTEGER NOT NULL,
-                chapter_language    INTEGER NOT NULL,
-                chapter_title       TEXT NULL,
-                chapter_number      TEXT NOT NULL,
-                mplus_manga_id      INTEGER NOT NULL,
-                md_chapter_id       TEXT NULL)''')
-    database_connection.execute('''CREATE TABLE IF NOT EXISTS deleted_chapters
-                (chapter_id         INTEGER NOT NULL PRIMARY KEY,
-                timestamp           INTEGER NOT NULL,
-                chapter_expire      INTEGER NOT NULL,
-                chapter_language    INTEGER NOT NULL,
-                chapter_title       TEXT NULL,
-                chapter_number      TEXT NOT NULL,
-                mplus_manga_id      INTEGER NOT NULL,
-                md_chapter_id       TEXT NULL)''')
-    database_connection.commit()
 
 
 def check_last_run(last_run_path: Path) -> int:
