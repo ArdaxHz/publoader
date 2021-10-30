@@ -197,24 +197,21 @@ def delete_exising_upload_session(session: requests.Session):
             if existing_session_json is None:
                 removal_retry += 1
                 logging.warning(f"Couldn't convert exising upload session response into a json, retrying.")
-                time.sleep(mangadex_ratelimit_time)
-                continue
-            remove_upload_session(session, existing_session_json["data"]["id"])
-            time.sleep(mangadex_ratelimit_time)
-            return
+            else:
+                remove_upload_session(session, existing_session_json["data"]["id"])
+                return
         elif existing_session.status_code == 404:
             logging.info("No existing upload session found.")
-            time.sleep(mangadex_ratelimit_time)
             return
         elif existing_session.status_code == 401:
             logging.info("Not logged in, logging in and retrying.")
             login_to_md(session, config)
             removal_retry += 1
-            time.sleep(mangadex_ratelimit_time)
         else:
             removal_retry += 1
             logging.warning(f"Couldn't delete the exising upload session, retrying.")
-            time.sleep(mangadex_ratelimit_time)
+
+        time.sleep(mangadex_ratelimit_time)
 
     logging.error("Exising upload session not deleted.")
 
@@ -506,6 +503,7 @@ def login_to_md(session: requests.Session, config: Dict[str, Dict[str, str]]):
     session_token = login_response_json["token"]["session"]
     session.headers.update({"Authorization": f"Bearer {session_token}"})
     logging.info(f'Logged into mangadex.')
+    
 
 
 def check_logged_in(session: requests.Session, config: Dict[str, Dict[str, str]]):
@@ -526,8 +524,6 @@ def check_logged_in(session: requests.Session, config: Dict[str, Dict[str, str]]
 
     logging.info('Login token expired, logging in again.')
     login_to_md(session, config)
-
-    time.sleep(mangadex_ratelimit_time)
 
 
 def update_database(database_connection: sqlite3.Connection, chapter: Chapter, succesful_upload_id: Optional[str]=None):
@@ -605,30 +601,27 @@ def create_upload_session(mangadex_manga_id: UUID, chapter_number: str, manga_ge
     chapter_upload_session_successful = False
     while chapter_upload_session_retry < upload_retry_total:
         delete_exising_upload_session(session)
+        time.sleep(mangadex_ratelimit_time)
         # Start the upload session
         upload_session_response = session.post(f'{md_upload_api_url}/begin', json={"manga": mangadex_manga_id, "groups": [mplus_group]})
         if upload_session_response.status_code == 401:
-            login_to_md(session, config)
-            chapter_upload_session_retry += 1
-            time.sleep(mangadex_ratelimit_time)
-            continue
+            login_to_md(session, config)            
         elif upload_session_response.status_code != 200:
             print_error(upload_session_response)
             logging.error(f"Couldn't create an upload session for {mangadex_manga_id}, chapter {chapter_number}.")
             print("Couldn't create an upload session.")
-            chapter_upload_session_retry += 1
-            time.sleep(mangadex_ratelimit_time)
-            continue
 
-        upload_session_response_json = convert_json(upload_session_response)
-        if upload_session_response_json is not None:
-            chapter_upload_session_successful = True
-            chapter_upload_session_retry == upload_retry_total
-            return upload_session_response_json
+        if upload_session_response.status_code == 200:
+            upload_session_response_json = convert_json(upload_session_response)
+            if upload_session_response_json is not None:
+                chapter_upload_session_successful = True
+                chapter_upload_session_retry == upload_retry_total
+                return upload_session_response_json
+            else:
+                upload_session_response_json_message = f"Couldn't convert successful upload session creation into a json, retrying. {manga_generic_error_message}."
+                logging.error(upload_session_response_json_message)
+                print(upload_session_response_json_message)
 
-        upload_session_response_json_message = f"Couldn't convert successful upload session creation into a json, retrying. {manga_generic_error_message}."
-        logging.error(upload_session_response_json_message)
-        print(upload_session_response_json_message)
         chapter_upload_session_retry += 1
         time.sleep(mangadex_ratelimit_time)
 
@@ -637,7 +630,6 @@ def create_upload_session(mangadex_manga_id: UUID, chapter_number: str, manga_ge
         upload_session_response_json_message = f"Couldn't create an upload session for {manga_generic_error_message}."
         logging.error(upload_session_response_json_message)
         print(upload_session_response_json_message)
-        time.sleep(mangadex_ratelimit_time)
         return
 
 
@@ -654,17 +646,18 @@ def commit_chapter(chapter, upload_session_id: UUID, mangadex_manga_id: UUID, mp
         if chapter_commit_response.status_code == 200:
             succesful_upload = True
             chapter_commit_response_json = convert_json(chapter_commit_response)
-            if chapter_commit_response_json is None:
-                chapter_commit_response_json_message = f"Couldn't convert successful chapter commit api response into a json"
-                logging.critical(chapter_commit_response_json_message)
-                raise Exception(chapter_commit_response_json_message)
+            if chapter_commit_response_json is not None:
+                succesful_upload_id = chapter_commit_response_json["data"]["id"]
+                succesful_upload_message = f"Committed {succesful_upload_id} for {manga_generic_error_message}."
+                logging.info(succesful_upload_message)
+                print(succesful_upload_message)
+                update_database(database_connection, chapter, succesful_upload_id)
+                commit_retries == upload_retry_total
+                return True
 
-            succesful_upload_id = chapter_commit_response_json["data"]["id"]
-            succesful_upload_message = f"Committed {succesful_upload_id} for {manga_generic_error_message}."
-            logging.info(succesful_upload_message)
-            print(succesful_upload_message)
-            update_database(database_connection, chapter, succesful_upload_id)
-            commit_retries == upload_retry_total
+            chapter_commit_response_json_message = f"Couldn't convert successful chapter commit api response into a json"
+            logging.error(chapter_commit_response_json_message)
+            print(chapter_commit_response_json_message)
             return True
         elif chapter_commit_response.status_code == 401:
             login_to_md(session, config)
@@ -680,7 +673,6 @@ def commit_chapter(chapter, upload_session_id: UUID, mangadex_manga_id: UUID, mp
         logging.error(error_message)
         print(error_message)
         remove_upload_session(session, upload_session_id)
-        time.sleep(mangadex_ratelimit_time)
         return False
 
 
@@ -708,11 +700,12 @@ def upload_chapters():
         for chapter in chapters:
             # Delete existing upload session if exists
             check_logged_in(session, config)
+            time.sleep(mangadex_ratelimit_time)
             mplus_manga_id = chapter.manga_id
             chapter_number = chapter.chapter_number
             chapter_language = chapter.chapter_language
             if isinstance(chapter_language, int):
-                chapter_language = mplus_language_map.get(str(chapter.chapter_language), "NULL")
+                chapter_language = mplus_language_map.get(str(chapter_language), "NULL")
 
             manga_generic_error_message = f'manga {mangadex_manga_id}: {mplus_manga_id}, chapter {chapter_number}, language {chapter_language}'
 
@@ -723,6 +716,7 @@ def upload_chapters():
 
             upload_session_response_json = create_upload_session(mangadex_manga_id, chapter_number, manga_generic_error_message)
             if upload_session_response_json is None:
+                time.sleep(mangadex_ratelimit_time)
                 skipped += 1
                 continue
 
