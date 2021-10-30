@@ -3,11 +3,11 @@ import json
 import logging
 import math
 import multiprocessing
-import re
 import sqlite3
+import sys
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional, List
 from uuid import UUID
@@ -38,6 +38,27 @@ MPLUS_LANGUAGE_ID_MAP = """
 6: Thai
 """
 
+if sys.version_info < (3, 9):
+    print("This program can only run Python 3.9 or higher.")
+    sys.exit()
+
+root_path = Path('.')
+database_path = root_path.joinpath('chapters').with_suffix('.db')
+config_file_path = root_path.joinpath('config').with_suffix('.ini')
+
+database_connection = database_connection = sqlite3.connect(database_path)
+database_connection.row_factory = sqlite3.Row
+logging.info('Opened database.')
+
+# Open config file and read values
+config = configparser.ConfigParser()
+config.read(config_file_path)
+
+try:
+    mangadex_ratelimit_time = int(config["User Set"]["mangadex_ratelimit_time"])
+except ValueError:
+    mangadex_ratelimit_time = 3
+
 
 
 @dataclass(order=True)
@@ -57,14 +78,6 @@ class Chapter:
     chapter_number:str
     chapter_language: int
     manga_id:int = field(default=None)
-
-
-root_path = Path('.')
-database_path = root_path.joinpath('chapters').with_suffix('.db')
-
-database_connection = database_connection = sqlite3.connect(database_path)
-database_connection.row_factory = sqlite3.Row
-logging.info('Opened database.')
 
 
 def check_table_exists(database_connection: sqlite3.Connection) -> bool:
@@ -730,22 +743,12 @@ if __name__ == '__main__':
 
     last_run_path = root_path.joinpath('last_run').with_suffix('.txt')
     manga_map_path = root_path.joinpath('manga').with_suffix('.json')
-    config_file_path = root_path.joinpath('config').with_suffix('.ini')
-
-    # Open config file and read values
-    config = configparser.ConfigParser()
-    config.read(config_file_path)
 
     # Open required files
     last_run = check_last_run(last_run_path)
     manga_id_map = open_manga_id_map(manga_map_path)
     uploader_account_id = config["MangaDex Credentials"]["mangadex_userid"]
     upload_retry_total = 3
-
-    try:
-        mangadex_ratelimit_time = int(config["User Set"]["mangadex_ratelimit_time"])
-    except ValueError:
-        mangadex_ratelimit_time = 3
 
     # Get already posted chapters
     posted_chapters = database_connection.execute("SELECT * FROM chapters").fetchall()
@@ -769,7 +772,11 @@ if __name__ == '__main__':
     updated_manga = get_mplus_updated_manga(manga_map_mplus_ids)
     updates = get_mplus_updates(manga_map_mplus_ids, posted_chapters_ids, last_run)
 
-    upload_chapters()
+    if not updates:
+        logging.info("No new updates found.")
+        print("No new updates found.")
+    else:
+        upload_chapters()
 
     if chapter_delete_processes is not None:
         chapter_delete_processes.join(6)
