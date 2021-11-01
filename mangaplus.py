@@ -376,6 +376,8 @@ def get_latest_chapters(manga_response: response_pb.Response, posted_chapters: L
             for chap_number in chapter_number_split:
                 if chap_number is not None:
                     chap_number = str(chap_number.lstrip('#')).lstrip('0')
+                    if len(chap_number) == 0:
+                        chap_number = '0'
 
                 updated_chapters.append(Chapter(chapter_id=chapter.chapter_id, chapter_timestamp=chapter.start_timestamp,
                     chapter_title=chapter.chapter_name, chapter_expire=chapter.end_timestamp, chapter_number=chap_number,
