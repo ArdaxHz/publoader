@@ -111,7 +111,7 @@ def make_tables(database_connection: sqlite3.Connection):
                 chapter_expire      INTEGER NOT NULL,
                 chapter_language    INTEGER NOT NULL,
                 chapter_title       TEXT NULL,
-                chapter_number      TEXT NOT NULL,
+                chapter_number      TEXT NULL,
                 mplus_manga_id      INTEGER NOT NULL,
                 md_chapter_id       TEXT NOT NULL PRIMARY KEY)''')
     database_connection.execute('''CREATE TABLE IF NOT EXISTS deleted_chapters
@@ -120,7 +120,7 @@ def make_tables(database_connection: sqlite3.Connection):
                 chapter_expire      INTEGER NOT NULL,
                 chapter_language    INTEGER NOT NULL,
                 chapter_title       TEXT NULL,
-                chapter_number      TEXT NOT NULL,
+                chapter_number      TEXT NULL,
                 mplus_manga_id      INTEGER NOT NULL,
                 md_chapter_id       TEXT NOT NULL PRIMARY KEY)''')
     database_connection.commit()
@@ -349,21 +349,21 @@ def get_latest_chapters(manga_response: response_pb.Response, posted_chapters: L
                 chapter_number = chapter.chapter_number.strip('#')
             if chapter_number == "ex":
                 if previous_chapter is None:
-                    continue
+                    chap_number = None
+                else:
+                    chapter_decimal = '5'
+                    previous_chapter_number = str(previous_chapter.chapter_number)
 
-                chapter_decimal = '5'
-                previous_chapter_number = str(previous_chapter.chapter_number)
+                    # There may be multiple extra chapters before the last numbered chapter
+                    # Use index difference as decimal to avoid not uploading non-dupes
+                    try:
+                        chapter_difference = list(chapters).index(chapter) - list(chapters).index(previous_chapter)
+                        if chapter_difference > 1:
+                            chapter_decimal = chapter_difference
+                    except (ValueError, IndexError):
+                        pass
 
-                # There may be multiple extra chapters before the last numbered chapter
-                # Use index difference as decimal to avoid not uploading non-dupes
-                try:
-                    chapter_difference = list(chapters).index(chapter) - list(chapters).index(previous_chapter)
-                    if chapter_difference > 1:
-                        chapter_decimal = chapter_difference
-                except (ValueError, IndexError):
-                    pass
-
-                chapter_number = f"{previous_chapter_number.lstrip('#').lstrip('0')}.{chapter_decimal}"
+                    chapter_number = f"{previous_chapter_number.lstrip('#').lstrip('0')}.{chapter_decimal}"
             elif chapter_number == "One-Shot":
                 chapter_number = None
 
@@ -456,7 +456,7 @@ def remove_old_chapters(session: requests.Session, chapter: dict):
             elif delete_reponse.status_code != 200:
                 logging.warning(f"Couldn't delete expired chapter {md_chapter_id}.")
                 print_error(delete_reponse)
-                time.sleep(mangadex_ratelimit_time*2)
+                time.sleep(6)
                 return
 
             if delete_reponse.status_code == 200:
@@ -465,7 +465,7 @@ def remove_old_chapters(session: requests.Session, chapter: dict):
                 print(delete_chapter_message)
 
         delete_from_database(chapter)
-        time.sleep(mangadex_ratelimit_time*2)
+        time.sleep(6)
         return
 
 
@@ -604,12 +604,12 @@ def open_manga_id_map(manga_map_path: Path) -> Dict[UUID, List[int]]:
     return manga_map
 
 
-def check_for_duplicate_chapter(database_connection: sqlite3.Connection, manga_chapters: List[dict], chapter, mangadex_manga_id: UUID, mplus_manga_id: int, chapter_number: str, chapter_language: str) -> bool:
+def check_for_duplicate_chapter(database_connection: sqlite3.Connection, manga_chapters: List[dict], chapter, manga_generic_error_message: str, chapter_number: str, chapter_language: str) -> bool:
     """Check for duplicate chapters on mangadex."""
     # Skip duplicate chapters
     for md_chapter in manga_chapters:
         if md_chapter["attributes"]["chapter"] == chapter_number and md_chapter["attributes"]["translatedLanguage"] == chapter_language and md_chapter["attributes"]["externalUrl"] is not None:
-            dupe_chapter_message = f'Manga: {mangadex_manga_id}: {mplus_manga_id}, chapter: {chapter_number}, language: {chapter_language} already exists on mangadex, skipping.'
+            dupe_chapter_message = f'{manga_generic_error_message} already exists on mangadex, skipping.'
             logging.info(dupe_chapter_message)
             print(dupe_chapter_message)
             # Add duplicate chapter to database to avoid checking it again in the future
@@ -732,7 +732,7 @@ def upload_chapters():
 
             manga_generic_error_message = f'manga {mangadex_manga_id}: {mplus_manga_id}, chapter {chapter_number}, language {chapter_language}'
 
-            duplicate_chapter = check_for_duplicate_chapter(database_connection, manga_chapters, chapter, mangadex_manga_id, mplus_manga_id, chapter_number, chapter_language)
+            duplicate_chapter = check_for_duplicate_chapter(database_connection, manga_chapters, chapter, manga_generic_error_message, chapter_number, chapter_language)
             if duplicate_chapter:
                 skipped += 1
                 continue           
