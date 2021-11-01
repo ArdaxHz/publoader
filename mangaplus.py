@@ -422,10 +422,10 @@ def request_from_api(manga_id: Optional[int]=None, updated: Optional[bool]=False
     except Exception as e:
         logging.error(f"{e}: Couldn't get details from the mangaplus api.")
         print("Request API Error", e)
+        return
 
     if response.status_code == 200:
         return response.content
-    return
 
 
 def delete_from_database(chapter: dict):
