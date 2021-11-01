@@ -1,3 +1,4 @@
+from ast import Str
 import configparser
 import json
 import logging
@@ -316,10 +317,16 @@ def get_chapters(session: requests.Session, **params) -> list:
     return chapters
 
 
-def get_previous_chapter(chapters: list, current_chapter):
-    """Find the previous chapter to the current."""
+def get_surrounding_chapter(chapters: list, current_chapter, next_chapter_search: bool=False):
+    """Find the previous and next chapter to the current."""
     chapters = list(chapters)
-    for chapter in reversed(chapters[:chapters.index(current_chapter)]):
+    # Starts from the first chapter before the current
+    index_search = reversed(chapters[:chapters.index(current_chapter)])
+    if next_chapter_search:
+        # Starts from the first chapter after the current
+        index_search = chapters[chapters.index(current_chapter):]
+
+    for chapter in index_search:
         try:
             int(chapter.chapter_number.strip('#'))
         except ValueError:
@@ -328,42 +335,75 @@ def get_previous_chapter(chapters: list, current_chapter):
             return chapter
 
 
+def strip_chapter_number(number: str) -> str:
+    """Returns the chapter number without the un-needed # or 0."""
+    return str(number).strip('#').lstrip('0')
+
+
 def get_latest_chapters(manga_response: response_pb.Response, posted_chapters: List[int]) -> List[Chapter]:
     """Get the latest unuploaded chapters."""
     manga_chapters = manga_response.success.manga_detail
     updated_chapters = []
 
     if len(manga_chapters.last_chapter_list) > 0:
-        chapters = manga_chapters.last_chapter_list
+        chapters = list(manga_chapters.last_chapter_list)
     else:
-        chapters = manga_chapters.first_chapter_list
+        chapters = list(manga_chapters.first_chapter_list)
 
     # Go through the last three chapters
     for chapter in chapters:
         # Chapter id is not in database and chapter release isn't before last run time
         chapter_timestamp = datetime.fromtimestamp(chapter.start_timestamp)
         if chapter.chapter_id not in posted_chapters and datetime.fromtimestamp(chapter.start_timestamp) <= datetime.now() and datetime.fromtimestamp(chapter.end_timestamp) >= datetime.now():
-            previous_chapter = get_previous_chapter(chapters, chapter)
+            current_number = strip_chapter_number(chapter.chapter_number)
             chapter_number = chapter.chapter_number
             if chapter_number is not None:
-                chapter_number = chapter.chapter_number.strip('#')
+                chapter_number = current_number
+                if len(chapter_number) == 0:
+                    chapter_number = '0'
+
             if chapter_number == "ex":
+                # Get previous chapter's number for chapter number
+                previous_chapter = get_surrounding_chapter(chapters, chapter)
+                next_chapter_number = None
+                previous_chapter_number = None
+
                 if previous_chapter is None:
-                    chap_number = None
+                    # Previous chapter isn't available, use
+                    next_chapter = get_surrounding_chapter(chapters, chapter, next_chapter_search=True)
+                    if next_chapter is None:
+                        chapter_number = None
+                    else:
+                        next_chapter_number = strip_chapter_number(next_chapter.chapter_number)
+                        chapter_number = int(next_chapter_number.split(',')[0]) - 1
+                        first_index = next_chapter
+                        second_index = chapter
                 else:
+                    previous_chapter_number = strip_chapter_number(previous_chapter.chapter_number)
+                    chapter_number = previous_chapter_number.split(',')[-1]
+                    first_index = chapter
+                    second_index = previous_chapter
+
+                if chapter_number == 'ex':
+                    chapter_number = None
+
+                if chapter_number is not None and current_number != 'ex':
+                    if math.sqrt((int(current_number) - int(chapter_number))**2) >= 5:
+                        chapter_number = None
+
+                if chapter_number is not None:
                     chapter_decimal = '5'
-                    previous_chapter_number = str(previous_chapter.chapter_number)
 
                     # There may be multiple extra chapters before the last numbered chapter
                     # Use index difference as decimal to avoid not uploading non-dupes
                     try:
-                        chapter_difference = list(chapters).index(chapter) - list(chapters).index(previous_chapter)
+                        chapter_difference = chapters.index(first_index) - chapters.index(second_index)
                         if chapter_difference > 1:
                             chapter_decimal = chapter_difference
                     except (ValueError, IndexError):
                         pass
 
-                    chapter_number = f"{previous_chapter_number.lstrip('#').lstrip('0')}.{chapter_decimal}"
+                    chapter_number = f"{chapter_number}.{chapter_decimal}"
             elif chapter_number == "One-Shot":
                 chapter_number = None
 
@@ -375,9 +415,7 @@ def get_latest_chapters(manga_response: response_pb.Response, posted_chapters: L
             # MPlus sometimes joins two chapters as one, upload to md as two different chapters            
             for chap_number in chapter_number_split:
                 if chap_number is not None:
-                    chap_number = str(chap_number.lstrip('#')).lstrip('0')
-                    if len(chap_number) == 0:
-                        chap_number = '0'
+                    chap_number = strip_chapter_number(chap_number)
 
                 updated_chapters.append(Chapter(chapter_id=chapter.chapter_id, chapter_timestamp=chapter.start_timestamp,
                     chapter_title=chapter.chapter_name, chapter_expire=chapter.end_timestamp, chapter_number=chap_number,
@@ -441,28 +479,28 @@ def remove_old_chapters(session: requests.Session, chapter: dict):
     if datetime.fromtimestamp(chapter["chapter_expire"]) <= datetime.now():
         logging.info(f'Moving {chapter} from chapters table to deleted_chapters table.')
         md_chapter_id = chapter["md_chapter_id"]
+        deleted_message = f'{md_chapter_id}: {chapter["chapter_id"]}, manga {chapter["mplus_manga_id"]}, chapter {chapter["chapter_number"]}, language {chapter["chapter_language"]}.'
 
         if md_chapter_id is not None:
-            logging.info(f'{md_chapter_id} expired, deleting.')
+            logging.info(f'{chapter} expired, deleting.')
             delete_reponse = session.delete(f'https://api.mangadex.org/chapter/{md_chapter_id}')
             if delete_reponse.status_code == 404:
-                notfound_message = f"{md_chapter_id} already deleted."
+                notfound_message = f"{deleted_message} already deleted."
                 logging.info(notfound_message)
                 print(notfound_message)
             elif delete_reponse.status_code == 403:
-                unauthorised_message = f"You're not authorised to delete {md_chapter_id}."
+                unauthorised_message = f"You're not authorised to delete {deleted_message}."
                 logging.info(unauthorised_message)
                 print(unauthorised_message)
             elif delete_reponse.status_code != 200:
-                logging.warning(f"Couldn't delete expired chapter {md_chapter_id}.")
+                logging.warning(f"Couldn't delete expired chapter {deleted_message}.")
                 print_error(delete_reponse)
                 time.sleep(6)
                 return
 
             if delete_reponse.status_code == 200:
-                delete_chapter_message = f'Deleted {md_chapter_id}.'
-                logging.info(delete_chapter_message)
-                print(delete_chapter_message)
+                logging.info(f'Deleted {chapter}.')
+                print(f'Deleted {deleted_message}.')
 
         delete_from_database(chapter)
         time.sleep(6)
