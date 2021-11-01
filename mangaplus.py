@@ -7,7 +7,7 @@ import sqlite3
 import sys
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, date
 from pathlib import Path
 from typing import Dict, Optional, List
 from uuid import UUID
@@ -16,48 +16,70 @@ import requests
 
 import proto.response_pb2 as response_pb
 
-
-mplus_base_api_url = "https://jumpg-webapi.tokyo-cdn.com"
-mangaplus_chapter_url = 'https://mangaplus.shueisha.co.jp/viewer/{}'
-http_error_codes = {"400": "Bad request.", "401": "Unauthorised.", "403": "Forbidden.", "404": "Not found.", "429": "Too many requests."}
-md_upload_api_url = 'https://api.mangadex.org/upload'
-md_auth_api_url = 'https://api.mangadex.org/auth'
-mplus_language_map = {'0': 'en', '1': 'es-la', '2': 'fr', '3': 'id', '4': 'pt-br', '5': 'ru', '6': 'th'}
-mplus_group = '4f1de6a2-f0c5-4ac5-bce5-02c7dbb67deb'
-logging.basicConfig(filename='mplus_md_uploader.log', encoding='utf-8', level=logging.DEBUG,
-    format='%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s', datefmt='%Y-%m-%d:%H:%M:%S')
-
-
-MPLUS_LANGUAGE_ID_MAP = """
-0: English
-1: Spanish
-2: French
-3: Indonesian
-4: Portuguese
-5: Russian
-6: Thai
-"""
-
 if sys.version_info < (3, 9):
     print("This program can only run Python 3.9 or higher.")
     sys.exit()
 
+mplus_base_api_url = "https://jumpg-webapi.tokyo-cdn.com"
+mplus_chapter_url = 'https://mangaplus.shueisha.co.jp/viewer/{}'
+mplus_language_map = {'0': 'en', '1': 'es-la', '2': 'fr', '3': 'id', '4': 'pt-br', '5': 'ru', '6': 'th'}
+mplus_group = '4f1de6a2-f0c5-4ac5-bce5-02c7dbb67deb'
+
+http_error_codes = {"400": "Bad request.", "401": "Unauthorised.", "403": "Forbidden.", "404": "Not found.", "429": "Too many requests."}
+
 root_path = Path('.')
-database_path = root_path.joinpath('chapters').with_suffix('.db')
 config_file_path = root_path.joinpath('config').with_suffix('.ini')
 
+log_folder_path = root_path.joinpath('logs')
+log_folder_path.mkdir(parents=True, exist_ok=True)
+
+logs_path = log_folder_path.joinpath(f'mplus_md_uploader_{str(date.today())}.log')
+logging.basicConfig(filename=logs_path, encoding='utf-8', level=logging.DEBUG,
+    format='%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s', datefmt='%Y-%m-%d:%H:%M:%S')
+
+
+def load_config_info(config: configparser.ConfigParser):
+    if config["User Set"].get("database_path", '') == '':
+        logging.info('Database path empty, using default.')
+        config["User Set"]["database_path"] = 'chapters.db'
+
+    if config["User Set"].get("mangadex_api_url", '') == '':
+        logging.info('Mangadex api path empty, using default.')
+        config["User Set"]["mangadex_api_url"] = 'https://api.mangadex.org'
+    
+    if config["User Set"].get("manga_id_map_path", '') == '':
+        logging.info('Manga id map path empty, using default.')
+        config["User Set"]["manga_id_map_path"] = 'manga.json'
+
+
+def open_config_file() -> configparser.ConfigParser:
+    # Open config file and read values
+    if config_file_path.exists():
+        config = configparser.ConfigParser()
+        config.read(config_file_path)
+        logging.info('Loaded config file.')
+    else:
+        logging.critical('Config file not found, exiting.')
+        raise FileNotFoundError('Config file not found.')
+
+    load_config_info(config)
+    return config
+
+config = open_config_file()
+
+database_path = Path(config["User Set"]["database_path"])
 database_connection = database_connection = sqlite3.connect(database_path)
 database_connection.row_factory = sqlite3.Row
 logging.info('Opened database.')
 
-# Open config file and read values
-config = configparser.ConfigParser()
-config.read(config_file_path)
+mangadex_api_url = config["User Set"]["mangadex_api_url"]
+md_upload_api_url = f'{mangadex_api_url}/upload'
+md_auth_api_url = f'{mangadex_api_url}/auth'
 
 try:
-    mangadex_ratelimit_time = int(config["User Set"]["mangadex_ratelimit_time"])
-except ValueError:
-    mangadex_ratelimit_time = 3
+    mangadex_ratelimit_time = int(config["User Set"].get("mangadex_ratelimit_time", ''))
+except (ValueError, KeyError):
+    mangadex_ratelimit_time = 2
 
 
 
@@ -65,7 +87,7 @@ except ValueError:
 class Manga:
     manga_id:int
     manga_name:str
-    manga_language:int
+    manga_language:str
 
 
 
@@ -76,7 +98,7 @@ class Chapter:
     chapter_expire:int
     chapter_title:str
     chapter_number:str
-    chapter_language: int
+    chapter_language:str
     manga_id:int = field(default=None)
 
 
@@ -84,23 +106,23 @@ def make_tables(database_connection: sqlite3.Connection):
     """Make the database table."""
     logging.warning("Creating new tables for database.")
     database_connection.execute('''CREATE TABLE IF NOT EXISTS chapters
-                (chapter_id         INTEGER NOT NULL PRIMARY KEY,
+                (chapter_id         INTEGER NOT NULL,
                 timestamp           INTEGER NOT NULL,
                 chapter_expire      INTEGER NOT NULL,
                 chapter_language    INTEGER NOT NULL,
                 chapter_title       TEXT NULL,
                 chapter_number      TEXT NOT NULL,
                 mplus_manga_id      INTEGER NOT NULL,
-                md_chapter_id       TEXT NULL)''')
+                md_chapter_id       TEXT NOT NULL PRIMARY KEY)''')
     database_connection.execute('''CREATE TABLE IF NOT EXISTS deleted_chapters
-                (chapter_id         INTEGER NOT NULL PRIMARY KEY,
+                (chapter_id         INTEGER NOT NULL,
                 timestamp           INTEGER NOT NULL,
                 chapter_expire      INTEGER NOT NULL,
                 chapter_language    INTEGER NOT NULL,
                 chapter_title       TEXT NULL,
                 chapter_number      TEXT NOT NULL,
                 mplus_manga_id      INTEGER NOT NULL,
-                md_chapter_id       TEXT NULL)''')
+                md_chapter_id       TEXT NOT NULL PRIMARY KEY)''')
     database_connection.commit()
 
 
@@ -120,7 +142,7 @@ def check_table_exists(database_connection: sqlite3.Connection) -> bool:
 fill_backlog = check_table_exists(database_connection)
 
 
-def convert_json(response_to_convert: requests.Response) -> Optional[Dict]:
+def convert_json(response_to_convert: requests.Response) -> Optional[dict]:
     """Convert the api response into a parsable json."""
     critical_decode_error_message = "Couldn't convert mangadex api response into a json."
     try:
@@ -144,8 +166,14 @@ def convert_json(response_to_convert: requests.Response) -> Optional[Dict]:
 
 def print_error(error_response: requests.Response):
     """Print the errors the site returns."""
+    status_code = error_response.status_code
     error_converting_json_log_message = "{} when converting error_response into json."
-    error_converting_json_print_message = f"{error_response.status_code}: Couldn't convert api reposnse into json."
+    error_converting_json_print_message = f"{status_code}: Couldn't convert api reposnse into json."
+
+    if status_code == 429:
+        logging.error(f'429: {http_error_codes.get(str(status_code))}')
+        print(f'429: {http_error_codes.get(str(status_code))}')
+        return
 
     # Api didn't return json object
     try:
@@ -171,17 +199,17 @@ def print_error(error_response: requests.Response):
         errors = ', '.join(errors)
 
         if not errors:
-            errors = http_error_codes.get(str(error_response.status_code), '')
+            errors = http_error_codes.get(str(status_code), '')
 
         logging.warning(f'Error: {errors}.')
         print(f'Error: {errors}.')
     except KeyError:
-        keyerror_message = f'KeyError: {error_response.status_code}.'
+        keyerror_message = f'KeyError: {status_code}.'
         logging.warning(keyerror_message)
         print(keyerror_message)
 
 
-def remove_upload_session(session: requests.Session, upload_session_id: str):
+def remove_upload_session(session: requests.Session, upload_session_id: UUID):
     """Delete the upload session."""
     session.delete(f'{md_upload_api_url}/{upload_session_id}')
     logging.info(f'Sent {upload_session_id} to be deleted.')
@@ -216,7 +244,7 @@ def delete_exising_upload_session(session: requests.Session):
     logging.error("Exising upload session not deleted.")
 
 
-def get_md_id(manga_id_map: Dict[str, List[int]], mangaplus_id: int) -> str:
+def get_md_id(manga_id_map: Dict[UUID, List[int]], mangaplus_id: int) -> UUID:
     """Get the mangadex id from the mangaplus one."""
     for md_id in manga_id_map:
         if mangaplus_id in manga_id_map[md_id]:
@@ -300,7 +328,7 @@ def get_previous_chapter(chapters: list, current_chapter):
             return chapter
 
 
-def get_latest_chapters(manga_response: response_pb.Response, posted_chapters: List[int], last_run: int) -> List[Chapter]:
+def get_latest_chapters(manga_response: response_pb.Response, posted_chapters: List[int]) -> List[Chapter]:
     """Get the latest unuploaded chapters."""
     manga_chapters = manga_response.success.manga_detail
     updated_chapters = []
@@ -339,13 +367,19 @@ def get_latest_chapters(manga_response: response_pb.Response, posted_chapters: L
             elif chapter_number == "One-Shot":
                 chapter_number = None
 
-            chapter_number_split = chapter_number.split(',')
-            chapter_number = chapter_number_split[-1]
-            chapter_number = str(chapter_number.lstrip('#')).lstrip('0')
+            if chapter_number is None:
+                chapter_number_split = [chapter_number]
+            else:
+                chapter_number_split = chapter_number.split(',')
 
-            updated_chapters.append(Chapter(chapter_id=chapter.chapter_id, chapter_timestamp=chapter.start_timestamp,
-                chapter_title=chapter.chapter_name, chapter_expire=chapter.end_timestamp, chapter_number=chapter_number,
-                chapter_language=mplus_language_map.get(str(manga_chapters.manga.language), "NULL"), manga_id=manga_chapters.manga.manga_id))
+            # MPlus sometimes joins two chapters as one, upload to md as two different chapters            
+            for chap_number in chapter_number_split:
+                if chap_number is not None:
+                    chap_number = str(chap_number.lstrip('#')).lstrip('0')
+
+                updated_chapters.append(Chapter(chapter_id=chapter.chapter_id, chapter_timestamp=chapter.start_timestamp,
+                    chapter_title=chapter.chapter_name, chapter_expire=chapter.end_timestamp, chapter_number=chap_number,
+                    chapter_language=mplus_language_map.get(str(manga_chapters.manga.language), "NULL"), manga_id=manga_chapters.manga.manga_id))
 
     return updated_chapters
 
@@ -374,7 +408,7 @@ def get_proto_response(response_proto: bytes) -> response_pb.Response:
     return response
 
 
-def request_from_api(manga_id: Optional[int]=None, updated: bool=False) -> Optional[bytes]:
+def request_from_api(manga_id: Optional[int]=None, updated: Optional[bool]=False) -> Optional[bytes]:
     """Get manga and chapter details from the api."""
     try:
         if manga_id is not None:
@@ -394,36 +428,37 @@ def request_from_api(manga_id: Optional[int]=None, updated: bool=False) -> Optio
 
 def delete_from_database(chapter: dict):
     """Move the chapter from the chapters table to the deleted_chapters table."""
-    database_connection.execute("""INSERT INTO deleted_chapters SELECT * FROM chapters WHERE chapter_id=(?)""", (chapter["chapter_id"],))
-    database_connection.execute("""DELETE FROM chapters WHERE chapter_id=(?)""", (chapter["chapter_id"],))
+    database_connection.execute("""INSERT INTO deleted_chapters SELECT * FROM chapters WHERE md_chapter_id=(?)""", (chapter["md_chapter_id"],))
+    database_connection.execute("""DELETE FROM chapters WHERE md_chapter_id=(?)""", (chapter["md_chapter_id"],))
     database_connection.commit()
 
 
-def remove_old_chapters(session: requests.Session, chapter: Dict[int, Optional[str]]):
+def remove_old_chapters(session: requests.Session, chapter: dict):
     """Check if the chapters expired and remove off mangadex if they are."""
     # If the expiry date of the chapter is less than the current time and the md chapter id is available, try delete
     if datetime.fromtimestamp(chapter["chapter_expire"]) <= datetime.now():
         logging.info(f'Moving {chapter} from chapters table to deleted_chapters table.')
+        md_chapter_id = chapter["md_chapter_id"]
 
-        if chapter["md_chapter_id"] is not None:
-            logging.info(f'{chapter["md_chapter_id"]} expired, deleting.')
-            delete_reponse = session.delete(f'https://api.mangadex.org/chapter/{chapter["md_chapter_id"]}')
+        if md_chapter_id is not None:
+            logging.info(f'{md_chapter_id} expired, deleting.')
+            delete_reponse = session.delete(f'https://api.mangadex.org/chapter/{md_chapter_id}')
             if delete_reponse.status_code == 404:
-                notfound_message = f"{chapter['md_chapter_id']} already deleted."
+                notfound_message = f"{md_chapter_id} already deleted."
                 logging.info(notfound_message)
                 print(notfound_message)
             elif delete_reponse.status_code == 403:
-                unauthorised_message = f"You're not authorised to delete {chapter['md_chapter_id']}."
+                unauthorised_message = f"You're not authorised to delete {md_chapter_id}."
                 logging.info(unauthorised_message)
                 print(unauthorised_message)
             elif delete_reponse.status_code != 200:
-                logging.warning(f"Couldn't delete expired chapter {chapter['md_chapter_id']}.")
+                logging.warning(f"Couldn't delete expired chapter {md_chapter_id}.")
                 print_error(delete_reponse)
                 time.sleep(mangadex_ratelimit_time*2)
                 return
 
             if delete_reponse.status_code == 200:
-                delete_chapter_message = f'Deleted {chapter["md_chapter_id"]}.'
+                delete_chapter_message = f'Deleted {md_chapter_id}.'
                 logging.info(delete_chapter_message)
                 print(delete_chapter_message)
 
@@ -432,7 +467,7 @@ def remove_old_chapters(session: requests.Session, chapter: Dict[int, Optional[s
         return
 
 
-def delete_expired_chapters(posted_chapters: List[Dict[str, int]], session: requests.Session):
+def delete_expired_chapters(posted_chapters: List[dict], session: requests.Session):
     """Delete expired chapters from mangadex."""
     chapter_delete_processes = []
     logging.info(f'Started deleting exired chapters process.')
@@ -456,7 +491,7 @@ def get_mplus_updated_manga(tracked_manga: List[int]) -> List[Manga]:
     return updates
 
 
-def get_mplus_updates(manga_series: List[int], posted_chapters_ids: List[int], last_run: int) -> List[Chapter]:
+def get_mplus_updates(manga_series: List[int], posted_chapters_ids: List[int]) -> List[Chapter]:
     """Get latest chapter updates."""
     updates = []
 
@@ -466,14 +501,14 @@ def get_mplus_updates(manga_series: List[int], posted_chapters_ids: List[int], l
         manga_response = request_from_api(manga_id=manga)
         if manga_response is not None:
             manga_response_parsed = get_proto_response(manga_response)
-            updated_chapters = get_latest_chapters(manga_response_parsed, posted_chapters_ids, last_run)
+            updated_chapters = get_latest_chapters(manga_response_parsed, posted_chapters_ids)
             logging.info(updated_chapters)
             # print(updated_chapters)
             updates.extend(updated_chapters)
     return updates
 
 
-def login_to_md(session: requests.Session, config: Dict[str, Dict[str, str]]):
+def login_to_md(session: requests.Session, config: configparser.ConfigParser):
     """Login to MangaDex using the credentials found in the env file."""
     username = config["MangaDex Credentials"]["mangadex_username"]
     password = config["MangaDex Credentials"]["mangadex_password"]
@@ -505,8 +540,7 @@ def login_to_md(session: requests.Session, config: Dict[str, Dict[str, str]]):
     logging.info(f'Logged into mangadex.')
     
 
-
-def check_logged_in(session: requests.Session, config: Dict[str, Dict[str, str]]):
+def check_logged_in(session: requests.Session, config: configparser.ConfigParser):
     """Check if still logged into mangadex."""
     auth_check_response = session.get(f'{md_auth_api_url}/check')
 
@@ -526,45 +560,32 @@ def check_logged_in(session: requests.Session, config: Dict[str, Dict[str, str]]
     login_to_md(session, config)
 
 
-def update_database(database_connection: sqlite3.Connection, chapter: Chapter, succesful_upload_id: Optional[str]=None):
+def update_database(database_connection: sqlite3.Connection, chapter: Chapter, succesful_upload_id: UUID=None):
     """Update the database with the new chapter."""
-    print('Updating database.')
-    chapter_id = chapter.chapter_id
+    mplus_chapter_id = chapter.chapter_id
 
-    chapter_id_exists = database_connection.execute('SELECT * FROM chapters WHERE EXISTS(SELECT 1 FROM chapters WHERE chapter_id=(?))', (chapter_id,))
+    chapter_id_exists = database_connection.execute('SELECT * FROM chapters WHERE EXISTS(SELECT 1 FROM chapters WHERE md_chapter_id=(?))', (succesful_upload_id,))
     chapter_id_exists_dict = chapter_id_exists.fetchone()
     if chapter_id_exists_dict is not None:
         chap_lang = chapter_id_exists_dict["chapter_language"]
-        if dict(chapter_id_exists_dict).get('md_chapter_id', None) is None:
-            print('Updating database with new mangadex chapter id.')
+        if dict(chapter_id_exists_dict).get('chapter_id', None) is None:
+            print('Updating database with new mangadex and mangaplus chapter ids.')
             logging.info(f'Updating existing record in the database: {chapter}.')
             database_connection.execute('UPDATE chapters SET md_chapter_id=:md_id, chapter_language=:language WHERE chapter_id=:mplus_id',
-                                {"md_id": succesful_upload_id, "mplus_id": chapter_id,
+                                {"md_id": succesful_upload_id, "mplus_id": mplus_chapter_id,
                                 "language": mplus_language_map.get(str(chap_lang), "NULL") if isinstance(chap_lang, int) else chap_lang})
     else:
         logging.info(f'Adding new chapter to database: {chapter}.')
         database_connection.execute('''INSERT INTO chapters (chapter_id, timestamp, chapter_expire, chapter_language, chapter_title, chapter_number, mplus_manga_id, md_chapter_id) VALUES
                                                             (:chapter_id, :timestamp, :chapter_expire, :chapter_language, :chapter_title, :chapter_number, :mplus_manga_id, :md_chapter_id)''',
-                    {"chapter_id": chapter_id, "timestamp": chapter.chapter_timestamp, "chapter_expire": chapter.chapter_expire,
+                    {"chapter_id": mplus_chapter_id, "timestamp": chapter.chapter_timestamp, "chapter_expire": chapter.chapter_expire,
                     "chapter_language": chapter.chapter_language, "chapter_title": chapter.chapter_title, "chapter_number": chapter.chapter_number,
                     "mplus_manga_id": chapter.manga_id, "md_chapter_id": succesful_upload_id})
     database_connection.commit()
     print('Updated database.')
 
 
-def check_last_run(last_run_path: Path) -> int:
-    """Open last run file, if not exists, use current time."""
-    if last_run_path.exists():
-        with open(last_run_path, 'r') as last_run_fp:
-            last_run = int(last_run_fp.readline().strip('\n'))
-        logging.info(f'Opened last run file, last run: {last_run}.')
-    else:
-        logging.warning('Last run file not found, using now as the last_run time.')
-        last_run = int(datetime.timestamp(datetime.now()))
-    return last_run
-
-
-def open_manga_id_map(manga_map_path: Path) -> Optional[Dict[str, List[int]]]:
+def open_manga_id_map(manga_map_path: Path) -> Dict[UUID, List[int]]:
     """Open mangaplus id to mangadex id map."""
     try:
         with open(manga_map_path, 'r') as manga_map_fp:
@@ -581,7 +602,7 @@ def open_manga_id_map(manga_map_path: Path) -> Optional[Dict[str, List[int]]]:
     return manga_map
 
 
-def check_for_duplicate_chapter(database_connection: sqlite3.Connection, manga_chapters: List[Dict], chapter, mangadex_manga_id: UUID, mplus_manga_id: int, chapter_number: str, chapter_language: str) -> bool:
+def check_for_duplicate_chapter(database_connection: sqlite3.Connection, manga_chapters: List[dict], chapter, mangadex_manga_id: UUID, mplus_manga_id: int, chapter_number: str, chapter_language: str) -> bool:
     """Check for duplicate chapters on mangadex."""
     # Skip duplicate chapters
     for md_chapter in manga_chapters:
@@ -595,7 +616,7 @@ def check_for_duplicate_chapter(database_connection: sqlite3.Connection, manga_c
     return False
 
 
-def create_upload_session(mangadex_manga_id: UUID, chapter_number: str, manga_generic_error_message: str) -> Optional[Dict]:
+def create_upload_session(mangadex_manga_id: UUID, chapter_number: str, manga_generic_error_message: str) -> Optional[dict]:
     """Try create an upload session 3 times."""
     chapter_upload_session_retry = 0
     chapter_upload_session_successful = False
@@ -640,7 +661,7 @@ def commit_chapter(chapter, upload_session_id: UUID, mangadex_manga_id: UUID, mp
     while commit_retries < upload_retry_total:
         chapter_commit_response = session.post(f'{md_upload_api_url}/{upload_session_id}/commit',
             json={"chapterDraft":
-                {"volume": None, "chapter": chapter_number, "title": chapter.chapter_title, "translatedLanguage": chapter_language, "externalUrl": mangaplus_chapter_url.format(chapter.chapter_id)}, "pageOrder": []
+                {"volume": None, "chapter": chapter_number, "title": chapter.chapter_title, "translatedLanguage": chapter_language, "externalUrl": mplus_chapter_url.format(chapter.chapter_id)}, "pageOrder": []
             })
 
         if chapter_commit_response.status_code == 200:
@@ -735,11 +756,8 @@ def upload_chapters():
 
 if __name__ == '__main__':
 
-    last_run_path = root_path.joinpath('last_run').with_suffix('.txt')
-    manga_map_path = root_path.joinpath('manga').with_suffix('.json')
+    manga_map_path = Path(config["User Set"]["manga_id_map_path"])
 
-    # Open required files
-    last_run = check_last_run(last_run_path)
     manga_id_map = open_manga_id_map(manga_map_path)
     uploader_account_id = config["MangaDex Credentials"]["mangadex_userid"]
     upload_retry_total = 3
@@ -764,7 +782,7 @@ if __name__ == '__main__':
 
     # Get new manga and chapter updates
     updated_manga = get_mplus_updated_manga(manga_map_mplus_ids)
-    updates = get_mplus_updates(manga_map_mplus_ids, posted_chapters_ids, last_run)
+    updates = get_mplus_updates(manga_map_mplus_ids, posted_chapters_ids)
 
     if not updates:
         logging.info("No new updates found.")
@@ -779,8 +797,3 @@ if __name__ == '__main__':
     database_connection.commit()
     database_connection.close()
     logging.info('Saved and closed database.')
-
-    # Save last run as now
-    with open(last_run_path, 'w') as last_run_fp:
-        last_run_path.write_text(str(int(datetime.timestamp(datetime.now()))))
-    logging.info('Saved last run time.')
