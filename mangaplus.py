@@ -489,18 +489,18 @@ def remove_old_chapters(session: requests.Session, chapter: dict):
                 logging.info(notfound_message)
                 print(notfound_message)
             elif delete_reponse.status_code == 403:
-                unauthorised_message = f"You're not authorised to delete {deleted_message}."
+                unauthorised_message = f"You're not authorised to delete {deleted_message}"
                 logging.info(unauthorised_message)
                 print(unauthorised_message)
             elif delete_reponse.status_code != 200:
-                logging.warning(f"Couldn't delete expired chapter {deleted_message}.")
+                logging.warning(f"Couldn't delete expired chapter {deleted_message}")
                 print_error(delete_reponse)
                 time.sleep(6)
                 return
 
             if delete_reponse.status_code == 200:
                 logging.info(f'Deleted {chapter}.')
-                print(f'Deleted {deleted_message}.')
+                print(f'Deleted {deleted_message}')
 
         delete_from_database(chapter)
         time.sleep(6)
@@ -642,7 +642,7 @@ def open_manga_id_map(manga_map_path: Path) -> Dict[UUID, List[int]]:
     return manga_map
 
 
-def check_for_duplicate_chapter(database_connection: sqlite3.Connection, manga_chapters: List[dict], chapter, manga_generic_error_message: str, chapter_number: str, chapter_language: str) -> bool:
+def check_for_duplicate_chapter(database_connection: sqlite3.Connection, manga_chapters: List[dict], chapter: Chapter, manga_generic_error_message: str, chapter_number: str, chapter_language: str) -> bool:
     """Check for duplicate chapters on mangadex."""
     # Skip duplicate chapters
     for md_chapter in manga_chapters:
@@ -694,7 +694,7 @@ def create_upload_session(mangadex_manga_id: UUID, chapter_number: str, manga_ge
         return
 
 
-def commit_chapter(chapter, upload_session_id: UUID, mangadex_manga_id: UUID, mplus_manga_id: int, manga_generic_error_message: str, chapter_number: str, chapter_language: str) -> bool:
+def commit_chapter(chapter: Chapter, upload_session_id: UUID, mangadex_manga_id: UUID, mplus_manga_id: int, manga_generic_error_message: str, chapter_number: str, chapter_language: str) -> bool:
     """Try commit the chapter to mangadex."""
     commit_retries = 0
     succesful_upload = False
