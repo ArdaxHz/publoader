@@ -124,8 +124,6 @@ def make_tables(database_connection: sqlite3.Connection):
                 chapter_number      TEXT NULL,
                 mplus_manga_id      INTEGER NOT NULL,
                 md_chapter_id       TEXT NOT NULL PRIMARY KEY)''')
-    database_connection.execute('''CREATE TABLE IF NOT EXISTS posted_mplus_ids
-                (chapter_id         INTEGER NOT NULL)''')
     database_connection.commit()
 
 
@@ -136,8 +134,8 @@ def check_table_exists(database_connection: sqlite3.Connection) -> bool:
     fill_backlog = False
     # Table doesn't exist, fill backlog without posting to mangadex
     if not table_exist.fetchall():
-        logging.error("Database tables don't exist, making new ones.")
-        print("Tables don't exist, making new ones.")
+        logging.error("Database table doesn't exist, making new one.")
+        print("Table doesn't exist, making new one.")
         make_tables(database_connection)
         fill_backlog = True
     return fill_backlog
@@ -339,11 +337,10 @@ def get_surrounding_chapter(chapters: list, current_chapter, next_chapter_search
 
 def strip_chapter_number(number: str) -> str:
     """Returns the chapter number without the un-needed # or 0."""
-    stripped = str(number).strip('#')
+    stripped = str(number).strip('#').lstrip('0')
 
-    parts = stripped.split('.')
-    parts[0] = '0' if len(parts[0].lstrip('0')) == 0 else parts[0].lstrip('0')
-    stripped = '.'.join(parts)
+    if len(stripped) == 0:
+        stripped = '0'
 
     return stripped
 
@@ -352,79 +349,80 @@ def get_latest_chapters(manga_response: response_pb.Response, posted_chapters: L
     """Get the latest unuploaded chapters."""
     manga_chapters = manga_response.success.manga_detail
     updated_chapters = []
-    manga_chapters_lists = []
+    chapters = []
 
-    manga_chapters_lists.append(list(manga_chapters.first_chapter_list))
+    chapters.extend(list(manga_chapters.first_chapter_list))
     if len(manga_chapters.last_chapter_list) > 0:
-        manga_chapters_lists.append(list(manga_chapters.last_chapter_list))
+        chapters.extend(list(manga_chapters.last_chapter_list))
 
-    for chapters in manga_chapters_lists:
-        # Go through the last three chapters
-        for chapter in chapters:
-            # Chapter id is not in database and chapter release isn't before last run time
-            if chapter.chapter_id not in posted_chapters and datetime.fromtimestamp(chapter.end_timestamp) >= datetime.now():
-                current_number = strip_chapter_number(chapter.chapter_number)
-                chapter_number = chapter.chapter_number
-                if chapter_number is not None:
-                    chapter_number = current_number
+    # Go through the last three chapters
+    for chapter in chapters:
+        # Chapter id is not in database and chapter release isn't before last run time
+        chapter_timestamp = datetime.fromtimestamp(chapter.start_timestamp)
+        if chapter.chapter_id not in posted_chapters and datetime.fromtimestamp(chapter.start_timestamp) <= datetime.now() and datetime.fromtimestamp(chapter.end_timestamp) >= datetime.now():
+            current_number = strip_chapter_number(chapter.chapter_number)
+            chapter_number = chapter.chapter_number
+            if chapter_number is not None:
+                chapter_number = current_number
 
-                if chapter_number == "ex":
-                    # Get previous chapter's number for chapter number
-                    previous_chapter = get_surrounding_chapter(chapters, chapter)
-                    next_chapter_number = None
-                    previous_chapter_number = None
+            if chapter_number == "ex":
+                # Get previous chapter's number for chapter number
+                previous_chapter = get_surrounding_chapter(chapters, chapter)
+                next_chapter_number = None
+                previous_chapter_number = None
 
-                    if previous_chapter is None:
-                        # Previous chapter isn't available, use
-                        next_chapter = get_surrounding_chapter(chapters, chapter, next_chapter_search=True)
-                        if next_chapter is None:
-                            chapter_number = None
-                        else:
-                            next_chapter_number = strip_chapter_number(next_chapter.chapter_number)
-                            chapter_number = int(next_chapter_number.split(',')[0]) - 1
-                            first_index = next_chapter
-                            second_index = chapter
-                    else:
-                        previous_chapter_number = strip_chapter_number(previous_chapter.chapter_number)
-                        chapter_number = previous_chapter_number.split(',')[-1]
-                        first_index = chapter
-                        second_index = previous_chapter
-
-                    if chapter_number == 'ex':
+                if previous_chapter is None:
+                    # Previous chapter isn't available, use
+                    next_chapter = get_surrounding_chapter(chapters, chapter, next_chapter_search=True)
+                    if next_chapter is None:
                         chapter_number = None
+                    else:
+                        next_chapter_number = strip_chapter_number(next_chapter.chapter_number)
+                        chapter_number = int(next_chapter_number.split(',')[0]) - 1
+                        first_index = next_chapter
+                        second_index = chapter
+                else:
+                    previous_chapter_number = strip_chapter_number(previous_chapter.chapter_number)
+                    chapter_number = previous_chapter_number.split(',')[-1]
+                    first_index = chapter
+                    second_index = previous_chapter
 
-                    if chapter_number is not None and current_number != 'ex':
-                        if math.sqrt((int(current_number) - int(chapter_number))**2) >= 5:
-                            chapter_number = None
-
-                    if chapter_number is not None:
-                        chapter_decimal = '5'
-
-                        # There may be multiple extra chapters before the last numbered chapter
-                        # Use index difference as decimal to avoid not uploading non-dupes
-                        try:
-                            chapter_difference = chapters.index(first_index) - chapters.index(second_index)
-                            if chapter_difference > 1:
-                                chapter_decimal = chapter_difference
-                        except (ValueError, IndexError):
-                            pass
-
-                        chapter_number = f"{chapter_number}.{chapter_decimal}"
-                elif chapter_number == "One-Shot":
+                if chapter_number == 'ex':
                     chapter_number = None
 
-                if chapter_number is None:
-                    chapter_number_split = [chapter_number]
-                else:
-                    chapter_number_split = [strip_chapter_number(chap_number) for chap_number in chapter_number.split(',')]
-       
-                # MPlus sometimes joins two chapters as one, upload to md as two different chapters
-            # MPlus sometimes joins two chapters as one, upload to md as two different chapters            
-                # MPlus sometimes joins two chapters as one, upload to md as two different chapters
-                for chap_number in chapter_number_split:
-                    updated_chapters.append(Chapter(chapter_id=chapter.chapter_id, chapter_timestamp=chapter.start_timestamp,
-                        chapter_title=chapter.chapter_name, chapter_expire=chapter.end_timestamp, chapter_number=chap_number,
-                        chapter_language=mplus_language_map.get(str(manga_chapters.manga.language), "NULL"), manga_id=manga_chapters.manga.manga_id))
+                if chapter_number is not None and current_number != 'ex':
+                    if math.sqrt((int(current_number) - int(chapter_number))**2) >= 5:
+                        chapter_number = None
+
+                if chapter_number is not None:
+                    chapter_decimal = '5'
+
+                    # There may be multiple extra chapters before the last numbered chapter
+                    # Use index difference as decimal to avoid not uploading non-dupes
+                    try:
+                        chapter_difference = chapters.index(first_index) - chapters.index(second_index)
+                        if chapter_difference > 1:
+                            chapter_decimal = chapter_difference
+                    except (ValueError, IndexError):
+                        pass
+
+                    chapter_number = f"{chapter_number}.{chapter_decimal}"
+            elif chapter_number == "One-Shot":
+                chapter_number = None
+
+            if chapter_number is None:
+                chapter_number_split = [chapter_number]
+            else:
+                chapter_number_split = chapter_number.split(',')
+
+            # MPlus sometimes joins two chapters as one, upload to md as two different chapters
+            for chap_number in chapter_number_split:
+                if chap_number is not None:
+                    chap_number = strip_chapter_number(chap_number)
+
+                updated_chapters.append(Chapter(chapter_id=chapter.chapter_id, chapter_timestamp=chapter.start_timestamp,
+                    chapter_title=chapter.chapter_name, chapter_expire=chapter.end_timestamp, chapter_number=chap_number,
+                    chapter_language=mplus_language_map.get(str(manga_chapters.manga.language), "NULL"), manga_id=manga_chapters.manga.manga_id))
 
     return updated_chapters
 
@@ -548,12 +546,7 @@ def get_mplus_updates(manga_series: List[int], posted_chapters_ids: List[int]) -
             manga_response_parsed = get_proto_response(manga_response)
             updated_chapters = get_latest_chapters(manga_response_parsed, posted_chapters_ids)
             logging.info(updated_chapters)
-
-            if updated_chapters:
-                print(f'Manga {manga}.')
-            for update in updated_chapters:
-                print(f'--Found {update.chapter_id} chapter {update.chapter_number} language {update.chapter_language}.')
-
+            # print(updated_chapters)
             updates.extend(updated_chapters)
     return updates
 
@@ -617,11 +610,13 @@ def update_database(database_connection: sqlite3.Connection, chapter: Chapter, s
     chapter_id_exists = database_connection.execute('SELECT * FROM chapters WHERE EXISTS(SELECT 1 FROM chapters WHERE md_chapter_id=(?))', (succesful_upload_id,))
     chapter_id_exists_dict = chapter_id_exists.fetchone()
     if chapter_id_exists_dict is not None:
+        chap_lang = chapter_id_exists_dict["chapter_language"]
         if dict(chapter_id_exists_dict).get('chapter_id', None) is None:
             print('Updating database with new mangadex and mangaplus chapter ids.')
             logging.info(f'Updating existing record in the database: {chapter}.')
-            database_connection.execute('UPDATE chapters SET md_chapter_id=:md_id WHERE chapter_id=:mplus_id',
-                                {"md_id": succesful_upload_id, "mplus_id": mplus_chapter_id})
+            database_connection.execute('UPDATE chapters SET md_chapter_id=:md_id, chapter_language=:language WHERE chapter_id=:mplus_id',
+                                {"md_id": succesful_upload_id, "mplus_id": mplus_chapter_id,
+                                "language": mplus_language_map.get(str(chap_lang), "NULL") if isinstance(chap_lang, int) else chap_lang})
     else:
         logging.info(f'Adding new chapter to database: {chapter}.')
         database_connection.execute('''INSERT INTO chapters (chapter_id, timestamp, chapter_expire, chapter_language, chapter_title, chapter_number, mplus_manga_id, md_chapter_id) VALUES
@@ -629,7 +624,6 @@ def update_database(database_connection: sqlite3.Connection, chapter: Chapter, s
                     {"chapter_id": mplus_chapter_id, "timestamp": chapter.chapter_timestamp, "chapter_expire": chapter.chapter_expire,
                     "chapter_language": chapter.chapter_language, "chapter_title": chapter.chapter_title, "chapter_number": chapter.chapter_number,
                     "mplus_manga_id": chapter.manga_id, "md_chapter_id": succesful_upload_id})
-    database_connection.execute('INSERT OR IGNORE INTO posted_mplus_ids (chapter_id) VALUES (?)', (mplus_chapter_id,))
     database_connection.commit()
     print('Updated database.')
 
@@ -642,10 +636,12 @@ def open_manga_id_map(manga_map_path: Path) -> Dict[UUID, List[int]]:
         logging.info('Opened manga id map file.')
     except json.JSONDecodeError:
         logging.critical('Manga map file is corrupted.')
-        raise json.JSONDecodeError("Manga map file is corrupted.")
+        raise Exception("Manga map file is corrupted.")
+        manga_map = {}
     except FileNotFoundError:
         logging.critical('Manga map file is missing.')
-        raise FileNotFoundError("Couldn't file manga map file.")
+        raise Exception("Couldn't file manga map file.")
+        manga_map = {}
     return manga_map
 
 
@@ -760,9 +756,13 @@ def upload_chapters():
         chapters = updated_manga_chapters[mangadex_manga_id]
         manga_chapters = get_chapters(session, **{
             "groups[]": [mplus_group],
-            "manga": mangadex_manga_id,
             "order[createdAt]": "desc",
         })
+
+        dupes = {}
+
+        {chapter[
+            "attributes"][]}
 
         skipped = 0
         for chapter in chapters:
@@ -810,9 +810,8 @@ if __name__ == '__main__':
     upload_retry_total = 3
 
     # Get already posted chapters
-    posted_chapters_data = database_connection.execute("SELECT * FROM chapters").fetchall()
-    posted_chapters_ids_data = database_connection.execute("SELECT * FROM posted_mplus_ids").fetchall()
-    posted_chapters_ids = [job["chapter_id"] for job in posted_chapters_ids_data] if not fill_backlog else []
+    posted_chapters = database_connection.execute("SELECT * FROM chapters").fetchall()
+    posted_chapters_ids = [job["chapter_id"] for job in posted_chapters] if not fill_backlog else []
     manga_map_mplus_ids = [mplus_id for md_id in manga_id_map for mplus_id in manga_id_map[md_id]]
     logging.info('Retrieved posted chapters from database and got mangaplus ids from manga id map file.')
 
@@ -823,7 +822,7 @@ if __name__ == '__main__':
     chapter_delete_processes = None
     if not fill_backlog:
         try:
-            chapter_delete_processes = multiprocessing.Process(target=delete_expired_chapters, args=([dict(k) for k in posted_chapters_data], session))
+            chapter_delete_processes = multiprocessing.Process(target=delete_expired_chapters, args=([dict(k) for k in posted_chapters], session))
             chapter_delete_processes.start()
         except:
             pass
@@ -836,8 +835,8 @@ if __name__ == '__main__':
         logging.info("No new updates found.")
         print("No new updates found.")
     else:
-        logging.info(f'Found {len(updates)} update(s).')
-        print(f'Found {len(updates)} update(s).')
+        logging.info(f'Found {len(updates)} updates.')
+        print(f'Found {len(updates)} updates.')
         upload_chapters()
 
     if chapter_delete_processes is not None:
