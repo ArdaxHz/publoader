@@ -254,7 +254,7 @@ def get_md_id(manga_id_map: Dict[UUID, List[int]], mangaplus_id: int) -> UUID:
             return md_id
 
 
-def get_chapters(session: requests.Session, **params) -> list:
+def get_chapters(session: requests.Session, params: dict) -> list:
     """Go through each page in the api to get all the chapters."""
     chapters = []
     limit = 100
@@ -758,7 +758,7 @@ def upload_chapters():
     for mangadex_manga_id in updated_manga_chapters:
         # Get each manga's uploaded chapters on mangadex
         chapters = updated_manga_chapters[mangadex_manga_id]
-        manga_chapters = get_chapters(session, **{
+        manga_chapters = get_chapters(session, params={
             "groups[]": [mplus_group],
             "manga": mangadex_manga_id,
             "order[createdAt]": "desc",
