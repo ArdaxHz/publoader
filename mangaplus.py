@@ -211,7 +211,7 @@ def print_error(error_response: requests.Response):
     if status_code == 429:
         logging.error(f'429: {http_error_codes.get(str(status_code))}')
         print(f'429: {http_error_codes.get(str(status_code))}')
-        time.sleep(mangadex_ratelimit_time * 2)
+        time.sleep(mangadex_ratelimit_time * 4)
         return
 
     # Api didn't return json object
@@ -555,16 +555,19 @@ class ChapterDeleterProcess:
         self.chapters_to_delete = [
             dict(x) for x in posted_chapters if datetime.fromtimestamp(
                 x["chapter_expire"]) <= datetime.now()]
-        self.chapter_delete_ratelimit = 6
+        self.chapter_delete_ratelimit = 8
 
         logging.info(f"Chapters to delete: {self.chapters_to_delete}")
 
     def _delete_from_database(self, chapter: dict):
         """Move the chapter from the chapters table to the deleted_chapters table."""
-        database_connection.execute(
-            """INSERT INTO deleted_chapters SELECT * FROM chapters WHERE md_chapter_id=(?)""",
-            (chapter["md_chapter_id"],
-             ))
+        try:
+            database_connection.execute(
+                """INSERT INTO deleted_chapters SELECT * FROM chapters WHERE md_chapter_id=(?)""",
+                (chapter["md_chapter_id"],
+                ))
+        except sqlite3.IntegrityError:
+            pass
         database_connection.execute(
             """DELETE FROM chapters WHERE md_chapter_id=(?)""", (chapter["md_chapter_id"],))
         database_connection.commit()
@@ -623,10 +626,10 @@ class ChapterDeleterProcess:
 
     def delete_async(self) -> multiprocessing.Process:
         """Delete chapters concurrently."""
-        chapter_delete_process = multiprocessing.Process(
+        self.chapter_delete_process = multiprocessing.Process(
             target=self._delete_expired_chapters)
-        chapter_delete_process.start()
-        return chapter_delete_process
+        self.chapter_delete_process.start()
+        return self.chapter_delete_process
 
 
 class MangaUploaderProcess:
@@ -638,13 +641,16 @@ class MangaUploaderProcess:
             updated_manga_chapters: list,
             all_manga_chapters: list,
             processes: list,
-            mangadex_manga_id: UUID):
+            mangadex_manga_id: UUID,
+            deleter_process_object: Optional['ChapterDeleterProcess']):
+
         self.database_connection = database_connection
         self.session = session
         self.updated_manga_chapters = updated_manga_chapters
         self.all_manga_chapters = all_manga_chapters
         self.processes = processes
         self.mangadex_manga_id = mangadex_manga_id
+        self.deleter_process_object = deleter_process_object
 
         self.chapters: List[dict] = updated_manga_chapters[self.mangadex_manga_id]
         self.chapters_all: List[dict] = all_manga_chapters[self.mangadex_manga_id]
@@ -691,9 +697,12 @@ class MangaUploaderProcess:
     def _delete_extra_chapters(self):
         chapters_to_delete = self._remove_chapters_not_mplus()
         if chapters_to_delete:
-            self.second_process_object = ChapterDeleterProcess(
-                self.session, chapters_to_delete)
-            self.second_process_object.delete()
+            if self.deleter_process_object is not None:
+                self.deleter_process_object.chapters_to_delete.extend(chapters_to_delete)
+            else:
+                self.second_process_object = ChapterDeleterProcess(
+                    self.session, chapters_to_delete)
+                self.second_process_object.delete()
 
     def start_manga_uploading_process(self):
         self.skipped = 0
@@ -1085,10 +1094,12 @@ class BotProcess:
             self,
             session: requests.Session,
             updates: list,
-            all_mplus_chapters: list):
+            all_mplus_chapters: list,
+            first_process_object: Optional['ChapterDeleterProcess']):
         self.session = session
         self.updates = updates
         self.all_mplus_chapters = all_mplus_chapters
+        self.first_process_object = first_process_object
 
     def _get_md_id(self,
                    manga_id_map: Dict[UUID,
@@ -1127,7 +1138,8 @@ class BotProcess:
                 updated_manga_chapters,
                 all_manga_chapters,
                 processes,
-                mangadex_manga_id)
+                mangadex_manga_id,
+                self.first_process_object)
             manga_uploader.start_manga_uploading_process()
 
 
@@ -1150,6 +1162,7 @@ def main():
 
     # Start deleting expired chapters
     first_process = None
+    first_process_object = None
     if not fill_backlog:
         first_process_object = ChapterDeleterProcess(
             session, [dict(k) for k in posted_chapters_data])
@@ -1169,7 +1182,7 @@ def main():
 
     logging.info(f'Found {len(updates)} update(s).')
     print(f'Found {len(updates)} update(s).')
-    BotProcess(session, updates, all_mplus_chapters).upload_chapters()
+    BotProcess(session, updates, all_mplus_chapters, first_process_object).upload_chapters()
 
     if first_process is not None:
         first_process.join()
