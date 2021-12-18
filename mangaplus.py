@@ -125,8 +125,6 @@ class Chapter:
             self.chapter_language = int(self.chapter_language)
         except ValueError:
             pass
-            # if self.chapter_language not in mplus_language_map.values():
-            #     self.chapter_language = "NULL"
         else:
             self.chapter_language = mplus_language_map.get(
                 str(self.chapter_language), "NULL")
@@ -565,7 +563,7 @@ class ChapterDeleterProcess:
             database_connection.execute(
                 """INSERT INTO deleted_chapters SELECT * FROM chapters WHERE md_chapter_id=(?)""",
                 (chapter["md_chapter_id"],
-                ))
+                 ))
         except sqlite3.IntegrityError:
             pass
         database_connection.execute(
@@ -698,7 +696,8 @@ class MangaUploaderProcess:
         chapters_to_delete = self._remove_chapters_not_mplus()
         if chapters_to_delete:
             if self.deleter_process_object is not None:
-                self.deleter_process_object.chapters_to_delete.extend(chapters_to_delete)
+                self.deleter_process_object.chapters_to_delete.extend(
+                    chapters_to_delete)
             else:
                 self.second_process_object = ChapterDeleterProcess(
                     self.session, chapters_to_delete)
@@ -756,6 +755,7 @@ class MangaUploaderProcess:
         offset = 0
         pages = 1
         iteration = 1
+        created_at_since_time = '2000-01-01T00:00:00'
 
         parameters = {}
         parameters.update(params)
@@ -764,7 +764,8 @@ class MangaUploaderProcess:
             # Update the parameters with the new offset
             parameters.update({
                 "limit": limit,
-                "offset": offset
+                "offset": offset,
+                'createdAtSince': created_at_since_time
             })
 
             # Call the api and get the json data
@@ -795,10 +796,6 @@ class MangaUploaderProcess:
                 if chapters_count > limit:
                     pages = math.ceil(chapters_count / limit)
 
-                if chapters_count >= 10000:
-                    print(
-                        'Due to api limits, a maximum of 10000 chapters can be downloaded.')
-
                 logging.info(f"{pages} page(s) for manga {params['manga']}.")
 
             # Wait every 5 pages
@@ -806,14 +803,23 @@ class MangaUploaderProcess:
                 time.sleep(5)
 
             # End the loop when all the pages have been gone through
-            # Offset 10000 is the highest you can go, any higher returns an
-            # error
+            # Offset 10000 is the highest you can go, reset offset and get next
+            # 10k batch using the last available chapter's created at date
             if iteration == pages or offset == 10000 or not chapters_response_data["data"]:
+                if chapters_count >= 10000 and offset == 10000:
+                    logging.info(
+                        'Reached 10k chapters, looping over next 10k.')
+                    created_at_since_time = (
+                        chapters[-1]["attributes"]["createdAt"].split('+')[0])
+                    offset = 0
+                    pages = 1
+                    iteration = 1
+                    time.sleep(5)
+                    continue
                 break
 
             iteration += 1
 
-        print('Finished going through the pages.')
         time.sleep(mangadex_ratelimit_time)
         return chapters
 
@@ -922,6 +928,7 @@ class MPlusAPI:
                     manga_response)
 
                 manga_chapters = manga_response_parsed.success.manga_detail
+                manga_name = manga_chapters.manga.manga_name
                 manga_chapters_lists = []
 
                 manga_chapters_lists.append(
@@ -939,7 +946,7 @@ class MPlusAPI:
                 logging.info(updated_chapters)
 
                 if updated_chapters:
-                    print(f'Manga {manga}.')
+                    print(f'Manga {manga_name}: {manga}.')
                 for update in updated_chapters:
                     print(
                         f'--Found {update.chapter_id} chapter {update.chapter_number} language {update.chapter_language}.')
@@ -1177,12 +1184,14 @@ def main():
     if not updates:
         logging.info("No new updates found.")
         print("No new updates found.")
-        first_process.kill()
+        if first_process is not None:
+            first_process.join(8)
         return
 
     logging.info(f'Found {len(updates)} update(s).')
     print(f'Found {len(updates)} update(s).')
-    BotProcess(session, updates, all_mplus_chapters, first_process_object).upload_chapters()
+    BotProcess(session, updates, all_mplus_chapters,
+               first_process_object).upload_chapters()
 
     if first_process is not None:
         first_process.join()
