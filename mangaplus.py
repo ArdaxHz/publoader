@@ -200,17 +200,19 @@ def convert_json(response_to_convert: requests.Response) -> Optional[dict]:
     return converted_response
 
 
-def print_error(error_response: requests.Response):
+def print_error(error_response: requests.Response) -> str:
     """Print the errors the site returns."""
     status_code = error_response.status_code
     error_converting_json_log_message = "{} when converting error_response into json."
     error_converting_json_print_message = f"{status_code}: Couldn't convert api reposnse into json."
+    error_message = ''
 
     if status_code == 429:
-        logging.error(f'429: {http_error_codes.get(str(status_code))}')
-        print(f'429: {http_error_codes.get(str(status_code))}')
+        error_message = f'429: {http_error_codes.get(str(status_code))}'
+        logging.error(error_message)
+        print(error_message)
         time.sleep(mangadex_ratelimit_time * 4)
-        return
+        return error_message
 
     # Api didn't return json object
     try:
@@ -218,7 +220,7 @@ def print_error(error_response: requests.Response):
     except json.JSONDecodeError as e:
         logging.warning(error_converting_json_log_message.format(e))
         print(error_converting_json_print_message)
-        return
+        return error_converting_json_print_message
     # Maybe already a json object
     except AttributeError:
         logging.warning(f"error_response is already a json.")
@@ -228,7 +230,7 @@ def print_error(error_response: requests.Response):
         except json.JSONDecodeError as e:
             logging.warning(error_converting_json_log_message.format(e))
             print(error_converting_json_print_message)
-            return
+            return error_converting_json_print_message
 
     # Api response doesn't follow the normal api error format
     try:
@@ -239,12 +241,15 @@ def print_error(error_response: requests.Response):
         if not errors:
             errors = http_error_codes.get(str(status_code), '')
 
-        logging.warning(f'Error: {errors}.')
-        print(f'Error: {errors}.')
+        error_message = f'Error: {errors}.'
+        logging.warning(error_message)
+        print(error_message)
     except KeyError:
-        keyerror_message = f'KeyError: {status_code}.'
-        logging.warning(keyerror_message)
-        print(keyerror_message)
+        error_message = f'KeyError: {status_code}.'
+        logging.warning(error_message)
+        print(error_message)
+
+    return error_message
 
 
 def login_to_md(session: requests.Session, config: configparser.ConfigParser):
@@ -288,18 +293,15 @@ def check_logged_in(
     """Check if still logged into mangadex."""
     auth_check_response = session.get(f'{md_auth_api_url}/check')
 
-    if auth_check_response.status_code != 200:
-        logging.warning(
-            f"Checking if logged in returned {auth_check_response.status_code}.")
-        print_error(auth_check_response)
-        return
+    if auth_check_response.status_code == 200:
+        auth_data = convert_json(auth_check_response)
+        if auth_data is not None:
+            if auth_data["isAuthenticated"]:
+                return
 
-    auth_data = convert_json(auth_check_response)
-    if auth_data is None:
-        return
-
-    if auth_data["isAuthenticated"]:
-        return
+    logging.warning(
+        f"Checking if logged in returned {auth_check_response.status_code}.")
+    print_error(auth_check_response)
 
     logging.info('Login token expired, logging in again.')
     login_to_md(session, config)
@@ -345,7 +347,6 @@ def update_database(
         (mplus_chapter_id,
          ))
     database_connection.commit()
-    print('Updated database.')
 
 
 def open_manga_id_map(manga_map_path: Path) -> Dict[UUID, List[int]]:
@@ -570,7 +571,7 @@ class ChapterDeleterProcess:
             """DELETE FROM chapters WHERE md_chapter_id=(?)""", (chapter["md_chapter_id"],))
         database_connection.commit()
 
-    def _remove_old_chapters(self, chapter: dict):
+    def _remove_old_chapter(self, chapter: dict):
         """Check if the chapters expired and remove off mangadex if they are."""
         # If the expiry date of the chapter is less than the current time and
         # the md chapter id is available, try delete
@@ -582,24 +583,25 @@ class ChapterDeleterProcess:
         if md_chapter_id is not None:
             delete_reponse = self.session.delete(
                 f'{mangadex_api_url}/chapter/{md_chapter_id}')
-            if delete_reponse.status_code == 404:
-                notfound_message = f"{deleted_message} already deleted."
-                logging.info(notfound_message)
-                print(notfound_message)
-            elif delete_reponse.status_code == 403:
-                unauthorised_message = f"You're not authorised to delete {deleted_message}"
-                logging.info(unauthorised_message)
-                print(unauthorised_message)
-            elif delete_reponse.status_code != 200:
-                logging.warning(
+
+            if delete_reponse.status_code != 200:
+                logging.error(
                     f"Couldn't delete expired chapter {deleted_message}")
                 print_error(delete_reponse)
-                time.sleep(self.chapter_delete_ratelimit)
-                return
+
+                if delete_reponse.status_code == 401:
+                    unauthorised_message = f"You're not logged in to delete this chapter {chapter}."
+                    logging.error(unauthorised_message)
+                    print(unauthorised_message)
+
+                    check_logged_in(self.session, config)
+                    time.sleep(mangadex_ratelimit_time)
+
+                    self._remove_old_chapter(chapter)
 
             if delete_reponse.status_code == 200:
                 logging.info(f'Deleted {chapter}.')
-                print(f'Deleted {deleted_message}')
+                print(f'----Deleted {deleted_message}')
 
         if self.on_db:
             self._delete_from_database(chapter)
@@ -616,7 +618,7 @@ class ChapterDeleterProcess:
                 check_logged_in(self.session, config)
                 time.sleep(mangadex_ratelimit_time)
 
-            self._remove_old_chapters(chapter_to_delete)
+            self._remove_old_chapter(chapter_to_delete)
 
     def delete(self):
         """Delete chapters non-concurrently."""
@@ -696,8 +698,12 @@ class MangaUploaderProcess:
         chapters_to_delete = self._remove_chapters_not_mplus()
         if chapters_to_delete:
             if self.deleter_process_object is not None:
-                self.deleter_process_object.chapters_to_delete.extend(
-                    chapters_to_delete)
+                if not self.deleter_process_object.chapters_to_delete:
+                    self.deleter_process_object.chapters_to_delete = chapters_to_delete
+                    self.deleter_process_object.delete_async()
+                else:
+                    self.deleter_process_object.chapters_to_delete.extend(
+                        chapters_to_delete)
             else:
                 self.second_process_object = ChapterDeleterProcess(
                     self.session, chapters_to_delete)
@@ -1107,6 +1113,7 @@ class BotProcess:
         self.updates = updates
         self.all_mplus_chapters = all_mplus_chapters
         self.first_process_object = first_process_object
+        self.processes: List[multiprocessing.Process] = []
 
     def _get_md_id(self,
                    manga_id_map: Dict[UUID,
@@ -1185,7 +1192,7 @@ def main():
         logging.info("No new updates found.")
         print("No new updates found.")
         if first_process is not None:
-            first_process.join(8)
+            first_process.join()
         return
 
     logging.info(f'Found {len(updates)} update(s).')
