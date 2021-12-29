@@ -3,8 +3,8 @@ import json
 import logging
 import math
 import multiprocessing
+import re
 import sqlite3
-import sys
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, date
@@ -15,10 +15,6 @@ from uuid import UUID
 import requests
 
 import proto.response_pb2 as response_pb
-
-if sys.version_info < (3, 9):
-    print("This program can only run Python 3.9 or higher.")
-    sys.exit()
 
 mplus_base_api_url = "https://jumpg-webapi.tokyo-cdn.com"
 mplus_chapter_url = 'https://mangaplus.shueisha.co.jp/viewer/{}'
@@ -49,7 +45,6 @@ logs_path = log_folder_path.joinpath(
     f'mplus_md_uploader_{str(date.today())}.log')
 logging.basicConfig(
     filename=logs_path,
-    encoding='utf-8',
     level=logging.DEBUG,
     format='%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s',
     datefmt='%Y-%m-%d:%H:%M:%S')
@@ -498,7 +493,8 @@ class ChapterUploaderProcess:
                         "title": self.chapter.chapter_title,
                         "translatedLanguage": self.chapter_language,
                         "externalUrl": mplus_chapter_url.format(
-                            self.chapter.chapter_id)},
+                            self.chapter.chapter_id),
+                        "publishAt": datetime.fromtimestamp(self.chapter.chapter_expire).strftime('%Y-%m-%dT%H:%M:%S%z')},
                     "pageOrder": []})
 
             if chapter_commit_response.status_code == 200:
@@ -508,7 +504,7 @@ class ChapterUploaderProcess:
 
                 if chapter_commit_response_json is not None:
                     succesful_upload_id = chapter_commit_response_json["data"]["id"]
-                    succesful_upload_message = f"Committed {succesful_upload_id} for {self.manga_generic_error_message}."
+                    succesful_upload_message = f"Committed {succesful_upload_id}: {self.chapter.chapter_id} for {self.manga_generic_error_message}."
                     logging.info(succesful_upload_message)
                     print(succesful_upload_message)
                     update_database(
@@ -988,7 +984,7 @@ class MPlusAPI:
         """Returns the chapter number without the un-needed # or 0."""
         stripped = str(number).strip('#')
 
-        parts = stripped.split('.')
+        parts = re.split('\.|\-', stripped)
         parts[0] = '0' if len(parts[0].lstrip(
             '0')) == 0 else parts[0].lstrip('0')
         stripped = '.'.join(parts)
