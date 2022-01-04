@@ -240,7 +240,7 @@ def print_error(error_response: requests.Response) -> str:
         logging.warning(error_message)
         print(error_message)
     except KeyError:
-        error_message = f'KeyError: {status_code}.'
+        error_message = f'KeyError {status_code}: {error_json}.'
         logging.warning(error_message)
         print(error_message)
 
@@ -676,10 +676,10 @@ class MangaUploaderProcess:
                 manga_id=self.mangadex_manga_id,
                 md_chapter_id=md_chapter_id)
 
-            update_database(
-                self.database_connection,
-                expired_chapter_object,
-                md_chapter_id)
+            # update_database(
+            #     self.database_connection,
+            #     expired_chapter_object,
+            #     md_chapter_id)
             chapters_to_delete.append(vars(expired_chapter_object))
 
         return chapters_to_delete
@@ -695,15 +695,14 @@ class MangaUploaderProcess:
         chapters_to_delete = self._remove_chapters_not_mplus()
         if chapters_to_delete:
             if self.deleter_process_object is not None:
-                if not self.deleter_process_object.chapters_to_delete:
-                    self.deleter_process_object.chapters_to_delete = chapters_to_delete
-                    if not self.deleter_process_object.chapter_delete_process.is_alive():
-                        self.deleter_process_object.delete_async()
+                if not self.deleter_process_object.chapter_delete_process.is_alive():
+                    if not self.deleter_process_object.chapters_to_delete:
+                        self.deleter_process_object.chapters_to_delete = chapters_to_delete
                     else:
-                        self.deleter_process_object.chapter_delete_process.start()
+                        self.deleter_process_object.chapters_to_delete.extend(chapters_to_delete)
+                    self.deleter_process_object.delete_async()
                 else:
-                    self.deleter_process_object.chapters_to_delete.extend(
-                        chapters_to_delete)
+                    self.deleter_process_object.chapters_to_delete.extend(chapters_to_delete)
             else:
                 self.second_process_object = ChapterDeleterProcess(
                     self.session, chapters_to_delete)
@@ -715,7 +714,7 @@ class MangaUploaderProcess:
         for count, chapter in enumerate(self.chapters, start=1):
             chapter: Chapter = chapter
             # Delete existing upload session if exists
-            if not self.skipped_chapter and count % 5 == 0:
+            if not self.skipped_chapter and count % 3 == 0:
                 check_logged_in(self.session, config)
                 time.sleep(mangadex_ratelimit_time)
 
@@ -1060,6 +1059,36 @@ class MPlusAPI:
                 chap_number) for chap_number in chapter_number.split(',')]
         return chapter_number_split
 
+    def _normalise_chapter_title(self, chapter) -> Optional[str]:
+        colon_regex = r'^.+:\s?'
+        no_title_regex = r'^\S+\s?\d+(?:\,\d{0,2})?$'
+        hashtag_regex = r'^(?:\S+\s?)?#\d+(?:\,\d{0,2})?\s'
+        period_regex = r'^(?:\S+\s?)?\d+(?:\,\d{0,2})?\s?[\.\/]\s'
+        spaces_regex = r'^(?:\S+\s?)?\d+(?:\,\d{0,2})?\s'
+
+        title = str(chapter.chapter_name)
+        normalised_title = title
+        pattern_to_use = None
+        replace_string = ''
+
+        if ':' in title:
+            pattern_to_use = colon_regex
+        elif re.match(no_title_regex, title):
+            pattern_to_use = no_title_regex
+        elif re.match(hashtag_regex, title):
+            pattern_to_use = hashtag_regex
+        elif re.match(period_regex, title):
+            pattern_to_use = period_regex
+        elif re.match(spaces_regex, title):
+            pattern_to_use = spaces_regex
+
+        if pattern_to_use is not None:
+            normalised_title = re.sub(pattern=pattern_to_use, repl=replace_string, string=title, flags=re.I)
+
+        if normalised_title == '':
+            normalised_title = None
+        return normalised_title
+
     def get_latest_chapters(
             self,
             manga_chapters_lists: list,
@@ -1081,6 +1110,8 @@ class MPlusAPI:
 
                 chapter_number_split = self._normalise_chapter_number(
                     chapters, chapter)
+ 
+                chapter_title = self._normalise_chapter_title(chapter)
 
                 # MPlus sometimes joins two chapters as one, upload to md as
                 # two different chapters
@@ -1089,7 +1120,7 @@ class MPlusAPI:
                         Chapter(
                             chapter_id=chapter.chapter_id,
                             chapter_timestamp=chapter.start_timestamp,
-                            chapter_title=chapter.chapter_name,
+                            chapter_title=chapter_title,
                             chapter_expire=chapter.end_timestamp,
                             chapter_number=chap_number,
                             chapter_language=mplus_language_map.get(
