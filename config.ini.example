@@ -8,3 +8,4 @@ MANGADEX_RATELIMIT_TIME=2
 MANGADEX_API_URL=https://api.mangadex.org
 DATABASE_PATH=chapters.db
 MANGA_ID_MAP_PATH=manga.json
+TITLE_REGEX_PATH=title_regex.json

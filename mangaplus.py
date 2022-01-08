@@ -63,6 +63,10 @@ def load_config_info(config: configparser.ConfigParser):
         logging.info('Manga id map path empty, using default.')
         config["User Set"]["manga_id_map_path"] = 'manga.json'
 
+    if config["User Set"].get("title_regex_path", '') == '':
+        logging.info('Manga id map path empty, using default.')
+        config["User Set"]["title_regex_path"] = 'title_regex.json'
+
 
 def open_config_file() -> configparser.ConfigParser:
     # Open config file and read values
@@ -103,6 +107,15 @@ class Manga:
     manga_name: str
     manga_language: str
 
+    def __post_init__(self):
+        try:
+            self.manga_language = int(self.manga_language)
+        except ValueError:
+            pass
+        else:
+            self.manga_language = mplus_language_map.get(
+                str(self.manga_language), "NULL")
+
 
 @dataclass()
 class Chapter:
@@ -113,6 +126,7 @@ class Chapter:
     chapter_language: str
     chapter_id: int = field(default=None)
     manga_id: int = field(default=None)
+    manga: Manga = field(default=None)
     md_chapter_id: str = field(default=None)
 
     def __post_init__(self):
@@ -127,7 +141,7 @@ class Chapter:
 
 def make_tables(database_connection: sqlite3.Connection):
     """Make the database table."""
-    logging.error("Creating new tables for database.")
+    logging.info("Creating new tables for database.")
     database_connection.execute(
         """CREATE TABLE IF NOT EXISTS chapters
         (chapter_id         INTEGER,
@@ -376,7 +390,7 @@ class ChapterUploaderProcess:
             self.chapter_language = mplus_language_map.get(
                 str(self.chapter_language), "NULL")
 
-        self.manga_generic_error_message = f'manga {self.mangadex_manga_id}: {self.chapter.manga_id}, chapter {self.chapter.chapter_number}, language {self.chapter_language}'
+        self.manga_generic_error_message = f'Manga {chapter.manga.manga_name}, {self.mangadex_manga_id}: {self.chapter.manga_id}, chapter {self.chapter.chapter_number}, language {self.chapter_language}'
         self.upload_retry_total = 3
 
     def _remove_upload_session(self, upload_session_id: UUID):
@@ -493,8 +507,7 @@ class ChapterUploaderProcess:
                         "title": self.chapter.chapter_title,
                         "translatedLanguage": self.chapter_language,
                         "externalUrl": mplus_chapter_url.format(
-                            self.chapter.chapter_id),
-                        "publishAt": datetime.fromtimestamp(self.chapter.chapter_expire).strftime('%Y-%m-%dT%H:%M:%S%z')},
+                            self.chapter.chapter_id)},
                     "pageOrder": []})
 
             if chapter_commit_response.status_code == 200:
@@ -547,13 +560,17 @@ class ChapterDeleterProcess:
             on_db: bool = True):
         self.session = session
         self.on_db = on_db
-        self.chapters_to_delete = [
-            dict(x) for x in posted_chapters if datetime.fromtimestamp(
-                x["chapter_expire"]) <= datetime.now()]
+        self.posted_chapters = posted_chapters
+        self.chapters_to_delete = self.get_chapter_to_delete()
         self.chapter_delete_ratelimit = 8
         self.chapter_delete_process = None
 
         logging.info(f"Chapters to delete: {self.chapters_to_delete}")
+
+    def get_chapter_to_delete(self) -> List[dict]:
+        return [
+            dict(x) for x in self.posted_chapters if datetime.fromtimestamp(
+                x["chapter_expire"]) <= datetime.now()]
 
     def _delete_from_database(self, chapter: dict):
         """Move the chapter from the chapters table to the deleted_chapters table."""
@@ -676,10 +693,10 @@ class MangaUploaderProcess:
                 manga_id=self.mangadex_manga_id,
                 md_chapter_id=md_chapter_id)
 
-            # update_database(
-            #     self.database_connection,
-            #     expired_chapter_object,
-            #     md_chapter_id)
+            update_database(
+                self.database_connection,
+                expired_chapter_object,
+                md_chapter_id)
             chapters_to_delete.append(vars(expired_chapter_object))
 
         return chapters_to_delete
@@ -699,10 +716,12 @@ class MangaUploaderProcess:
                     if not self.deleter_process_object.chapters_to_delete:
                         self.deleter_process_object.chapters_to_delete = chapters_to_delete
                     else:
-                        self.deleter_process_object.chapters_to_delete.extend(chapters_to_delete)
+                        self.deleter_process_object.chapters_to_delete.extend(
+                            chapters_to_delete)
                     self.deleter_process_object.delete_async()
                 else:
-                    self.deleter_process_object.chapters_to_delete.extend(chapters_to_delete)
+                    self.deleter_process_object.chapters_to_delete.extend(
+                        chapters_to_delete)
             else:
                 self.second_process_object = ChapterDeleterProcess(
                     self.session, chapters_to_delete)
@@ -841,6 +860,10 @@ class MPlusAPI:
         self.all_mplus_chapters: List[Chapter] = []
         self.untracked_manga: List[Manga] = []
 
+        self.title_regexes = self._open_title_regex(
+            Path(config["User Set"]["title_regex_path"]))
+        self.empty_titles = self.title_regexes.get('empty', [])
+
         self.get_mplus_updated_manga()
         self.get_mplus_updates()
 
@@ -924,39 +947,64 @@ class MPlusAPI:
             if process is not None:
                 process.join()
 
+    def _open_title_regex(
+            self, title_regex_path: Path) -> Dict[str, List[int]]:
+        """Open the chapter title regex."""
+        try:
+            with open(title_regex_path, 'r') as title_regex_fp:
+                title_regexes = json.load(title_regex_fp)
+            logging.info('Opened title regex file.')
+        except json.JSONDecodeError:
+            logging.critical('Title regex file is corrupted.')
+            raise json.JSONDecodeError("Title regex file is corrupted.")
+        except FileNotFoundError:
+            logging.critical('Title regex file is missing.')
+            raise FileNotFoundError("Couldn't file title regex file.")
+        return title_regexes
+
     def _chapter_updates(self, mangas: list):
         """Get the updated chapters from each manga."""
         for manga in mangas:
             manga_response = self._request_from_api(manga_id=manga)
-            if manga_response is not None:
-                manga_response_parsed = self._get_proto_response(
-                    manga_response)
+            if manga_response is None:
+                continue
 
-                manga_chapters = manga_response_parsed.success.manga_detail
-                manga_name = manga_chapters.manga.manga_name
-                manga_chapters_lists = []
+            manga_response_parsed = self._get_proto_response(
+                manga_response)
 
+            manga_chapters = manga_response_parsed.success.manga_detail
+            manga_object = Manga(
+                manga_id=manga_chapters.manga.manga_id,
+                manga_name=manga_chapters.manga.manga_name,
+                manga_language=manga_chapters.manga.language)
+            manga_chapters_lists = []
+
+            manga_chapters_lists.append(
+                list(manga_chapters.first_chapter_list))
+            if len(manga_chapters.last_chapter_list) > 0:
                 manga_chapters_lists.append(
-                    list(manga_chapters.first_chapter_list))
-                if len(manga_chapters.last_chapter_list) > 0:
-                    manga_chapters_lists.append(
-                        list(manga_chapters.last_chapter_list))
+                    list(manga_chapters.last_chapter_list))
 
-                all_chapters = self.get_latest_chapters(
-                    manga_chapters_lists, manga_chapters, self.posted_chapters_ids, True)
-                self.all_mplus_chapters.extend(all_chapters)
+            all_chapters = self.get_latest_chapters(
+                manga_chapters_lists,
+                manga_chapters,
+                self.posted_chapters_ids,
+                manga_object,
+                True)
+            self.all_mplus_chapters.extend(all_chapters)
 
-                updated_chapters = self.get_latest_chapters(
-                    manga_chapters_lists, manga_chapters, self.posted_chapters_ids)
-                logging.info(updated_chapters)
+            updated_chapters = self.get_latest_chapters(
+                manga_chapters_lists, manga_chapters, self.posted_chapters_ids, manga_object)
+            logging.info(updated_chapters)
 
-                if updated_chapters:
-                    print(f'Manga {manga_name}: {manga}.')
-                for update in updated_chapters:
-                    print(
-                        f'--Found {update.chapter_id} chapter {update.chapter_number} language {update.chapter_language}.')
+            if updated_chapters:
+                print(
+                    f'Manga {manga_object.manga_name}: {manga_object.manga_id}.')
+            for update in updated_chapters:
+                print(
+                    f'--Found {update.chapter_id} chapter: {update.chapter_number} language: {update.chapter_language} title: {update.chapter_title}.')
 
-                self.updated_chapters.extend(updated_chapters)
+            self.updated_chapters.extend(updated_chapters)
 
     def _get_surrounding_chapter(
             self,
@@ -983,7 +1031,7 @@ class MPlusAPI:
         """Returns the chapter number without the un-needed # or 0."""
         stripped = str(number).strip('#')
 
-        parts = re.split('\.|\-', stripped)
+        parts = re.split('\\.|\\-', stripped)
         parts[0] = '0' if len(parts[0].lstrip(
             '0')) == 0 else parts[0].lstrip('0')
         stripped = '.'.join(parts)
@@ -1071,7 +1119,9 @@ class MPlusAPI:
         pattern_to_use = None
         replace_string = ''
 
-        if ':' in title:
+        if chapter.manga_id in self.empty_titles:
+            normalised_title = None
+        elif ':' in title:
             pattern_to_use = colon_regex
         elif re.match(no_title_regex, title):
             pattern_to_use = no_title_regex
@@ -1083,7 +1133,11 @@ class MPlusAPI:
             pattern_to_use = spaces_regex
 
         if pattern_to_use is not None:
-            normalised_title = re.sub(pattern=pattern_to_use, repl=replace_string, string=title, flags=re.I)
+            normalised_title = re.sub(
+                pattern=pattern_to_use,
+                repl=replace_string,
+                string=title,
+                flags=re.I)
 
         if normalised_title == '':
             normalised_title = None
@@ -1094,6 +1148,7 @@ class MPlusAPI:
             manga_chapters_lists: list,
             manga_chapters,
             posted_chapters: List[int],
+            manga_object: Manga,
             all_chapters: bool = False) -> List[Chapter]:
         """Get the latest un-uploaded chapters."""
         updated_chapters = []
@@ -1110,7 +1165,7 @@ class MPlusAPI:
 
                 chapter_number_split = self._normalise_chapter_number(
                     chapters, chapter)
- 
+
                 chapter_title = self._normalise_chapter_title(chapter)
 
                 # MPlus sometimes joins two chapters as one, upload to md as
@@ -1127,7 +1182,8 @@ class MPlusAPI:
                                 str(
                                     manga_chapters.manga.language),
                                 "NULL"),
-                            manga_id=manga_chapters.manga.manga_id))
+                            manga_id=manga_chapters.manga.manga_id,
+                            manga=manga_object))
 
         return updated_chapters
 
@@ -1162,7 +1218,8 @@ class BotProcess:
         for chapter in updates:
             md_id = self._get_md_id(manga_id_map, chapter.manga_id)
             if md_id is None:
-                logging.warning(f'No mangadex id found for mplus id {chapter.manga_id}.')
+                logging.warning(
+                    f'No mangadex id found for mplus id {chapter.manga_id}.')
                 continue
 
             try:
@@ -1227,7 +1284,8 @@ def main():
         logging.info(f'Found {len(updates)} update(s).')
         print(f'Found {len(updates)} update(s).')
         BotProcess(session, updates, all_mplus_chapters,
-                first_process_object).upload_chapters()
+                   first_process_object).upload_chapters()
+        print('Finished processing the update(s).')
 
     if first_process is not None:
         first_process.join()
