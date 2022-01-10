@@ -95,7 +95,6 @@ logging.info('Opened database.')
 
 mangadex_api_url = config["Paths"]["mangadex_api_url"]
 md_upload_api_url = f'{mangadex_api_url}/upload'
-md_auth_api_url = f'{mangadex_api_url}/auth'
 
 try:
     mangadex_ratelimit_time = int(
@@ -209,7 +208,7 @@ def convert_json(response_to_convert: requests.Response) -> Optional[dict]:
             print(critical_decode_error_message)
             return
 
-    logging.info("Convert api response into json.")
+    logging.debug("Convert api response into json.")
     return converted_response
 
 
@@ -273,6 +272,7 @@ class AuthMD:
         self.config = config
         self.successful_login = False
         self.token_file = root_path.joinpath(config["Paths"]["mdauth_path"])
+        self.md_auth_api_url = f'{mangadex_api_url}/auth'
 
     def _save_session(self, token: dict):
         """Save the session and refresh tokens."""
@@ -284,35 +284,35 @@ class AuthMD:
         """Update the session headers to include the auth token."""
         self.session.headers = {"Authorization": f"Bearer {session_token}"}
 
-    def _refresh_token(self, token: dict) -> bool:
+    def _refresh_token(self, refresh_token: str) -> bool:
         """Use the refresh token to get a new session token."""
         refresh_response = self.session.post(
-            f'{md_auth_api_url}/refresh',
+            f'{self.md_auth_api_url}/refresh',
             json={
-                "token": token["refresh"]})
+                "token": refresh_token})
 
         if refresh_response.status_code == 200:
             refresh_response_json = convert_json(refresh_response)
             if refresh_response_json is not None:
                 refresh_data = refresh_response_json["token"]
 
-                self._update_headers(token["session"])
+                self._update_headers(refresh_data["session"])
                 self._save_session(refresh_data)
                 return True
             return False
         elif refresh_response.status_code in (401, 403):
             error = print_error(refresh_response)
             logging.warning(
-                f"Couldn't login using refresh token, login using your account. Error: {error}")
+                f"Couldn't login using refresh token, logging in using your account. Error: {error}")
             return self._login_using_details()
         else:
             error = print_error(refresh_response)
             logging.error(f"Couldn't refresh token. Error: {error}")
             return False
 
-    def _check_login(self, token: dict) -> bool:
+    def _check_login(self, refresh_token: Optional[str]) -> bool:
         """Try login using saved session token."""
-        auth_check_response = self.session.get(f'{md_auth_api_url}/check')
+        auth_check_response = self.session.get(f'{self.md_auth_api_url}/check')
 
         if auth_check_response.status_code == 200:
             auth_data = convert_json(auth_check_response)
@@ -321,7 +321,9 @@ class AuthMD:
                     logging.info('Logged in using saved token.')
                     return True
 
-        return self._refresh_token(token)
+        if refresh_token is None:
+            return self._login_using_details()
+        return self._refresh_token(refresh_token)
 
     def _login_using_details(self) -> bool:
         """Login using account details."""
@@ -334,7 +336,7 @@ class AuthMD:
             raise Exception(critical_message)
 
         login_response = self.session.post(
-            f'{md_auth_api_url}/login',
+            f'{self.md_auth_api_url}/login',
             json={
                 "username": username,
                 "password": password})
@@ -342,9 +344,9 @@ class AuthMD:
         if login_response.status_code == 200:
             login_response_json = convert_json(login_response)
             if login_response_json is not None:
-                token = login_response_json["token"]
-                self._update_headers(token["session"])
-                self._save_session(token)
+                login_token = login_response_json["token"]
+                self._update_headers(login_token["session"])
+                self._save_session(login_token)
                 return True
 
         error = print_error(login_response)
@@ -361,7 +363,7 @@ class AuthMD:
                 token = json.load(login_file)
 
             self._update_headers(token["session"])
-            logged_in = self._check_login(token)
+            logged_in = self._check_login(token["refresh"])
         except (FileNotFoundError, json.JSONDecodeError):
             logging.error(
                 "Couldn't find the file, trying to login using your account details.")
@@ -473,10 +475,10 @@ class ChapterUploaderProcess:
                         existing_session_json["data"]["id"])
                     return
             elif existing_session.status_code == 404:
-                logging.warning("No existing upload session found.")
+                logging.info("No existing upload session found.")
                 return
             elif existing_session.status_code == 401:
-                logging.warning("Not logged in, logging in and retrying.")
+                logging.error("Not logged in, logging in and retrying.")
                 self.md_auth_object.login()
                 removal_retry += 1
             else:
@@ -511,6 +513,7 @@ class ChapterUploaderProcess:
         chapter_upload_session_retry = 0
         chapter_upload_session_successful = False
         while chapter_upload_session_retry < self.upload_retry_total:
+            # Delete existing upload session if exists
             self._delete_exising_upload_session()
             time.sleep(mangadex_ratelimit_time)
             # Start the upload session
@@ -795,7 +798,6 @@ class MangaUploaderProcess:
         self.skipped_chapter = False
         for count, chapter in enumerate(self.chapters, start=1):
             chapter: Chapter = chapter
-            # Delete existing upload session if exists
             if not self.skipped_chapter and count % 3 == 0:
                 self.md_auth_object.login()
                 time.sleep(mangadex_ratelimit_time)
@@ -1315,7 +1317,7 @@ class BotProcess:
             self.all_mplus_chapters)
         processes = []
 
-        for mangadex_manga_id in updated_manga_chapters:
+        for index, mangadex_manga_id in enumerate(updated_manga_chapters, start=1):
             # Get each manga's uploaded chapters on mangadex
             manga_uploader = MangaUploaderProcess(
                 database_connection,
@@ -1327,6 +1329,9 @@ class BotProcess:
                 self.first_process_object,
                 self.md_auth_object)
             manga_uploader.start_manga_uploading_process()
+
+            if index % 10 == 0:
+                self.md_auth_object.login()
 
 
 def main():
