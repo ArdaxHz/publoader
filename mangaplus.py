@@ -6,7 +6,7 @@ import multiprocessing
 import re
 import sqlite3
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, date
 from pathlib import Path
 from typing import Any, Dict, Optional, List, Union
@@ -50,28 +50,32 @@ logging.basicConfig(
     datefmt='%Y-%m-%d:%H:%M:%S')
 
 
-def load_config_info(config: configparser.ConfigParser):
-    if config["User Set"].get("database_path", '') == '':
+def load_config_info(config: configparser.RawConfigParser):
+    if config["Paths"].get("database_path", '') == '':
         logging.warning('Database path empty, using default.')
-        config["User Set"]["database_path"] = 'chapters.db'
+        config["Paths"]["database_path"] = 'chapters.db'
 
-    if config["User Set"].get("mangadex_api_url", '') == '':
+    if config["Paths"].get("mangadex_api_url", '') == '':
         logging.warning('Mangadex api path empty, using default.')
-        config["User Set"]["mangadex_api_url"] = 'https://api.mangadex.org'
+        config["Paths"]["mangadex_api_url"] = 'https://api.mangadex.org'
 
-    if config["User Set"].get("manga_id_map_path", '') == '':
+    if config["Paths"].get("manga_id_map_path", '') == '':
         logging.info('Manga id map path empty, using default.')
-        config["User Set"]["manga_id_map_path"] = 'manga.json'
+        config["Paths"]["manga_id_map_path"] = 'manga.json'
 
-    if config["User Set"].get("title_regex_path", '') == '':
-        logging.info('Manga id map path empty, using default.')
-        config["User Set"]["title_regex_path"] = 'title_regex.json'
+    if config["Paths"].get("title_regex_path", '') == '':
+        logging.info('Title regex map path empty, using default.')
+        config["Paths"]["title_regex_path"] = 'title_regex.json'
+
+    if config["Paths"].get("mdauth_path", '') == '':
+        logging.info('mdauth path empty, using default.')
+        config["Paths"]["mdauth_path"] = '.mdauth'
 
 
-def open_config_file() -> configparser.ConfigParser:
+def open_config_file() -> configparser.RawConfigParser:
     # Open config file and read values
     if config_file_path.exists():
-        config = configparser.ConfigParser()
+        config = configparser.RawConfigParser()
         config.read(config_file_path)
         logging.info('Loaded config file.')
     else:
@@ -84,12 +88,12 @@ def open_config_file() -> configparser.ConfigParser:
 
 config = open_config_file()
 
-database_path = Path(config["User Set"]["database_path"])
+database_path = Path(config["Paths"]["database_path"])
 database_connection = database_connection = sqlite3.connect(database_path)
 database_connection.row_factory = sqlite3.Row
 logging.info('Opened database.')
 
-mangadex_api_url = config["User Set"]["mangadex_api_url"]
+mangadex_api_url = config["Paths"]["mangadex_api_url"]
 md_upload_api_url = f'{mangadex_api_url}/upload'
 md_auth_api_url = f'{mangadex_api_url}/auth'
 
@@ -261,59 +265,115 @@ def print_error(error_response: requests.Response) -> str:
     return error_message
 
 
-def login_to_md(session: requests.Session, config: configparser.ConfigParser):
-    """Login to MangaDex using the credentials found in the env file."""
-    username = config["MangaDex Credentials"]["mangadex_username"]
-    password = config["MangaDex Credentials"]["mangadex_password"]
+class AuthMD:
 
-    if username == '' or password == '':
-        critical_message = 'Login details missing.'
-        logging.critical(critical_message)
-        raise Exception(critical_message)
+    def __init__(self, session: requests.Session,
+                 config: configparser.RawConfigParser):
+        self.session = session
+        self.config = config
+        self.successful_login = False
+        self.token_file = root_path.joinpath(config["Paths"]["mdauth_path"])
 
-    login_response = session.post(
-        f'{md_auth_api_url}/login',
-        json={
-            "username": username,
-            "password": password})
+    def _save_session(self, token: dict):
+        """Save the session and refresh tokens."""
+        with open(self.token_file, 'w') as login_file:
+            login_file.write(json.dumps(token, indent=4))
+        logging.debug('Saved mdauth file.')
 
-    if login_response.status_code != 200:
-        login_response_error_message = f"Couldn't login, mangadex returned an error {login_response.status_code}."
-        logging.critical(login_response_error_message)
-        print_error(login_response)
-        raise Exception(login_response_error_message)
+    def _update_headers(self, session_token: str):
+        """Update the session headers to include the auth token."""
+        self.session.headers = {"Authorization": f"Bearer {session_token}"}
 
-    # Update requests session with headers to always be logged in
-    login_response_json = convert_json(login_response)
-    if login_response_json is None:
-        login_response_json_message = "Couldn't convert login api response into a json."
-        logging.error(login_response_json_message)
-        raise Exception(login_response_json_message)
+    def _refresh_token(self, token: dict) -> bool:
+        """Use the refresh token to get a new session token."""
+        refresh_response = self.session.post(
+            f'{md_auth_api_url}/refresh',
+            json={
+                "token": token["refresh"]})
 
-    session_token = login_response_json["token"]["session"]
-    session.headers.update({"Authorization": f"Bearer {session_token}"})
-    logging.info(f'Logged into mangadex.')
-    print('Logged in.')
+        if refresh_response.status_code == 200:
+            refresh_response_json = convert_json(refresh_response)
+            if refresh_response_json is not None:
+                refresh_data = refresh_response_json["token"]
 
+                self._update_headers(token["session"])
+                self._save_session(refresh_data)
+                return True
+            return False
+        elif refresh_response.status_code in (401, 403):
+            error = print_error(refresh_response)
+            logging.warning(
+                f"Couldn't login using refresh token, login using your account. Error: {error}")
+            return self._login_using_details()
+        else:
+            error = print_error(refresh_response)
+            logging.error(f"Couldn't refresh token. Error: {error}")
+            return False
 
-def check_logged_in(
-        session: requests.Session,
-        config: configparser.ConfigParser):
-    """Check if still logged into mangadex."""
-    auth_check_response = session.get(f'{md_auth_api_url}/check')
+    def _check_login(self, token: dict) -> bool:
+        """Try login using saved session token."""
+        auth_check_response = self.session.get(f'{md_auth_api_url}/check')
 
-    if auth_check_response.status_code == 200:
-        auth_data = convert_json(auth_check_response)
-        if auth_data is not None:
-            if auth_data["isAuthenticated"]:
-                return
+        if auth_check_response.status_code == 200:
+            auth_data = convert_json(auth_check_response)
+            if auth_data is not None:
+                if auth_data["isAuthenticated"]:
+                    logging.info('Logged in using saved token.')
+                    return True
 
-    logging.warning(
-        f"Checking if logged in returned {auth_check_response.status_code}.")
-    print_error(auth_check_response)
+            return self._refresh_token(token)
 
-    logging.info('Login token expired, logging in again.')
-    login_to_md(session, config)
+    def _login_using_details(self) -> bool:
+        """Login using account details."""
+        username = self.config["MangaDex Credentials"]["mangadex_username"]
+        password = self.config["MangaDex Credentials"]["mangadex_password"]
+
+        if username == '' or password == '':
+            critical_message = 'Login details missing.'
+            logging.critical(critical_message)
+            raise Exception(critical_message)
+
+        login_response = self.session.post(
+            f'{md_auth_api_url}/login',
+            json={
+                "username": username,
+                "password": password})
+
+        if login_response.status_code == 200:
+            login_response_json = convert_json(login_response)
+            if login_response_json is not None:
+                token = login_response_json["token"]
+                self._update_headers(token["session"])
+                self._save_session(token)
+                return True
+
+        error = print_error(login_response)
+        logging.error(
+            f"Couldn't login to mangadex using the details provided. Error: {error}.")
+        return False
+
+    def login(self):
+        """Login to MD account using details or saved token."""
+        logging.info('Trying to login through the .mdauth file.')
+
+        try:
+            with open(self.token_file, 'r') as login_file:
+                token = json.load(login_file)
+
+            self._update_headers(token["session"])
+            logged_in = self._check_login(token)
+        except (FileNotFoundError, json.JSONDecodeError):
+            logging.error(
+                "Couldn't find the file, trying to login using your account details.")
+            logged_in = self._login_using_details()
+
+        if logged_in:
+            self.successful_login = True
+            logging.info(f'Logged into mangadex.')
+            print('Logged in.')
+        else:
+            logging.critical("Couldn't login.")
+            raise Exception("Couldn't login.")
 
 
 def update_database(
@@ -380,17 +440,16 @@ class ChapterUploaderProcess:
             database_connection: sqlite3.Connection,
             session: requests.Session,
             mangadex_manga_id: UUID,
-            chapter: Chapter):
+            chapter: Chapter,
+            md_auth_object: AuthMD):
         self.database_connection = database_connection
         self.session = session
         self.mangadex_manga_id = mangadex_manga_id
         self.chapter = chapter
+        self.md_auth_object = md_auth_object
         self.chapter_language = self.chapter.chapter_language
-        if isinstance(self.chapter_language, int):
-            self.chapter_language = mplus_language_map.get(
-                str(self.chapter_language), "NULL")
 
-        self.manga_generic_error_message = f'Manga {chapter.manga.manga_name}, {self.mangadex_manga_id}: {self.chapter.manga_id}, chapter {self.chapter.chapter_number}, language {self.chapter_language}'
+        self.manga_generic_error_message = f'Manga: {chapter.manga.manga_name}, {self.mangadex_manga_id} - {self.chapter.manga_id}, chapter: {self.chapter.chapter_number}, language: {self.chapter_language}, title: {self.chapter.chapter_title}'
         self.upload_retry_total = 3
 
     def _remove_upload_session(self, upload_session_id: UUID):
@@ -418,7 +477,7 @@ class ChapterUploaderProcess:
                 return
             elif existing_session.status_code == 401:
                 logging.warning("Not logged in, logging in and retrying.")
-                login_to_md(self.session, config)
+                self.md_auth_object.login()
                 removal_retry += 1
             else:
                 removal_retry += 1
@@ -462,7 +521,7 @@ class ChapterUploaderProcess:
                     "groups": [mplus_group]})
 
             if upload_session_response.status_code == 401:
-                login_to_md(self.session, config)
+                self.md_auth_object.login()
 
             elif upload_session_response.status_code != 200:
                 print_error(upload_session_response)
@@ -517,7 +576,7 @@ class ChapterUploaderProcess:
 
                 if chapter_commit_response_json is not None:
                     succesful_upload_id = chapter_commit_response_json["data"]["id"]
-                    succesful_upload_message = f"Committed {succesful_upload_id}: {self.chapter.chapter_id} for {self.manga_generic_error_message}."
+                    succesful_upload_message = f"Committed {succesful_upload_id} - {self.chapter.chapter_id} for {self.manga_generic_error_message}."
                     logging.info(succesful_upload_message)
                     print(succesful_upload_message)
                     update_database(
@@ -533,7 +592,7 @@ class ChapterUploaderProcess:
                 return True
 
             elif chapter_commit_response.status_code == 401:
-                login_to_md(self.session, config)
+                self.md_auth_object.login()
 
             else:
                 logging.warning(
@@ -544,7 +603,7 @@ class ChapterUploaderProcess:
             time.sleep(mangadex_ratelimit_time)
 
         if not succesful_upload:
-            error_message = f"Couldn't commit {upload_session_id}, manga {self.mangadex_manga_id}: {self.chapter.manga_id} chapter {self.chapter.chapter_number}."
+            error_message = f"Couldn't commit {upload_session_id}, manga {self.mangadex_manga_id} - {self.chapter.manga_id} chapter {self.chapter.chapter_number}."
             logging.error(error_message)
             print(error_message)
             self._remove_upload_session(upload_session_id)
@@ -557,10 +616,12 @@ class ChapterDeleterProcess:
             self,
             session: requests.Session,
             posted_chapters: List[dict],
-            on_db: bool = True):
+            md_auth_object: AuthMD,
+            on_db: bool = True,):
         self.session = session
         self.on_db = on_db
         self.posted_chapters = posted_chapters
+        self.md_auth_object = md_auth_object
         self.chapters_to_delete = self.get_chapter_to_delete()
         self.chapter_delete_ratelimit = 8
         self.chapter_delete_process = None
@@ -608,7 +669,7 @@ class ChapterDeleterProcess:
                     logging.error(unauthorised_message)
                     print(unauthorised_message)
 
-                    check_logged_in(self.session, config)
+                    self.md_auth_object.login()
                     time.sleep(mangadex_ratelimit_time)
 
                     self._remove_old_chapter(chapter)
@@ -629,7 +690,7 @@ class ChapterDeleterProcess:
         for count, chapter_to_delete in enumerate(
                 self.chapters_to_delete, start=1):
             if count == 1 or count % 3 == 0:
-                check_logged_in(self.session, config)
+                self.md_auth_object.login()
                 time.sleep(mangadex_ratelimit_time)
 
             self._remove_old_chapter(chapter_to_delete)
@@ -656,7 +717,8 @@ class MangaUploaderProcess:
             all_manga_chapters: list,
             processes: list,
             mangadex_manga_id: UUID,
-            deleter_process_object: Optional['ChapterDeleterProcess']):
+            deleter_process_object: Optional['ChapterDeleterProcess'],
+            md_auth_object: AuthMD):
 
         self.database_connection = database_connection
         self.session = session
@@ -665,6 +727,7 @@ class MangaUploaderProcess:
         self.processes = processes
         self.mangadex_manga_id = mangadex_manga_id
         self.deleter_process_object = deleter_process_object
+        self.md_auth_object = md_auth_object
 
         self.chapters: List[dict] = updated_manga_chapters[self.mangadex_manga_id]
         self.chapters_all: List[dict] = all_manga_chapters[self.mangadex_manga_id]
@@ -724,7 +787,7 @@ class MangaUploaderProcess:
                         chapters_to_delete)
             else:
                 self.second_process_object = ChapterDeleterProcess(
-                    self.session, chapters_to_delete)
+                    self.session, chapters_to_delete, self.md_auth_object)
                 self.second_process_object.delete()
 
     def start_manga_uploading_process(self):
@@ -734,11 +797,15 @@ class MangaUploaderProcess:
             chapter: Chapter = chapter
             # Delete existing upload session if exists
             if not self.skipped_chapter and count % 3 == 0:
-                check_logged_in(self.session, config)
+                self.md_auth_object.login()
                 time.sleep(mangadex_ratelimit_time)
 
             chapter_to_upload_process = ChapterUploaderProcess(
-                self.database_connection, self.session, self.mangadex_manga_id, chapter)
+                self.database_connection,
+                self.session,
+                self.mangadex_manga_id,
+                chapter,
+                self.md_auth_object)
 
             duplicate_chapter = chapter_to_upload_process.check_for_duplicate_chapter(
                 self.manga_chapters)
@@ -764,7 +831,7 @@ class MangaUploaderProcess:
             time.sleep(mangadex_ratelimit_time)
 
         if self.skipped != 0:
-            skipped_chapters_message = f'Skipped {self.skipped} chapters out of {len(self.chapters)} for manga {self.mangadex_manga_id}: {chapter.manga_id}.'
+            skipped_chapters_message = f'Skipped {self.skipped} chapters out of {len(self.chapters)} for manga {chapter.manga.manga_name}: {self.mangadex_manga_id} - {chapter.manga_id}.'
             logging.info(skipped_chapters_message)
             print(skipped_chapters_message)
 
@@ -861,7 +928,7 @@ class MPlusAPI:
         self.untracked_manga: List[Manga] = []
 
         self.title_regexes = self._open_title_regex(
-            Path(config["User Set"]["title_regex_path"]))
+            Path(config["Paths"]["title_regex_path"]))
         self.empty_titles = self.title_regexes.get('empty', [])
 
         self.get_mplus_updated_manga()
@@ -962,6 +1029,23 @@ class MPlusAPI:
             raise FileNotFoundError("Couldn't file title regex file.")
         return title_regexes
 
+    def _normalise_chapter_object(
+            self,
+            chapter_list,
+            manga_object: Manga) -> List[Chapter]:
+        """Return a list of chapter objects made from the api chapter lists."""
+        return [
+            Chapter(
+                chapter_id=chapter.chapter_id,
+                chapter_timestamp=chapter.start_timestamp,
+                chapter_title=chapter.chapter_name,
+                chapter_expire=chapter.end_timestamp,
+                chapter_number=chapter.chapter_number,
+                chapter_language=manga_object.manga_language,
+                manga_id=manga_object.manga_id,
+                manga=manga_object)
+            for chapter in chapter_list]
+
     def _chapter_updates(self, mangas: list):
         """Get the updated chapters from each manga."""
         for manga in mangas:
@@ -977,24 +1061,23 @@ class MPlusAPI:
                 manga_id=manga_chapters.manga.manga_id,
                 manga_name=manga_chapters.manga.manga_name,
                 manga_language=manga_chapters.manga.language)
-            manga_chapters_lists = []
 
-            manga_chapters_lists.append(
-                list(manga_chapters.first_chapter_list))
+            manga_chapters_lists = []
+            manga_chapters_lists.append(self._normalise_chapter_object(
+                list(manga_chapters.first_chapter_list), manga_object))
+
             if len(manga_chapters.last_chapter_list) > 0:
-                manga_chapters_lists.append(
-                    list(manga_chapters.last_chapter_list))
+                manga_chapters_lists.append(self._normalise_chapter_object(
+                    list(manga_chapters.last_chapter_list), manga_object))
 
             all_chapters = self.get_latest_chapters(
                 manga_chapters_lists,
-                manga_chapters,
                 self.posted_chapters_ids,
-                manga_object,
                 True)
             self.all_mplus_chapters.extend(all_chapters)
 
             updated_chapters = self.get_latest_chapters(
-                manga_chapters_lists, manga_chapters, self.posted_chapters_ids, manga_object)
+                manga_chapters_lists, self.posted_chapters_ids)
             logging.info(updated_chapters)
 
             if updated_chapters:
@@ -1002,17 +1085,16 @@ class MPlusAPI:
                     f'Manga {manga_object.manga_name}: {manga_object.manga_id}.')
             for update in updated_chapters:
                 print(
-                    f'--Found {update.chapter_id} chapter: {update.chapter_number} language: {update.chapter_language} title: {update.chapter_title}.')
+                    f'--Found {update.chapter_id}, chapter: {update.chapter_number}, language: {update.chapter_language}, title: {update.chapter_title}.')
 
             self.updated_chapters.extend(updated_chapters)
 
     def _get_surrounding_chapter(
             self,
-            chapters: list,
-            current_chapter,
-            next_chapter_search: bool = False) -> Optional[Any]:
-        """Find the previous and next chapter to the current."""
-        chapters = list(chapters)
+            chapters: List[Chapter],
+            current_chapter: Chapter,
+            next_chapter_search: bool = False) -> Optional[Chapter]:
+        """Find the chapter before or after the current."""
         # Starts from the first chapter before the current
         index_search = reversed(chapters[:chapters.index(current_chapter)])
         if next_chapter_search:
@@ -1031,15 +1113,16 @@ class MPlusAPI:
         """Returns the chapter number without the un-needed # or 0."""
         stripped = str(number).strip('#')
 
-        parts = re.split('\\.|\\-', stripped)
+        parts = re.split(r'\.|\-', stripped)
         parts[0] = '0' if len(parts[0].lstrip(
             '0')) == 0 else parts[0].lstrip('0')
         stripped = '.'.join(parts)
 
         return stripped
 
-    def _normalise_chapter_number(
-            self, chapters: list, chapter) -> List[Optional[str]]:
+    def _normalise_chapter_number(self,
+                                  chapters: List[Chapter],
+                                  chapter: Chapter) -> List[Optional[str]]:
         """Rid the extra data from the chapter number for use in ManagDex."""
         current_number = self._strip_chapter_number(chapter.chapter_number)
         chapter_number = chapter.chapter_number
@@ -1107,28 +1190,31 @@ class MPlusAPI:
                 chap_number) for chap_number in chapter_number.split(',')]
         return chapter_number_split
 
-    def _normalise_chapter_title(self, chapter) -> Optional[str]:
+    def _normalise_chapter_title(
+            self, chapter: Chapter, chapter_number: List[Union[str, None]]) -> Optional[str]:
+        """Strip away the title prefix."""
         colon_regex = r'^.+:\s?'
-        no_title_regex = r'^\S+\s?\d+(?:\,\d{0,2})?$'
-        hashtag_regex = r'^(?:\S+\s?)?#\d+(?:\,\d{0,2})?\s'
-        period_regex = r'^(?:\S+\s?)?\d+(?:\,\d{0,2})?\s?[\.\/]\s'
-        spaces_regex = r'^(?:\S+\s?)?\d+(?:\,\d{0,2})?\s'
+        no_title_regex = r'^\S+\s?\d+(?:(?:\,|\-)\d{0,2})?$'
+        hashtag_regex = r'^(?:\S+\s?)?#\d+(?:(?:\,|\-)\d{0,2})?\s?'
+        period_regex = r'^(?:\S+\s?)?\d+(?:(?:\,|\-)\d{0,2})?\s?[\.\/\-]\s?'
+        spaces_regex = r'^(?:\S+\s?)?\d+(?:(?:\,|\-)\d{0,2})?\s?'
 
-        title = str(chapter.chapter_name)
+        title = str(chapter.chapter_title)
         normalised_title = title
         pattern_to_use = None
         replace_string = ''
 
-        if chapter.manga_id in self.empty_titles:
+        if chapter.manga_id in self.empty_titles and None not in chapter_number or title.lower(
+        ) in ('final chapter',):
             normalised_title = None
         elif ':' in title:
             pattern_to_use = colon_regex
         elif re.match(no_title_regex, title):
             pattern_to_use = no_title_regex
-        elif re.match(hashtag_regex, title):
-            pattern_to_use = hashtag_regex
         elif re.match(period_regex, title):
             pattern_to_use = period_regex
+        elif re.match(hashtag_regex, title):
+            pattern_to_use = hashtag_regex
         elif re.match(spaces_regex, title):
             pattern_to_use = spaces_regex
 
@@ -1137,7 +1223,7 @@ class MPlusAPI:
                 pattern=pattern_to_use,
                 repl=replace_string,
                 string=title,
-                flags=re.I)
+                flags=re.I).strip()
 
         if normalised_title == '':
             normalised_title = None
@@ -1145,10 +1231,8 @@ class MPlusAPI:
 
     def get_latest_chapters(
             self,
-            manga_chapters_lists: list,
-            manga_chapters,
+            manga_chapters_lists: List[List[Chapter]],
             posted_chapters: List[int],
-            manga_object: Manga,
             all_chapters: bool = False) -> List[Chapter]:
         """Get the latest un-uploaded chapters."""
         updated_chapters = []
@@ -1160,30 +1244,23 @@ class MPlusAPI:
                     # Chapter id is not in database or chapter expiry isn't
                     # before atm
                     if chapter.chapter_id in posted_chapters or datetime.fromtimestamp(
-                            chapter.end_timestamp) <= datetime.now():
+                            chapter.chapter_expire) <= datetime.now():
                         continue
 
                 chapter_number_split = self._normalise_chapter_number(
                     chapters, chapter)
 
-                chapter_title = self._normalise_chapter_title(chapter)
+                chapter_title = self._normalise_chapter_title(
+                    chapter, chapter_number_split)
 
                 # MPlus sometimes joins two chapters as one, upload to md as
                 # two different chapters
                 for chap_number in chapter_number_split:
-                    updated_chapters.append(
-                        Chapter(
-                            chapter_id=chapter.chapter_id,
-                            chapter_timestamp=chapter.start_timestamp,
-                            chapter_title=chapter_title,
-                            chapter_expire=chapter.end_timestamp,
-                            chapter_number=chap_number,
-                            chapter_language=mplus_language_map.get(
-                                str(
-                                    manga_chapters.manga.language),
-                                "NULL"),
-                            manga_id=manga_chapters.manga.manga_id,
-                            manga=manga_object))
+                    changes = {
+                        'chapter_number': chap_number,
+                        'chapter_title': chapter_title}
+                    chapter_object: Chapter = replace(chapter, **changes)
+                    updated_chapters.append(chapter_object)
 
         return updated_chapters
 
@@ -1195,11 +1272,13 @@ class BotProcess:
             session: requests.Session,
             updates: list,
             all_mplus_chapters: list,
-            first_process_object: Optional['ChapterDeleterProcess']):
+            first_process_object: Optional['ChapterDeleterProcess'],
+            md_auth_object: AuthMD):
         self.session = session
         self.updates = updates
         self.all_mplus_chapters = all_mplus_chapters
         self.first_process_object = first_process_object
+        self.md_auth_object = md_auth_object
         self.processes: List[multiprocessing.Process] = []
 
     def _get_md_id(self,
@@ -1245,7 +1324,8 @@ class BotProcess:
                 all_manga_chapters,
                 processes,
                 mangadex_manga_id,
-                self.first_process_object)
+                self.first_process_object,
+                self.md_auth_object)
             manga_uploader.start_manga_uploading_process()
 
 
@@ -1264,11 +1344,11 @@ def main():
         'Retrieved posted chapters from database and got mangaplus ids from manga id map file.')
 
     session = requests.Session()
-    login_to_md(session, config)
+    md_auth_object = AuthMD(session, config)
 
     # Start deleting expired chapters
     first_process_object = ChapterDeleterProcess(
-        session, [dict(k) for k in posted_chapters_data])
+        session, [dict(k) for k in posted_chapters_data], md_auth_object)
     first_process = first_process_object.delete_async()
 
     # Get new manga and chapter updates
@@ -1284,7 +1364,7 @@ def main():
         logging.info(f'Found {len(updates)} update(s).')
         print(f'Found {len(updates)} update(s).')
         BotProcess(session, updates, all_mplus_chapters,
-                   first_process_object).upload_chapters()
+                   first_process_object, md_auth_object).upload_chapters()
         print('Finished processing the update(s).')
 
     if first_process is not None:
@@ -1294,7 +1374,7 @@ def main():
 if __name__ == "__main__":
 
     manga_id_map = open_manga_id_map(
-        Path(config["User Set"]["manga_id_map_path"]))
+        Path(config["Paths"]["manga_id_map_path"]))
     multiprocessing_manager = multiprocessing.Manager()
 
     main()
