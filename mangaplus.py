@@ -9,14 +9,14 @@ import time
 from dataclasses import dataclass, field, replace
 from datetime import datetime, date
 from pathlib import Path
-from typing import Dict, Optional, List, Union
+from typing import Dict, Literal, Optional, List, Union
 from uuid import UUID
 
 import requests
 
 import proto.response_pb2 as response_pb
 
-__version__ = '1.0.0'
+__version__ = '1.1.0'
 
 mplus_language_map = {
     '0': 'en',
@@ -269,6 +269,7 @@ class AuthMD:
                  config: configparser.RawConfigParser):
         self.session = session
         self.config = config
+        self.first_login = True
         self.successful_login = False
         self.refresh_token = None
         self.token_file = root_path.joinpath(config["Paths"]["mdauth_path"])
@@ -280,7 +281,6 @@ class AuthMD:
                 token = json.load(login_file)
 
             refresh_token = token["refresh"]
-            self.refresh_token = refresh_token
             return refresh_token
         except (FileNotFoundError, json.JSONDecodeError):
             logging.error(
@@ -331,7 +331,7 @@ class AuthMD:
             auth_data = convert_json(auth_check_response)
             if auth_data is not None:
                 if auth_data["isAuthenticated"]:
-                    logging.info('Logged in using saved token.')
+                    logging.info('Already logged in.')
                     return True
 
         if self.refresh_token is None:
@@ -371,21 +371,28 @@ class AuthMD:
 
     def login(self, check_login = True):
         """Login to MD account using details or saved token."""
+
+        if not check_login and self.successful_login:
+            logging.info('Already logged in, not checking for login.')
+            return
+
         logging.info('Trying to login through the .mdauth file.')
-        
-        if check_login:
-            logged_in = self._check_login()
-        else:
+
+        if self.first_login:
             self.refresh_token = self._open_auth_file()
             if self.refresh_token is None:
                 logged_in = self._login_using_details()
             else:
                 logged_in = self._refresh_token()
+        else:
+            logged_in = self._check_login()
 
         if logged_in:
             self.successful_login = True
-            logging.info(f'Logged into mangadex.')
-            print('Logged in.')
+            if self.first_login:
+                logging.info(f'Logged into mangadex.')
+                print('Logged in.')
+                self.first_login = False
         else:
             logging.critical("Couldn't login.")
             raise Exception("Couldn't login.")
@@ -626,25 +633,25 @@ class ChapterUploaderProcess:
             self.remove_upload_session()
             return False
 
-    def start_upload(self, manga_chapters: list) -> bool:
+    def start_upload(self, manga_chapters: list) -> Literal[0, 1, 2]:
         duplicate_chapter = self._check_for_duplicate_chapter(manga_chapters)
         if duplicate_chapter:
-            return True
+            return 1
 
         upload_session_response_json = self._create_upload_session()
         if upload_session_response_json is None:
             time.sleep(mangadex_ratelimit_time)
-            return True
+            return 1
 
         self.upload_session_id = upload_session_response_json["data"]["id"]
         chapter_committed = self._commit_chapter()
         if not chapter_committed:
             self.remove_upload_session()
             time.sleep(mangadex_ratelimit_time)
-            return True
+            return 2
 
         time.sleep(mangadex_ratelimit_time)
-        return False
+        return 0
 
 
 
@@ -827,7 +834,7 @@ class MangaUploaderProcess:
         self.skipped_chapter = False
         for count, chapter in enumerate(self.chapters, start=1):
             chapter: Chapter = chapter
-            if not self.skipped_chapter and count % 3 == 0:
+            if not self.skipped_chapter and count % 5 == 0:
                 self.md_auth_object.login()
                 time.sleep(mangadex_ratelimit_time)
 
@@ -838,11 +845,16 @@ class MangaUploaderProcess:
                 "chapter": chapter,
                 "md_auth_object": self.md_auth_object,
                 "mplus_group": self.mplus_group})
-            
+
             uploaded = chapter_to_upload_process.start_upload(self.manga_chapters)
-            if not uploaded:
+            if uploaded in (1, 2):
                 self.skipped +=1
-            
+                if uploaded in (1,):
+                    self.skipped_chapter = True
+                continue
+
+            self.skipped_chapter = False
+
         if self.skipped != 0:
             skipped_chapters_message = f'Skipped {self.skipped} chapters out of {len(self.chapters)} for manga {chapter.manga.manga_name}: {self.mangadex_manga_id} - {chapter.manga_id}.'
             logging.info(skipped_chapters_message)
@@ -1097,9 +1109,9 @@ class MPlusAPI:
             if updated_chapters:
                 print(
                     f'Manga {manga_object.manga_name}: {manga_object.manga_id}.')
-            for update in updated_chapters:
-                print(
-                    f'--Found {update.chapter_id}, chapter: {update.chapter_number}, language: {update.chapter_language}, title: {update.chapter_title}.')
+                for update in updated_chapters:
+                    print(
+                        f'--Found {update.chapter_id}, chapter: {update.chapter_number}, language: {update.chapter_language}, title: {update.chapter_title}.')
 
             self.updated_chapters.extend(updated_chapters)
 
@@ -1329,6 +1341,8 @@ class BotProcess:
         all_manga_chapters = self._sort_chapters_by_manga(
             self.all_mplus_chapters)
         processes = []
+
+        self.md_auth_object.login(False)
 
         for index, mangadex_manga_id in enumerate(updated_manga_chapters, start=1):
             # Get each manga's uploaded chapters on mangadex
