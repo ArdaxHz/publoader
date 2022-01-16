@@ -7,16 +7,19 @@ import re
 import sqlite3
 import time
 from dataclasses import dataclass, field, replace
-from datetime import datetime, date
+from datetime import datetime, date, timezone
+from datetime import time as dtTime
 from pathlib import Path
 from typing import Dict, Literal, Optional, List, Union
 from uuid import UUID
 
 import requests
+from scheduler import Scheduler
+import scheduler.trigger as trigger
 
 import proto.response_pb2 as response_pb
 
-__version__ = '1.1.0'
+__version__ = '1.2.0'
 
 mplus_language_map = {
     '0': 'en',
@@ -732,9 +735,6 @@ class ChapterDeleterProcess:
         logging.info(f'Started deleting expired chapters process.')
         print('Deleting expired chapters.')
 
-        if self.chapters_to_delete:
-            self.md_auth_object.login(False)
-
         for count, chapter_to_delete in enumerate(
                 self.chapters_to_delete, start=1):
             if count % 3 == 0:
@@ -748,7 +748,10 @@ class ChapterDeleterProcess:
         self._delete_expired_chapters()
 
     def delete_async(self) -> multiprocessing.Process:
-        """Delete chapters concurrently."""     
+        """Delete chapters concurrently."""
+        if self.chapters_to_delete:
+            self.md_auth_object.login()
+
         self.chapter_delete_process = multiprocessing.Process(
             target=self._delete_expired_chapters)
         self.chapter_delete_process.start()
@@ -1299,22 +1302,21 @@ class BotProcess:
             updates: list,
             all_mplus_chapters: list,
             first_process_object: Optional['ChapterDeleterProcess'],
-            md_auth_object: AuthMD):
+            md_auth_object: AuthMD,
+            manga_id_map:  Dict[UUID, List[int]]):
         self.session = session
         self.updates = updates
         self.all_mplus_chapters = all_mplus_chapters
         self.first_process_object = first_process_object
         self.md_auth_object = md_auth_object
+        self.manga_id_map = manga_id_map
         self.processes: List[multiprocessing.Process] = []
         self.mplus_group = '4f1de6a2-f0c5-4ac5-bce5-02c7dbb67deb'
 
-    def _get_md_id(self,
-                   manga_id_map: Dict[UUID,
-                                      List[int]],
-                   mangaplus_id: int) -> Optional[UUID]:
+    def _get_md_id(self, mangaplus_id: int) -> Optional[UUID]:
         """Get the mangadex id from the mangaplus one."""
-        for md_id in manga_id_map:
-            if mangaplus_id in manga_id_map[md_id]:
+        for md_id in self.manga_id_map:
+            if mangaplus_id in self.manga_id_map[md_id]:
                 return md_id
 
     def _sort_chapters_by_manga(self, updates: list) -> dict:
@@ -1322,7 +1324,7 @@ class BotProcess:
         chapters_sorted = {}
 
         for chapter in updates:
-            md_id = self._get_md_id(manga_id_map, chapter.manga_id)
+            md_id = self._get_md_id(chapter.manga_id)
             if md_id is None:
                 logging.warning(
                     f'No mangadex id found for mplus id {chapter.manga_id}.')
@@ -1342,7 +1344,7 @@ class BotProcess:
             self.all_mplus_chapters)
         processes = []
 
-        self.md_auth_object.login(False)
+        self.md_auth_object.login()
 
         for index, mangadex_manga_id in enumerate(updated_manga_chapters, start=1):
             # Get each manga's uploaded chapters on mangadex
@@ -1364,6 +1366,9 @@ class BotProcess:
 
 def main():
     """Main function for getting the updates."""
+    manga_id_map = open_manga_id_map(
+        Path(config["Paths"]["manga_id_map_path"]))
+
     # Get already posted chapters
     posted_chapters_data = database_connection.execute(
         "SELECT * FROM chapters").fetchall()
@@ -1397,22 +1402,24 @@ def main():
         logging.info(f'Found {len(updates)} update(s).')
         print(f'Found {len(updates)} update(s).')
         BotProcess(session, updates, all_mplus_chapters,
-                   first_process_object, md_auth_object).upload_chapters()
+                   first_process_object, md_auth_object, manga_id_map).upload_chapters()
         print('Finished processing the update(s).')
 
     if first_process is not None:
         first_process.join()
 
-
-if __name__ == "__main__":
-
-    manga_id_map = open_manga_id_map(
-        Path(config["Paths"]["manga_id_map_path"]))
-    multiprocessing_manager = multiprocessing.Manager()
-
-    main()
-
     # Save and close database
     database_connection.commit()
     database_connection.close()
     logging.info('Saved and closed database.')
+
+
+if __name__ == "__main__":
+
+    multiprocessing_manager = multiprocessing.Manager()
+    schedule = Scheduler(tzinfo=timezone.utc)
+    schedule.daily(dtTime(hour=15, minute=0, tzinfo=timezone.utc), main)
+
+    while True:
+        schedule.exec_jobs()
+        time.sleep(1)
