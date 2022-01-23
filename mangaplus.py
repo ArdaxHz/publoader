@@ -5,6 +5,7 @@ import math
 import multiprocessing
 import re
 import sqlite3
+import string
 import time
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime
@@ -20,7 +21,7 @@ from scheduler import Scheduler
 
 import proto.response_pb2 as response_pb
 
-__version__ = "1.2.1"
+__version__ = "1.2.2"
 
 mplus_language_map = {
     "0": "en",
@@ -488,9 +489,7 @@ class ChapterUploaderProcess:
         self.chapter_language = self.chapter.chapter_language
         self.mplus_chapter_url = "https://mangaplus.shueisha.co.jp/viewer/{}"
 
-        self.manga_generic_error_message = (
-            f"Manga: {self.chapter.manga.manga_name}, {self.mangadex_manga_id} - {self.chapter.manga_id}, chapter: {self.chapter.chapter_number}, language: {self.chapter_language}, title: {self.chapter.chapter_title}"
-        )
+        self.manga_generic_error_message = f"Manga: {self.chapter.manga.manga_name}, {self.mangadex_manga_id} - {self.chapter.manga_id}, chapter: {self.chapter.chapter_number}, language: {self.chapter_language}, title: {self.chapter.chapter_title}"
         self.upload_retry_total = 3
         self.upload_session_id: Optional[UUID] = None
 
@@ -1014,7 +1013,7 @@ class MPlusAPI:
         )
         self.empty_titles = self.title_regexes.get("empty", [])
 
-        self.get_mplus_updated_manga()
+        # self.get_mplus_updated_manga()
         self.get_mplus_updates()
 
     def _get_proto_response(self, response_proto: bytes) -> response_pb.Response:
@@ -1189,8 +1188,20 @@ class MPlusAPI:
             index_search = chapters[chapters.index(current_chapter) :]
 
         for chapter in index_search:
+            number_match = re.match(
+                pattern=r"^#?(\d+)", string=chapter.chapter_number, flags=re.I
+            )
+
+            if bool(number_match):
+                number = number_match.group(1)
+            else:
+                number = re.split(
+                    r"[\s{}]+".format(re.escape(string.punctuation)),
+                    chapter.chapter_number.strip("#"),
+                )[0]
+
             try:
-                int(chapter.chapter_number.strip("#"))
+                int(number)
             except ValueError:
                 continue
             else:
@@ -1233,14 +1244,19 @@ class MPlusAPI:
                     next_chapter_number = self._strip_chapter_number(
                         next_chapter.chapter_number
                     )
-                    chapter_number = int(next_chapter_number.split(",")[0]) - 1
+                    chapter_number = (
+                        int(re.split(r"\.|\-|\,", next_chapter_number)[0]) - 1
+                    )
                     first_index = next_chapter
                     second_index = chapter
             else:
                 previous_chapter_number = self._strip_chapter_number(
                     previous_chapter.chapter_number
                 )
-                chapter_number = previous_chapter_number.split(",")[-1]
+                if "," in previous_chapter_number:
+                    chapter_number = previous_chapter_number.split(",")[-1]
+                else:
+                    chapter_number = re.split(r"\.|\-", previous_chapter_number)[0]
                 first_index = chapter
                 second_index = previous_chapter
 
