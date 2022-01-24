@@ -3,17 +3,19 @@ import json
 import logging
 import math
 import multiprocessing
+import os
 import re
+import shutil
 import sqlite3
 import string
 import time
+from copy import copy
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime
 from datetime import time as dtTime
 from datetime import timezone
 from pathlib import Path
 from typing import Dict, List, Literal, Optional, Union
-from uuid import UUID
 
 import requests
 import scheduler.trigger as trigger
@@ -21,7 +23,7 @@ from scheduler import Scheduler
 
 import proto.response_pb2 as response_pb
 
-__version__ = "1.2.2"
+__version__ = "1.2.3"
 
 mplus_language_map = {
     "0": "en",
@@ -93,12 +95,6 @@ def open_config_file() -> configparser.RawConfigParser:
 
 
 config = open_config_file()
-
-database_path = Path(config["Paths"]["database_path"])
-database_connection = database_connection = sqlite3.connect(database_path)
-database_connection.row_factory = sqlite3.Row
-logging.info("Opened database.")
-
 mangadex_api_url = config["Paths"]["mangadex_api_url"]
 md_upload_api_url = f"{mangadex_api_url}/upload"
 
@@ -106,46 +102,6 @@ try:
     mangadex_ratelimit_time = int(config["User Set"].get("mangadex_ratelimit_time", ""))
 except (ValueError, KeyError):
     mangadex_ratelimit_time = 2
-
-
-@dataclass(order=True)
-class Manga:
-    manga_id: int
-    manga_name: str
-    manga_language: str
-
-    def __post_init__(self):
-        try:
-            self.manga_language = int(self.manga_language)
-        except ValueError:
-            pass
-        else:
-            self.manga_language = mplus_language_map.get(
-                str(self.manga_language), "NULL"
-            )
-
-
-@dataclass()
-class Chapter:
-    chapter_timestamp: int
-    chapter_expire: int
-    chapter_title: str
-    chapter_number: str
-    chapter_language: str
-    chapter_id: int = field(default=None)
-    manga_id: int = field(default=None)
-    manga: Manga = field(default=None)
-    md_chapter_id: str = field(default=None)
-
-    def __post_init__(self):
-        try:
-            self.chapter_language = int(self.chapter_language)
-        except ValueError:
-            pass
-        else:
-            self.chapter_language = mplus_language_map.get(
-                str(self.chapter_language), "NULL"
-            )
 
 
 def make_tables(database_connection: sqlite3.Connection):
@@ -196,7 +152,60 @@ def check_table_exists(database_connection: sqlite3.Connection) -> bool:
     return fill_backlog
 
 
-fill_backlog = check_table_exists(database_connection)
+database_name = config["Paths"]["database_path"]
+database_path = Path(database_name)
+
+
+def open_database(db_path: Path) -> tuple[sqlite3.Connection, bool]:
+    database_connection = sqlite3.connect(db_path)
+    database_connection.row_factory = sqlite3.Row
+    logging.info("Opened database.")
+
+    fill_backlog = check_table_exists(database_connection)
+    return database_connection, fill_backlog
+
+
+database_connection, fill_backlog = open_database(database_path)
+
+
+@dataclass(order=True)
+class Manga:
+    manga_id: int
+    manga_name: str
+    manga_language: str
+
+    def __post_init__(self):
+        try:
+            self.manga_language = int(self.manga_language)
+        except ValueError:
+            pass
+        else:
+            self.manga_language = mplus_language_map.get(
+                str(self.manga_language), "NULL"
+            )
+
+
+@dataclass()
+class Chapter:
+    chapter_timestamp: int
+    chapter_expire: int
+    chapter_title: str
+    chapter_number: str
+    chapter_language: str
+    chapter_id: Optional[int] = field(default=None)
+    manga_id: Optional[int] = field(default=None)
+    manga: Optional[Manga] = field(default=None)
+    md_chapter_id: Optional[str] = field(default=None)
+
+    def __post_init__(self):
+        try:
+            self.chapter_language = int(self.chapter_language)
+        except ValueError:
+            pass
+        else:
+            self.chapter_language = mplus_language_map.get(
+                str(self.chapter_language), "NULL"
+            )
 
 
 def convert_json(response_to_convert: requests.Response) -> Optional[dict]:
@@ -418,7 +427,7 @@ class AuthMD:
 def update_database(
     database_connection: sqlite3.Connection,
     chapter: Chapter,
-    succesful_upload_id: UUID = None,
+    succesful_upload_id: Optional[str] = None,
 ):
     """Update the database with the new chapter."""
     mplus_chapter_id = chapter.chapter_id
@@ -462,7 +471,7 @@ def update_database(
     database_connection.commit()
 
 
-def open_manga_id_map(manga_map_path: Path) -> Dict[UUID, List[int]]:
+def open_manga_id_map(manga_map_path: Path) -> Dict[str, List[int]]:
     """Open mangaplus id to mangadex id map."""
     try:
         with open(manga_map_path, "r") as manga_map_fp:
@@ -481,19 +490,19 @@ class ChapterUploaderProcess:
     def __init__(self, **kwargs):
         self.database_connection: sqlite3.Connection = kwargs["database_connection"]
         self.session: requests.Session = kwargs["session"]
-        self.mangadex_manga_id: UUID = kwargs["mangadex_manga_id"]
+        self.mangadex_manga_id: str = kwargs["mangadex_manga_id"]
         self.chapter: Chapter = kwargs["chapter"]
         self.md_auth_object: AuthMD = kwargs["md_auth_object"]
-        self.mplus_group: UUID = kwargs["mplus_group"]
+        self.mplus_group: str = kwargs["mplus_group"]
 
         self.chapter_language = self.chapter.chapter_language
         self.mplus_chapter_url = "https://mangaplus.shueisha.co.jp/viewer/{}"
 
         self.manga_generic_error_message = f"Manga: {self.chapter.manga.manga_name}, {self.mangadex_manga_id} - {self.chapter.manga_id}, chapter: {self.chapter.chapter_number}, language: {self.chapter_language}, title: {self.chapter.chapter_title}"
         self.upload_retry_total = 3
-        self.upload_session_id: Optional[UUID] = None
+        self.upload_session_id: Optional[str] = None
 
-    def remove_upload_session(self, session_id: Optional[UUID] = None):
+    def remove_upload_session(self, session_id: Optional[str] = None):
         """Delete the upload session."""
         if session_id is None:
             session_id = self.upload_session_id
@@ -689,6 +698,7 @@ class ChapterUploaderProcess:
 class ChapterDeleterProcess:
     def __init__(
         self,
+        *,
         session: requests.Session,
         posted_chapters: List[dict],
         md_auth_object: AuthMD,
@@ -703,6 +713,10 @@ class ChapterDeleterProcess:
         self.chapter_delete_process = None
 
         logging.info(f"Chapters to delete: {self.chapters_to_delete}")
+
+    def _open_database() -> sqlite3.Connection:
+        database_connection, _ = open_database(database_path)
+        return database_connection
 
     def get_chapter_to_delete(self) -> List[dict]:
         return [
@@ -777,6 +791,8 @@ class ChapterDeleterProcess:
 
     def delete(self):
         """Delete chapters non-concurrently."""
+        if self.chapters_to_delete:
+            self.md_auth_object.login()
         self._delete_expired_chapters()
 
     def delete_async(self) -> multiprocessing.Process:
@@ -798,12 +814,12 @@ class MangaUploaderProcess:
         self.updated_manga_chapters: list = kwargs["updated_manga_chapters"]
         self.all_manga_chapters: list = kwargs["all_manga_chapters"]
         self.processes: list = kwargs["processes"]
-        self.mangadex_manga_id: UUID = kwargs["mangadex_manga_id"]
+        self.mangadex_manga_id: str = kwargs["mangadex_manga_id"]
         self.deleter_process_object: Optional["ChapterDeleterProcess"] = kwargs[
             "deleter_process_object"
         ]
         self.md_auth_object: AuthMD = kwargs["md_auth_object"]
-        self.mplus_group: UUID = kwargs["mplus_group"]
+        self.mplus_group: str = kwargs["mplus_group"]
 
         self.chapters: List[dict] = self.updated_manga_chapters[self.mangadex_manga_id]
         self.chapters_all: List[dict] = self.all_manga_chapters[self.mangadex_manga_id]
@@ -873,7 +889,9 @@ class MangaUploaderProcess:
                     )
             else:
                 self.second_process_object = ChapterDeleterProcess(
-                    self.session, chapters_to_delete, self.md_auth_object
+                    session=self.session,
+                    posted_chapters=chapters_to_delete,
+                    md_auth_object=self.md_auth_object,
                 )
                 self.second_process_object.delete()
 
@@ -1387,7 +1405,8 @@ class BotProcess:
         all_mplus_chapters: list,
         first_process_object: Optional["ChapterDeleterProcess"],
         md_auth_object: AuthMD,
-        manga_id_map: Dict[UUID, List[int]],
+        manga_id_map: Dict[str, List[int]],
+        database_connection: sqlite3.Connection,
     ):
         self.session = session
         self.updates = updates
@@ -1395,10 +1414,11 @@ class BotProcess:
         self.first_process_object = first_process_object
         self.md_auth_object = md_auth_object
         self.manga_id_map = manga_id_map
+        self.database_connection = database_connection
         self.processes: List[multiprocessing.Process] = []
         self.mplus_group = "4f1de6a2-f0c5-4ac5-bce5-02c7dbb67deb"
 
-    def _get_md_id(self, mangaplus_id: int) -> Optional[UUID]:
+    def _get_md_id(self, mangaplus_id: int) -> Optional[str]:
         """Get the mangadex id from the mangaplus one."""
         for md_id in self.manga_id_map:
             if mangaplus_id in self.manga_id_map[md_id]:
@@ -1435,7 +1455,7 @@ class BotProcess:
             # Get each manga's uploaded chapters on mangadex
             manga_uploader = MangaUploaderProcess(
                 **{
-                    "database_connection": database_connection,
+                    "database_connection": self.database_connection,
                     "session": self.session,
                     "updated_manga_chapters": updated_manga_chapters,
                     "all_manga_chapters": all_manga_chapters,
@@ -1452,9 +1472,13 @@ class BotProcess:
                 self.md_auth_object.login()
 
 
-def main():
+def main(db_connection: Optional[sqlite3.Connection] = None):
     """Main function for getting the updates."""
     manga_id_map = open_manga_id_map(Path(config["Paths"]["manga_id_map_path"]))
+    if db_connection is not None:
+        database_connection = db_connection
+    else:
+        database_connection, _ = open_database(database_path)
 
     # Get already posted chapters
     posted_chapters_data = database_connection.execute(
@@ -1463,11 +1487,7 @@ def main():
     posted_chapters_ids_data = database_connection.execute(
         "SELECT * FROM posted_mplus_ids"
     ).fetchall()
-    posted_chapters_ids = (
-        [job["chapter_id"] for job in posted_chapters_ids_data]
-        if not fill_backlog
-        else []
-    )
+    posted_chapters_ids = [job["chapter_id"] for job in posted_chapters_ids_data]
     manga_map_mplus_ids = [
         mplus_id for md_id in manga_id_map for mplus_id in manga_id_map[md_id]
     ]
@@ -1480,7 +1500,9 @@ def main():
 
     # Start deleting expired chapters
     first_process_object = ChapterDeleterProcess(
-        session, [dict(k) for k in posted_chapters_data], md_auth_object
+        session=session,
+        posted_chapters=[dict(k) for k in posted_chapters_data],
+        md_auth_object=md_auth_object,
     )
     first_process = first_process_object.delete_async()
 
@@ -1503,6 +1525,7 @@ def main():
             first_process_object,
             md_auth_object,
             manga_id_map,
+            database_connection,
         ).upload_chapters()
         print("Finished all update(s).")
 
@@ -1515,14 +1538,103 @@ def main():
     logging.info("Saved and closed database.")
 
 
+def move_chapters():
+    database_connection, _ = open_database(database_path)
+
+    db_files = [
+        file
+        for file in root_path.iterdir()
+        if file != database_path or file.suffix == ".db"
+    ]
+    for file in db_files:
+        logging.info(f"Opened {file.name} to move the data to the current database.")
+        other_database_connection, _ = open_database(file)
+        other_chapters = [
+            c
+            for c in other_database_connection.execute(
+                "SELECT * FROM chapters"
+            ).fetchall()
+        ]
+
+        # database_connection.executemany(
+        #     """INSERT OR IGNORE INTO chapters VALUES
+        #         (:chapter_id, :chapter_timestamp, :chapter_expire, :chapter_language, :chapter_title, :chapter_number, :manga_id, :md_chapter_id)""",
+        #     other_chapters,
+        # )
+
+        logging.debug(f"Moved all chapters data.")
+        other_deletions = [
+            c
+            for c in other_database_connection.execute(
+                "SELECT * FROM deleted_chapters"
+            ).fetchall()
+        ]
+
+        database_connection.executemany(
+            """INSERT OR IGNORE INTO deleted_chapters VALUES
+                (:chapter_id, :chapter_timestamp, :chapter_expire, :chapter_language, :chapter_title, :chapter_number, :manga_id, :md_chapter_id)""",
+            other_deletions,
+        )
+
+        logging.debug(f"Moved all deleted chapters data.")
+        other_posted_mplus_ids = [
+            c
+            for c in other_database_connection.execute(
+                "SELECT * FROM posted_mplus_ids"
+            ).fetchall()
+        ]
+
+        database_connection.executemany(
+            "INSERT OR IGNORE INTO posted_mplus_ids VALUES (?)", other_posted_mplus_ids
+        )
+
+        logging.debug(f"Moved all the posted ids.")
+        logging.info(f"Moved {file.name}'s data to to the current database.")
+        database_connection.commit()
+        other_database_connection.commit()
+        other_database_connection.close()
+        file.unlink()
+        logging.info(f"Deleted {file}.")
+
+    main(database_connection)
+
+
+def clean_db():
+    version = 1
+    found = False
+
+    database_connection, _ = open_database(database_path)
+    while True:
+        version += 1
+        print(version)
+        new_database_path = Path(
+            f"{database_name.rsplit('.', 1)[0]}-{version}"
+        ).with_suffix(".db")
+        if not os.path.exists(new_database_path):
+            found = True
+            break
+
+    if found:
+        database_connection.commit()
+        db_con, _ = open_database(new_database_path)
+        database_connection.backup(db_con)
+        database_connection.close()
+        database_path.unlink()
+
+    db_connection, _ = open_database(database_path)
+    main(db_connection)
+
+
 if __name__ == "__main__":
 
     multiprocessing_manager = multiprocessing.Manager()
-    # schedule = Scheduler(tzinfo=timezone.utc)
-    # schedule.daily(dtTime(hour=15, minute=0, tzinfo=timezone.utc), main)
+    schedule = Scheduler(tzinfo=timezone.utc)
+    schedule.daily(dtTime(hour=15, minute=00, tzinfo=timezone.utc), main)
+    # schedule.weekly(
+    #     trigger.Monday(dtTime(hour=00, minute=00, tzinfo=timezone.utc)), clean_db
+    # )
+    schedule.daily(dtTime(hour=00, minute=00, tzinfo=timezone.utc), move_chapters)
 
-    # while True:
-    #     schedule.exec_jobs()
-    #     time.sleep(1)
-
-    main()
+    while True:
+        schedule.exec_jobs()
+        time.sleep(1)
