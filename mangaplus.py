@@ -5,11 +5,9 @@ import math
 import multiprocessing
 import os
 import re
-import shutil
 import sqlite3
 import string
 import time
-from copy import copy
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime
 from datetime import time as dtTime
@@ -1544,7 +1542,7 @@ def move_chapters():
     db_files = [
         file
         for file in root_path.iterdir()
-        if file != database_path or file.suffix == ".db"
+        if file != database_path and file.suffix == ".db"
     ]
     for file in db_files:
         logging.info(f"Opened {file.name} to move the data to the current database.")
