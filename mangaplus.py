@@ -21,7 +21,7 @@ from scheduler import Scheduler
 
 import proto.response_pb2 as response_pb
 
-__version__ = "1.2.3"
+__version__ = "1.2.4"
 
 mplus_language_map = {
     "0": "en",
@@ -630,6 +630,9 @@ class ChapterUploaderProcess:
                         "externalUrl": self.mplus_chapter_url.format(
                             self.chapter.chapter_id
                         ),
+                        "publishAt": datetime.fromtimestamp(
+                            self.chapter.chapter_expire
+                        ).strftime("%Y-%m-%dT%H:%M:%S%z"),
                     },
                     "pageOrder": [],
                 },
@@ -809,8 +812,8 @@ class MangaUploaderProcess:
     def __init__(self, **kwargs):
         self.database_connection: sqlite3.Connection = kwargs["database_connection"]
         self.session: requests.Session = kwargs["session"]
-        self.updated_manga_chapters: list = kwargs["updated_manga_chapters"]
-        self.all_manga_chapters: list = kwargs["all_manga_chapters"]
+        self.chapters: List[Chapter] = kwargs["updated_manga_chapters"]
+        self.chapters_all: List[Chapter] = kwargs["all_manga_chapters"]
         self.processes: list = kwargs["processes"]
         self.mangadex_manga_id: str = kwargs["mangadex_manga_id"]
         self.deleter_process_object: Optional["ChapterDeleterProcess"] = kwargs[
@@ -818,9 +821,6 @@ class MangaUploaderProcess:
         ]
         self.md_auth_object: AuthMD = kwargs["md_auth_object"]
         self.mplus_group: str = kwargs["mplus_group"]
-
-        self.chapters: List[dict] = self.updated_manga_chapters[self.mangadex_manga_id]
-        self.chapters_all: List[dict] = self.all_manga_chapters[self.mangadex_manga_id]
 
         self.second_process = None
         self.second_process_object = None
@@ -1399,8 +1399,8 @@ class BotProcess:
     def __init__(
         self,
         session: requests.Session,
-        updates: list,
-        all_mplus_chapters: list,
+        updates: List[Chapter],
+        all_mplus_chapters: List[Chapter],
         first_process_object: Optional["ChapterDeleterProcess"],
         md_auth_object: AuthMD,
         manga_id_map: Dict[str, List[int]],
@@ -1422,7 +1422,9 @@ class BotProcess:
             if mangaplus_id in self.manga_id_map[md_id]:
                 return md_id
 
-    def _sort_chapters_by_manga(self, updates: list) -> dict:
+    def _sort_chapters_by_manga(
+        self, updates: List[Chapter]
+    ) -> Dict[str, List[Chapter]]:
         """Sort the chapters by manga id."""
         chapters_sorted = {}
 
@@ -1455,8 +1457,8 @@ class BotProcess:
                 **{
                     "database_connection": self.database_connection,
                     "session": self.session,
-                    "updated_manga_chapters": updated_manga_chapters,
-                    "all_manga_chapters": all_manga_chapters,
+                    "updated_manga_chapters": updated_manga_chapters[mangadex_manga_id],
+                    "all_manga_chapters": all_manga_chapters[mangadex_manga_id],
                     "processes": processes,
                     "mangadex_manga_id": mangadex_manga_id,
                     "deleter_process_object": self.first_process_object,
