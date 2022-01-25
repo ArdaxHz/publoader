@@ -1627,7 +1627,7 @@ if __name__ == "__main__":
 
     multiprocessing_manager = multiprocessing.Manager()
     schedule = Scheduler(tzinfo=timezone.utc)
-    schedule.daily(dtTime(hour=15, minute=00, tzinfo=timezone.utc), main)
+    schedule.daily(dtTime(hour=15, minute=10, tzinfo=timezone.utc), main)
     # schedule.weekly(
     #     trigger.Monday(dtTime(hour=00, minute=00, tzinfo=timezone.utc)), clean_db
     # )
