@@ -21,7 +21,7 @@ from scheduler import Scheduler
 
 import proto.response_pb2 as response_pb
 
-__version__ = "1.2.4"
+__version__ = "1.2.5"
 
 mplus_language_map = {
     "0": "en",
@@ -1029,7 +1029,7 @@ class MPlusAPI:
         )
         self.empty_titles = self.title_regexes.get("empty", [])
 
-        # self.get_mplus_updated_manga()
+        self.get_mplus_updated_manga()
         self.get_mplus_updates()
 
     def _get_proto_response(self, response_proto: bytes) -> response_pb.Response:
@@ -1556,11 +1556,11 @@ def move_chapters():
             ).fetchall()
         ]
 
-        # database_connection.executemany(
-        #     """INSERT OR IGNORE INTO chapters VALUES
-        #         (:chapter_id, :chapter_timestamp, :chapter_expire, :chapter_language, :chapter_title, :chapter_number, :manga_id, :md_chapter_id)""",
-        #     other_chapters,
-        # )
+        database_connection.executemany(
+            """INSERT OR IGNORE INTO chapters VALUES
+                (:chapter_id, :chapter_timestamp, :chapter_expire, :chapter_language, :chapter_title, :chapter_number, :manga_id, :md_chapter_id)""",
+            other_chapters,
+        )
 
         logging.debug(f"Moved all chapters data.")
         other_deletions = [
@@ -1633,7 +1633,7 @@ if __name__ == "__main__":
     # schedule.weekly(
     #     trigger.Monday(dtTime(hour=00, minute=00, tzinfo=timezone.utc)), clean_db
     # )
-    schedule.daily(dtTime(hour=00, minute=00, tzinfo=timezone.utc), move_chapters)
+    schedule.daily(dtTime(hour=00, minute=00, tzinfo=timezone.utc), main)
 
     while True:
         schedule.exec_jobs()
