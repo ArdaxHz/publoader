@@ -21,7 +21,7 @@ from scheduler import Scheduler
 
 import proto.response_pb2 as response_pb
 
-__version__ = "1.2.5"
+__version__ = "1.2.6"
 
 mplus_language_map = {
     "0": "en",
@@ -1188,7 +1188,14 @@ class MPlusAPI:
                         f"--Found {update.chapter_id}, chapter: {update.chapter_number}, language: {update.chapter_language}, title: {update.chapter_title}."
                     )
 
-            self.updated_chapters.extend(updated_chapters)
+            self.updated_chapters.extend(
+                [
+                    chapter
+                    for chapter in updated_chapters
+                    if chapter.chapter_id not in self.posted_chapters_ids
+                    and datetime.fromtimestamp(chapter.chapter_expire) >= datetime.now()
+                ]
+            )
 
     def _get_surrounding_chapter(
         self,
@@ -1317,11 +1324,11 @@ class MPlusAPI:
         self, chapter: Chapter, chapter_number: List[Union[str, None]]
     ) -> Optional[str]:
         """Strip away the title prefix."""
-        colon_regex = r"^.+:\s?"
-        no_title_regex = r"^\S+\s?\d+(?:(?:\,|\-)\d{0,2})?$"
-        hashtag_regex = r"^(?:\S+\s?)?#\d+(?:(?:\,|\-)\d{0,2})?\s?"
-        period_regex = r"^(?:\S+\s?)?\d+(?:(?:\,|\-)\d{0,2})?\s?[\.\/\-]\s?"
-        spaces_regex = r"^(?:\S+\s?)?\d+(?:(?:\,|\-)\d{0,2})?\s?"
+        colon_regex = re.compile(r"^.+:\s?")
+        no_title_regex = re.compile(r"^\S+\s?\d+(?:(?:\,|\-)\d{0,2})?$")
+        hashtag_regex = re.compile(r"^(?:\S+\s?)?#\d+(?:(?:\,|\-)\d{0,2})?\s?")
+        period_regex = re.compile(r"^(?:\S+\s?)?\d+(?:(?:\,|\-)\d{0,2})?\s?[\.\/\-]\s?")
+        spaces_regex = re.compile(r"^(?:\S+\s?)?\d+(?:(?:\,|\-)\d{0,2})?\s?")
 
         title = str(chapter.chapter_title)
         normalised_title = title
@@ -1336,18 +1343,18 @@ class MPlusAPI:
             normalised_title = None
         elif ":" in title:
             pattern_to_use = colon_regex
-        elif re.match(no_title_regex, title):
+        elif no_title_regex.match(title):
             pattern_to_use = no_title_regex
-        elif re.match(period_regex, title):
+        elif period_regex.match(title):
             pattern_to_use = period_regex
-        elif re.match(hashtag_regex, title):
+        elif hashtag_regex.match(title):
             pattern_to_use = hashtag_regex
-        elif re.match(spaces_regex, title):
+        elif spaces_regex.match(title):
             pattern_to_use = spaces_regex
 
         if pattern_to_use is not None:
-            normalised_title = re.sub(
-                pattern=pattern_to_use, repl=replace_string, string=title, flags=re.I
+            normalised_title = pattern_to_use.sub(
+                repl=replace_string, string=title
             ).strip()
 
         if normalised_title == "":
@@ -1527,13 +1534,19 @@ def main(db_connection: Optional[sqlite3.Connection] = None):
             manga_id_map,
             database_connection,
         ).upload_chapters()
-        print("Finished all update(s).")
+        print("Uploaded all update(s).")
 
     if first_process is not None:
         first_process.join()
+        print("Finished deleting expired chapters.")
 
     # Save and close database
     database_connection.commit()
+    backup_database_connection, _ = open_database(
+        Path(database_name).with_suffix(".bak")
+    )
+    database_connection.backup(backup_database_connection)
+    backup_database_connection.close()
     database_connection.close()
     logging.info("Saved and closed database.")
 
@@ -1606,7 +1619,6 @@ def clean_db():
     database_connection, _ = open_database(database_path)
     while True:
         version += 1
-        print(version)
         new_database_path = Path(
             f"{database_name.rsplit('.', 1)[0]}-{version}"
         ).with_suffix(".db")
@@ -1618,22 +1630,58 @@ def clean_db():
         database_connection.commit()
         db_con, _ = open_database(new_database_path)
         database_connection.backup(db_con)
-        database_connection.close()
-        database_path.unlink()
+        db_con.close()
+        database_connection.execute("DELETE FROM chapters")
+        database_connection.execute("DELETE FROM deleted_chapters")
+        database_connection.execute("DELETE FROM posted_mplus_ids")
+        database_connection.commit()
 
-    db_connection, _ = open_database(database_path)
-    main(db_connection)
+    main(database_connection)
 
 
 if __name__ == "__main__":
 
+    daily_run_time_daily_hour = int(
+        config["User Set"]["bot_run_time_daily"].split(":")[0]
+    )
+    daily_run_time_daily_minute = int(
+        config["User Set"]["bot_run_time_daily"].split(":")[1]
+    )
+    daily_run_time_checks_hour = int(
+        config["User Set"]["bot_run_time_checks"].split(":")[0]
+    )
+    daily_run_time_checks_minute = int(
+        config["User Set"]["bot_run_time_checks"].split(":")[1]
+    )
+
     multiprocessing_manager = multiprocessing.Manager()
     schedule = Scheduler(tzinfo=timezone.utc)
-    schedule.daily(dtTime(hour=15, minute=10, tzinfo=timezone.utc), main)
-    # schedule.weekly(
-    #     trigger.Monday(dtTime(hour=00, minute=00, tzinfo=timezone.utc)), clean_db
-    # )
-    schedule.daily(dtTime(hour=00, minute=00, tzinfo=timezone.utc), main)
+    schedule.daily(
+        dtTime(
+            hour=daily_run_time_daily_hour,
+            minute=daily_run_time_daily_minute,
+            tzinfo=timezone.utc,
+        ),
+        main,
+    )
+    schedule.weekly(
+        trigger.Monday(
+            dtTime(
+                hour=daily_run_time_checks_hour,
+                minute=daily_run_time_checks_minute,
+                tzinfo=timezone.utc,
+            )
+        ),
+        clean_db,
+    )
+    schedule.daily(
+        dtTime(
+            hour=daily_run_time_checks_hour,
+            minute=daily_run_time_checks_minute,
+            tzinfo=timezone.utc,
+        ),
+        move_chapters,
+    )
 
     while True:
         schedule.exec_jobs()
