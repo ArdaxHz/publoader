@@ -5,3 +5,4 @@ last_run.txt
 *.log
 logs/*
 .mdauth
+*.bak
