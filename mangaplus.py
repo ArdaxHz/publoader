@@ -21,7 +21,7 @@ from scheduler import Scheduler
 
 import proto.response_pb2 as response_pb
 
-__version__ = "1.2.6"
+__version__ = "1.2.7"
 
 mplus_language_map = {
     "0": "en",
@@ -816,6 +816,7 @@ class MangaUploaderProcess:
         self.chapters_all: List[Chapter] = kwargs["all_manga_chapters"]
         self.processes: list = kwargs["processes"]
         self.mangadex_manga_id: str = kwargs["mangadex_manga_id"]
+        self.manga_chapters = kwargs["mplus_group_chapters"]
         self.deleter_process_object: Optional["ChapterDeleterProcess"] = kwargs[
             "deleter_process_object"
         ]
@@ -825,8 +826,8 @@ class MangaUploaderProcess:
         self.second_process = None
         self.second_process_object = None
 
-        self.manga_chapters = self._get_mangadex_chapters()
-        self._delete_extra_chapters()
+        if self.manga_chapters:
+            self._delete_extra_chapters()
 
     def _remove_chapters_not_mplus(self) -> List[dict]:
         """Find chapters on MangaDex not on MangaPlus."""
@@ -858,19 +859,20 @@ class MangaUploaderProcess:
 
         return chapters_to_delete
 
-    def _get_mangadex_chapters(self):
-        return self._get_chapters(
-            params={
-                "groups[]": [self.mplus_group],
-                "manga": self.mangadex_manga_id,
-                "order[createdAt]": "desc",
-            }
-        )
-
     def _delete_extra_chapters(self):
         chapters_to_delete = self._remove_chapters_not_mplus()
         if chapters_to_delete:
-            if self.deleter_process_object is not None:
+            if (
+                self.deleter_process_object is None
+                or self.deleter_process_object.chapter_delete_process is None
+            ):
+                self.second_process_object = ChapterDeleterProcess(
+                    session=self.session,
+                    posted_chapters=chapters_to_delete,
+                    md_auth_object=self.md_auth_object,
+                )
+                self.second_process_object.delete()
+            else:
                 if not self.deleter_process_object.chapter_delete_process.is_alive():
                     if not self.deleter_process_object.chapters_to_delete:
                         self.deleter_process_object.chapters_to_delete = (
@@ -885,13 +887,6 @@ class MangaUploaderProcess:
                     self.deleter_process_object.chapters_to_delete.extend(
                         chapters_to_delete
                     )
-            else:
-                self.second_process_object = ChapterDeleterProcess(
-                    session=self.session,
-                    posted_chapters=chapters_to_delete,
-                    md_auth_object=self.md_auth_object,
-                )
-                self.second_process_object.delete()
 
     def start_manga_uploading_process(self):
         self.skipped = 0
@@ -931,7 +926,91 @@ class MangaUploaderProcess:
             del self.second_process_object
         time.sleep(mangadex_ratelimit_time * 2)
 
-    def _get_chapters(self, params: dict) -> list:
+
+class BotProcess:
+    def __init__(
+        self,
+        session: requests.Session,
+        updates: List[Chapter],
+        all_mplus_chapters: List[Chapter],
+        deleter_process_object: Optional["ChapterDeleterProcess"],
+        md_auth_object: AuthMD,
+        manga_id_map: Dict[str, List[int]],
+        database_connection: sqlite3.Connection,
+    ):
+        self.session = session
+        self.updates = updates
+        self.all_mplus_chapters = all_mplus_chapters
+        self.deleter_process_object = deleter_process_object
+        self.md_auth_object = md_auth_object
+        self.manga_id_map = manga_id_map
+        self.database_connection = database_connection
+        self.processes: List[multiprocessing.Process] = []
+        self.mplus_group = "4f1de6a2-f0c5-4ac5-bce5-02c7dbb67deb"
+        self.mplus_group_chapters = self._get_mplus_chapters()
+        self.manga_untracked = [
+            m
+            for m in list(self.mplus_group_chapters.keys())
+            if m not in list(self.manga_id_map.keys())
+        ]
+        logging.info(f"Manga not tracked but on mangadex: {self.manga_untracked}")
+
+    def _remove_chapters_not_mplus(self) -> List[dict]:
+        """Find chapters on MangaDex not on MangaPlus."""
+        chapters_to_delete = []
+
+        for manga_id in self.mplus_group_chapters:
+            if manga_id in self.manga_untracked:
+                for expired in self.mplus_group_chapters[manga_id]:
+                    md_chapter_id = expired["id"]
+
+                    expired_chapter_object = Chapter(
+                        chapter_timestamp=946684799,
+                        chapter_expire=946684799,
+                        chapter_language=expired["attributes"]["translatedLanguage"],
+                        chapter_title=expired["attributes"]["title"],
+                        chapter_number=expired["attributes"]["chapter"],
+                        manga_id=manga_id,
+                        md_chapter_id=md_chapter_id,
+                    )
+
+                    update_database(
+                        self.database_connection, expired_chapter_object, md_chapter_id
+                    )
+                    chapters_to_delete.append(vars(expired_chapter_object))
+
+        return chapters_to_delete
+
+    def _delete_extra_chapters(self):
+        chapters_to_delete = self._remove_chapters_not_mplus()
+        if chapters_to_delete:
+            if (
+                self.deleter_process_object is None
+                or self.deleter_process_object.chapter_delete_process is None
+            ):
+                self.second_process_object = ChapterDeleterProcess(
+                    session=self.session,
+                    posted_chapters=chapters_to_delete,
+                    md_auth_object=self.md_auth_object,
+                )
+                self.second_process_object.delete()
+            else:
+                if not self.deleter_process_object.chapter_delete_process.is_alive():
+                    if not self.deleter_process_object.chapters_to_delete:
+                        self.deleter_process_object.chapters_to_delete = (
+                            chapters_to_delete
+                        )
+                    else:
+                        self.deleter_process_object.chapters_to_delete.extend(
+                            chapters_to_delete
+                        )
+                    self.deleter_process_object.delete_async()
+                else:
+                    self.deleter_process_object.chapters_to_delete.extend(
+                        chapters_to_delete
+                    )
+
+    def _get_chapters(self, params: dict) -> List[dict]:
         """Go through each page in the api to get all the chapters."""
         chapters = []
         limit = 100
@@ -959,9 +1038,7 @@ class MangaUploaderProcess:
             )
             if chapters_response.status_code != 200:
                 print_error(chapters_response)
-                manga_response_message = (
-                    f"Couldn't get chapters of manga {params['manga']}."
-                )
+                manga_response_message = f"Couldn't get chapters of group chapters."
                 logging.error(manga_response_message)
                 continue
 
@@ -983,18 +1060,18 @@ class MangaUploaderProcess:
                 if chapters_count > limit:
                     pages = math.ceil(chapters_count / limit)
 
-                logging.info(f"{pages} page(s) for manga {params['manga']}.")
+                logging.debug(f"{pages} page(s) for group chapters.")
 
             # Wait every 5 pages
             if iteration % 5 == 0 and pages != 5:
-                time.sleep(5)
+                time.sleep(mangadex_ratelimit_time)
 
             # End the loop when all the pages have been gone through
             # Offset 10000 is the highest you can go, reset offset and get next
             # 10k batch using the last available chapter's created at date
             if (
                 iteration == pages
-                or offset == 10000
+                or offset >= 10000
                 or not chapters_response_data["data"]
             ):
                 if chapters_count >= 10000 and offset == 10000:
@@ -1013,6 +1090,88 @@ class MangaUploaderProcess:
 
         time.sleep(mangadex_ratelimit_time)
         return chapters
+
+    def _get_mplus_chapters(self) -> Dict[str, List[dict]]:
+        logging.debug("Getting all m+'s uploaded chapters.")
+        print("Getting the mangaplus chapters on mangadex.")
+        chapters_unsorted = self._get_chapters(
+            params={
+                "groups[]": [self.mplus_group],
+                "order[createdAt]": "desc",
+                "includes[]": ["manga"],
+            }
+        )
+
+        logging.debug("Sorting the uploaded chapters by MD ID.")
+        chapters_sorted = {}
+        for chapter in chapters_unsorted:
+            manga_id = [
+                g["id"] for g in chapter["relationships"] if g["type"] == "manga"
+            ][0]
+            try:
+                chapters_sorted[manga_id].append(chapter)
+            except (KeyError, ValueError, AttributeError):
+                chapters_sorted[manga_id] = [chapter]
+        return chapters_sorted
+
+    def _get_md_id(self, mangaplus_id: int) -> Optional[str]:
+        """Get the mangadex id from the mangaplus one."""
+        for md_id in self.manga_id_map:
+            if mangaplus_id in self.manga_id_map[md_id]:
+                return md_id
+
+    def _sort_chapters_by_manga(
+        self, updates: List[Chapter]
+    ) -> Dict[str, List[Chapter]]:
+        """Sort the chapters by manga id."""
+        chapters_sorted = {}
+
+        for chapter in updates:
+            md_id = self._get_md_id(chapter.manga_id)
+            if md_id is None:
+                logging.warning(
+                    f"No mangadex id found for mplus id {chapter.manga_id}."
+                )
+                continue
+
+            try:
+                chapters_sorted[md_id].append(chapter)
+            except (KeyError, ValueError, AttributeError):
+                chapters_sorted[md_id] = [chapter]
+        return chapters_sorted
+
+    def upload_chapters(self):
+        """Go through each new chapter and upload it to mangadex."""
+        # Sort each chapter by manga
+        updated_manga_chapters = self._sort_chapters_by_manga(self.updates)
+        all_manga_chapters = self._sort_chapters_by_manga(self.all_mplus_chapters)
+        self._delete_extra_chapters()
+        processes = []
+
+        self.md_auth_object.login()
+
+        for index, mangadex_manga_id in enumerate(updated_manga_chapters, start=1):
+            # Get each manga's uploaded chapters on mangadex
+            manga_uploader = MangaUploaderProcess(
+                **{
+                    "database_connection": self.database_connection,
+                    "session": self.session,
+                    "updated_manga_chapters": updated_manga_chapters[mangadex_manga_id],
+                    "all_manga_chapters": all_manga_chapters[mangadex_manga_id],
+                    "processes": processes,
+                    "mangadex_manga_id": mangadex_manga_id,
+                    "deleter_process_object": self.deleter_process_object,
+                    "md_auth_object": self.md_auth_object,
+                    "mplus_group": self.mplus_group,
+                    "mplus_group_chapters": self.mplus_group_chapters.get(
+                        mangadex_manga_id, []
+                    ),
+                }
+            )
+            manga_uploader.start_manga_uploading_process()
+
+            if index % 10 == 0:
+                self.md_auth_object.login()
 
 
 class MPlusAPI:
@@ -1308,7 +1467,7 @@ class MPlusAPI:
                     pass
 
                 chapter_number = f"{chapter_number}.{chapter_decimal}"
-        elif chapter_number == "One-Shot":
+        elif chapter_number.lower() in ("one-shot", "one.shot"):
             chapter_number = None
 
         if chapter_number is None:
@@ -1400,83 +1559,6 @@ class MPlusAPI:
                     updated_chapters.append(chapter_object)
 
         return updated_chapters
-
-
-class BotProcess:
-    def __init__(
-        self,
-        session: requests.Session,
-        updates: List[Chapter],
-        all_mplus_chapters: List[Chapter],
-        first_process_object: Optional["ChapterDeleterProcess"],
-        md_auth_object: AuthMD,
-        manga_id_map: Dict[str, List[int]],
-        database_connection: sqlite3.Connection,
-    ):
-        self.session = session
-        self.updates = updates
-        self.all_mplus_chapters = all_mplus_chapters
-        self.first_process_object = first_process_object
-        self.md_auth_object = md_auth_object
-        self.manga_id_map = manga_id_map
-        self.database_connection = database_connection
-        self.processes: List[multiprocessing.Process] = []
-        self.mplus_group = "4f1de6a2-f0c5-4ac5-bce5-02c7dbb67deb"
-
-    def _get_md_id(self, mangaplus_id: int) -> Optional[str]:
-        """Get the mangadex id from the mangaplus one."""
-        for md_id in self.manga_id_map:
-            if mangaplus_id in self.manga_id_map[md_id]:
-                return md_id
-
-    def _sort_chapters_by_manga(
-        self, updates: List[Chapter]
-    ) -> Dict[str, List[Chapter]]:
-        """Sort the chapters by manga id."""
-        chapters_sorted = {}
-
-        for chapter in updates:
-            md_id = self._get_md_id(chapter.manga_id)
-            if md_id is None:
-                logging.warning(
-                    f"No mangadex id found for mplus id {chapter.manga_id}."
-                )
-                continue
-
-            try:
-                chapters_sorted[md_id].append(chapter)
-            except (KeyError, ValueError, AttributeError):
-                chapters_sorted[md_id] = [chapter]
-        return chapters_sorted
-
-    def upload_chapters(self):
-        """Go through each new chapter and upload it to mangadex."""
-        # Sort each chapter by manga
-        updated_manga_chapters = self._sort_chapters_by_manga(self.updates)
-        all_manga_chapters = self._sort_chapters_by_manga(self.all_mplus_chapters)
-        processes = []
-
-        self.md_auth_object.login()
-
-        for index, mangadex_manga_id in enumerate(updated_manga_chapters, start=1):
-            # Get each manga's uploaded chapters on mangadex
-            manga_uploader = MangaUploaderProcess(
-                **{
-                    "database_connection": self.database_connection,
-                    "session": self.session,
-                    "updated_manga_chapters": updated_manga_chapters[mangadex_manga_id],
-                    "all_manga_chapters": all_manga_chapters[mangadex_manga_id],
-                    "processes": processes,
-                    "mangadex_manga_id": mangadex_manga_id,
-                    "deleter_process_object": self.first_process_object,
-                    "md_auth_object": self.md_auth_object,
-                    "mplus_group": self.mplus_group,
-                }
-            )
-            manga_uploader.start_manga_uploading_process()
-
-            if index % 10 == 0:
-                self.md_auth_object.login()
 
 
 def main(db_connection: Optional[sqlite3.Connection] = None):
