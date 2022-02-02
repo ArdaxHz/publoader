@@ -375,6 +375,8 @@ def request(
                     )
 
             if limit is not None and remaining is not None:
+                if int(remaining) == 0:
+                    remaining = limit
                 time.sleep(int(limit) / int(remaining))
 
             data = convert_json(response)
