@@ -21,7 +21,7 @@ from scheduler import Scheduler
 
 import proto.response_pb2 as response_pb
 
-__version__ = "1.2.8"
+__version__ = "1.2.9"
 
 mplus_language_map = {
     "0": "en",
@@ -348,15 +348,15 @@ def request(
             )
             # Requests remaining before ratelimit
             remaining = response.headers.get("x-ratelimit-remaining", None)
-            logging.debug("remaining is: %s", remaining)
+            logging.debug(f"remaining is: {remaining}")
             # Timestamp for when current ratelimit session(?) expires
             retry = response.headers.get("x-ratelimit-retry-after", None)
-            logging.debug("retry is: %s", retry)
+            logging.debug(f"retry is: {retry}")
             if retry is not None:
                 retry = datetime.fromtimestamp(int(retry))
             # The total ratelimit session hits
             limit = response.headers.get("x-ratelimit-limit", None)
-            logging.debug("limit is: %s", limit)
+            logging.debug(f"limit is: {limit}")
 
             if remaining == "0" and response.status_code != 429:
                 assert retry is not None
@@ -365,6 +365,9 @@ def request(
                 logging.warning(
                     f"A ratelimit has been exhausted, sleeping for: {sleep}"
                 )
+
+            if limit is not None and remaining is not None:
+                time.sleep(int(limit) / int(remaining))
 
             data = convert_json(response)
 
