@@ -21,7 +21,7 @@ from scheduler import Scheduler
 
 import proto.response_pb2 as response_pb
 
-__version__ = "1.2.9"
+__version__ = "1.2.30"
 
 mplus_language_map = {
     "0": "en",
@@ -66,16 +66,24 @@ def load_config_info(config: configparser.RawConfigParser):
         config["Paths"]["mangadex_api_url"] = "https://api.mangadex.org"
 
     if config["Paths"].get("manga_id_map_path", "") == "":
-        logging.info("Manga id map path empty, using default.")
+        logging.warning("Manga id map path empty, using default.")
         config["Paths"]["manga_id_map_path"] = "manga.json"
 
     if config["Paths"].get("title_regex_path", "") == "":
-        logging.info("Title regex map path empty, using default.")
+        logging.warning("Title regex map path empty, using default.")
         config["Paths"]["title_regex_path"] = "title_regex.json"
 
     if config["Paths"].get("mdauth_path", "") == "":
-        logging.info("mdauth path empty, using default.")
+        logging.warning("mdauth path empty, using default.")
         config["Paths"]["mdauth_path"] = ".mdauth"
+
+    if config["User Set"].get("bot_run_time_daily", "") == "":
+        logging.warning("bot run time daily empty, using default.")
+        config["Paths"]["bot_run_time_daily"] = "15:10"
+
+    if config["User Set"].get("bot_run_time_checks", "") == "":
+        logging.warning("bot run time checks empty, using default.")
+        config["Paths"]["bot_run_time_checks"] = "00:00"
 
 
 def open_config_file() -> configparser.RawConfigParser:
@@ -206,11 +214,6 @@ class Chapter:
             )
 
 
-class APIError(Exception):
-    def __init__(self, *args: object) -> None:
-        super().__init__(*args)
-
-
 def convert_json(response_to_convert: requests.Response) -> Optional[dict]:
     """Convert the api response into a parsable json."""
     critical_decode_error_message = (
@@ -316,16 +319,18 @@ class Route:
         verb: str,
         path: str,
         *,
-        parameters: dict = {},
+        params: dict = {},
         json: dict = {},
-        data: Any = None,
+        data: Optional[Any] = None,
+        files: Optional[Any] = None,
     ) -> None:
         self.verb: str = verb.upper()
         self.path: str = path
         self.url: str = f"{mangadex_api_url}/{self.path}"
-        self.params = parameters
+        self.params = params
         self.json = json
         self.data = data
+        self.files = files
 
 
 def request(
@@ -334,8 +339,6 @@ def request(
     md_auth_object: Optional["AuthMD"] = None,
     show_error: bool = True,
 ) -> CustomResponse:
-    logging.debug("Current request url: %s", route.url)
-
     response: Optional[requests.Response] = None
     for tries in range(5):
         try:
@@ -346,6 +349,10 @@ def request(
                 json=route.json,
                 data=route.data,
             )
+            logging.debug("Current request url: %s", response.url)
+            # The total ratelimit session hits
+            limit = response.headers.get("x-ratelimit-limit", None)
+            logging.debug(f"limit is: {limit}")
             # Requests remaining before ratelimit
             remaining = response.headers.get("x-ratelimit-remaining", None)
             logging.debug(f"remaining is: {remaining}")
@@ -354,17 +361,18 @@ def request(
             logging.debug(f"retry is: {retry}")
             if retry is not None:
                 retry = datetime.fromtimestamp(int(retry))
-            # The total ratelimit session hits
-            limit = response.headers.get("x-ratelimit-limit", None)
-            logging.debug(f"limit is: {limit}")
 
-            if remaining == "0" and response.status_code != 429:
-                assert retry is not None
-                delta = retry - datetime.now()
-                sleep = delta.total_seconds() + 1
-                logging.warning(
-                    f"A ratelimit has been exhausted, sleeping for: {sleep}"
-                )
+            if (
+                remaining is not None
+                and remaining == "0"
+                and response.status_code != 429
+            ):
+                if retry is not None:
+                    delta = retry - datetime.now()
+                    sleep = delta.total_seconds() + 1
+                    logging.warning(
+                        f"A ratelimit has been exhausted, sleeping for: {sleep}"
+                    )
 
             if limit is not None and remaining is not None:
                 time.sleep(int(limit) / int(remaining))
@@ -383,9 +391,11 @@ def request(
             error = print_error(response, show_error)
 
             if response.status_code == 429:
-                assert retry is not None
-                delta = retry - datetime.now()
-                sleep = delta.total_seconds() + 1
+                if retry is not None:
+                    delta = retry - datetime.now()
+                    sleep = delta.total_seconds() + 1
+                else:
+                    sleep = 5
                 logging.warning(f"A ratelimit has been hit, sleeping for: {sleep}")
                 time.sleep(sleep)
                 continue
@@ -396,7 +406,7 @@ def request(
                 time.sleep(sleep_)
                 continue
 
-            if response.status_code == 401 and md_auth_object is not None:
+            if response.status_code in (401, 403) and md_auth_object is not None:
                 md_auth_object.login()
                 continue
 
@@ -406,7 +416,7 @@ def request(
             time.sleep(5)
             continue
 
-    raise RuntimeError("Unreachable code in HTTP handling.")
+    return CustomResponse(0, error="Unreachable code in HTTP handling.")
 
 
 class AuthMD:
@@ -1107,14 +1117,11 @@ class BotProcess:
         iteration = 1
         created_at_since_time = "2000-01-01T00:00:00"
 
-        parameters = {}
-        parameters.update(params)
-
-        route = Route("GET", "chapter", parameters=parameters)
+        route = Route("GET", "chapter", params=params)
 
         while True:
             # Update the parameters with the new offset
-            parameters.update(
+            route.params.update(
                 {
                     "limit": limit,
                     "offset": offset,
