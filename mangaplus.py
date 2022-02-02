@@ -377,18 +377,19 @@ def request(
             if limit is not None and remaining is not None:
                 if int(remaining) == 0:
                     remaining = limit
-                time.sleep(int(limit) / int(remaining))
-
-            data = convert_json(response)
-
-            if 300 > response.status_code >= 200 and data is not None:
-                return CustomResponse(response.status_code, data=data)
-
-            if 300 > response.status_code >= 200 and data is None:
-                sleep_ = 1 + tries * 2
-                logging.warning("Couldn't convert api response into a json.")
+                sleep_ = int(limit) / int(remaining)
+                logging.debug(f"Sleeping for {sleep_}.")
                 time.sleep(sleep_)
-                continue
+
+            if 300 > response.status_code >= 200:
+                data = convert_json(response)
+                if data is not None:
+                    return CustomResponse(response.status_code, data=data)
+                else:
+                    sleep_ = 1 + tries * 2
+                    logging.warning("Couldn't convert api response into a json.")
+                    time.sleep(sleep_)
+                    continue
 
             error = print_error(response, show_error)
 
