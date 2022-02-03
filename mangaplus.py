@@ -348,8 +348,9 @@ def request(
                 params=route.params,
                 json=route.json,
                 data=route.data,
+                files=route.files,
             )
-            logging.debug("Current request url: %s", response.url)
+            logging.debug(f"Current request url: {route.verb} {response.url}")
             # The total ratelimit session hits
             limit = response.headers.get("x-ratelimit-limit", None)
             logging.debug(f"limit is: {limit}")
@@ -374,12 +375,12 @@ def request(
                         f"A ratelimit has been exhausted, sleeping for: {sleep}"
                     )
 
-            if limit is not None and remaining is not None:
-                if int(remaining) == 0:
-                    remaining = limit
-                sleep_ = int(limit) / int(remaining)
-                logging.debug(f"Sleeping for {sleep_}.")
-                time.sleep(sleep_)
+            # if limit is not None and remaining is not None:
+            #     if int(remaining) == 0:
+            #         remaining = limit
+            #     sleep_ = int(limit) / int(remaining)
+            #     logging.debug(f"Sleeping for {sleep_}.")
+            #     time.sleep(sleep_)
 
             if 300 > response.status_code >= 200:
                 data = convert_json(response)
