@@ -21,7 +21,7 @@ from scheduler import Scheduler
 
 import proto.response_pb2 as response_pb
 
-__version__ = "1.2.30"
+__version__ = "1.3.0"
 
 mplus_language_map = {
     "0": "en",
@@ -1277,7 +1277,6 @@ class MPlusAPI:
         self.title_regexes = self._open_title_regex(
             Path(config["Paths"]["title_regex_path"])
         )
-        self.empty_titles = self.title_regexes.get("empty", [])
 
         self.get_mplus_updated_manga()
         self.get_mplus_updates()
@@ -1359,7 +1358,7 @@ class MPlusAPI:
             if process is not None:
                 process.join()
 
-    def _open_title_regex(self, title_regex_path: Path) -> Dict[str, List[int]]:
+    def _open_title_regex(self, title_regex_path: Path) -> dict:
         """Open the chapter title regex."""
         try:
             with open(title_regex_path, "r") as title_regex_fp:
@@ -1568,6 +1567,8 @@ class MPlusAPI:
                 self._strip_chapter_number(chap_number)
                 for chap_number in chapter_number.split(",")
             ]
+
+        chapter_number_split: List[Optional[str]] = chapter_number_split
         return chapter_number_split
 
     def _normalise_chapter_title(
@@ -1582,15 +1583,23 @@ class MPlusAPI:
 
         title = str(chapter.chapter_title)
         normalised_title = title
-        pattern_to_use = None
+        pattern_to_use: Optional[re.Pattern[str]] = None
         replace_string = ""
 
         if (
-            chapter.manga_id in self.empty_titles
+            chapter.manga_id in self.title_regexes.get("empty", [])
             and None not in chapter_number
             or title.lower() in ("final chapter",)
         ):
             normalised_title = None
+        elif chapter.manga_id in self.title_regexes.get("noformat", []):
+            return title
+        elif chapter.manga_id in self.title_regexes.get("custom", {}):
+            pattern_to_use = re.compile(
+                self.title_regexes["custom"][str(chapter.manga_id)]
+                .encode("utf-8")
+                .decode("unicode_escape")
+            )
         elif ":" in title:
             pattern_to_use = colon_regex
         elif no_title_regex.match(title):
