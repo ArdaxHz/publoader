@@ -21,7 +21,7 @@ from scheduler import Scheduler
 
 import proto.response_pb2 as response_pb
 
-__version__ = "1.3.2"
+__version__ = "1.3.3"
 
 mplus_language_map = {
     "0": "en",
@@ -292,7 +292,7 @@ def print_error(
         if not errors:
             errors = http_error_codes.get(str(status_code), "")
 
-        error_message = f"Error: {errors}."
+        error_message = f"Error: {errors}"
         logging.warning(error_message)
         if show_error:
             print(error_message)
@@ -380,6 +380,7 @@ def request(
                 )
                 time.sleep(sleep)
                 if response.status_code == 429:
+                    logging.debug(f"Hit a 429, retrying. {route}")
                     continue
 
             if limit is not None and remaining is not None:
@@ -392,8 +393,9 @@ def request(
                 logging.debug(f"Sleeping for {mangadex_ratelimit_time}.")
                 time.sleep(mangadex_ratelimit_time)
 
+            data = convert_json(response)
+
             if 300 > response.status_code >= 200:
-                data = convert_json(response)
                 if data is not None:
                     return CustomResponse(response.status_code, data=data)
                 else:
@@ -504,7 +506,10 @@ class AuthMD:
         )
 
         auth_check_response = request(self.session, route)
-        if auth_check_response.data is not None:
+        if (
+            auth_check_response.status_code == 200
+            and auth_check_response.data is not None
+        ):
             if auth_check_response.data["isAuthenticated"]:
                 logging.info("Already logged in.")
                 return True
@@ -532,7 +537,7 @@ class AuthMD:
         )
 
         login_response = request(self.session, route)
-        if login_response.data is not None:
+        if login_response.status_code == 200 and login_response.data is not None:
             login_token = login_response.data["token"]
             self._update_headers(login_token["session"])
             self._save_session(login_token)
@@ -614,6 +619,8 @@ def update_database(
         "INSERT OR IGNORE INTO posted_mplus_ids (chapter_id) VALUES (?)",
         (mplus_chapter_id,),
     )
+
+    logging.warning(f"Added to database: {succesful_upload_id} - {chapter}")
     database_connection.commit()
 
 
@@ -623,9 +630,9 @@ def open_manga_id_map(manga_map_path: Path) -> Dict[str, List[int]]:
         with open(manga_map_path, "r") as manga_map_fp:
             manga_map = json.load(manga_map_fp)
         logging.info("Opened manga id map file.")
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as e:
         logging.critical("Manga map file is corrupted.")
-        raise json.JSONDecodeError("Manga map file is corrupted.")
+        raise json.JSONDecodeError(e.msg, e.doc, e.pos)
     except FileNotFoundError:
         logging.critical("Manga map file is missing.")
         raise FileNotFoundError("Couldn't file manga map file.")
@@ -640,11 +647,9 @@ class ChapterUploaderProcess:
         self.chapter: Chapter = kwargs["chapter"]
         self.md_auth_object: AuthMD = kwargs["md_auth_object"]
         self.mplus_group: str = kwargs["mplus_group"]
-
-        self.chapter_language = self.chapter.chapter_language
         self.mplus_chapter_url = "https://mangaplus.shueisha.co.jp/viewer/{}"
 
-        self.manga_generic_error_message = f"Manga: {self.chapter.manga.manga_name}, {self.mangadex_manga_id} - {self.chapter.manga_id}, chapter: {self.chapter.chapter_number}, language: {self.chapter_language}, title: {self.chapter.chapter_title}"
+        self.manga_generic_error_message = f"Manga: {self.chapter.manga.manga_name}, {self.mangadex_manga_id} - {self.chapter.manga_id}, chapter: {self.chapter.chapter_number}, language: {self.chapter.chapter_language}, title: {self.chapter.chapter_title}"
         self.upload_retry_total = 3
         self.upload_session_id: Optional[str] = None
 
@@ -657,18 +662,30 @@ class ChapterUploaderProcess:
         request(self.session, route, show_error=False)
         logging.info(f"Sent {session_id} to be deleted.")
 
-    def _delete_exising_upload_session(self, chapter_upload_session_retry: int):
+    def _delete_exising_upload_session(
+        self, chapter_upload_session_retry: int, check_for_session=False
+    ) -> Optional[str]:
         """Remove any exising upload sessions to not error out as mangadex only allows one upload session at a time."""
         if chapter_upload_session_retry > 0:
             return
 
         route = Route("GET", f"{md_upload_api_url}")
+        logging.debug(
+            f"Checking for upload sessions for manga {self.mangadex_manga_id}, chapter {self.chapter}."
+        )
 
-        removal_retry = 0
-        while removal_retry < self.upload_retry_total:
+        if check_for_session:
+            time.sleep(0.5)
+
+        for removal_retry in range(self.upload_retry_total):
             existing_session = request(self.session, route, show_error=False)
 
-            if existing_session.data is not None:
+            if (
+                existing_session.status_code == 200
+                and existing_session.data is not None
+            ):
+                if check_for_session:
+                    return existing_session.data["data"]["id"]
                 self.remove_upload_session(existing_session.data["data"]["id"])
                 return
             elif existing_session.status_code == 404:
@@ -677,12 +694,12 @@ class ChapterUploaderProcess:
             elif existing_session.status_code == 401:
                 logging.warning("Not logged in, logging in and retrying.")
                 self.md_auth_object.login()
-                removal_retry += 1
+                continue
             else:
-                removal_retry += 1
                 logging.warning(
                     f"Couldn't delete the exising upload session, retrying."
                 )
+                continue
 
         logging.error("Exising upload session not deleted.")
         raise Exception(f"Couldn't delete existing upload session.")
@@ -694,7 +711,7 @@ class ChapterUploaderProcess:
             if (
                 md_chapter["attributes"]["chapter"] == self.chapter.chapter_number
                 and md_chapter["attributes"]["translatedLanguage"]
-                == self.chapter_language
+                == self.chapter.chapter_language
                 and md_chapter["attributes"]["externalUrl"] is not None
             ):
                 dupe_chapter_message = f"{self.manga_generic_error_message} already exists on mangadex, skipping."
@@ -710,7 +727,6 @@ class ChapterUploaderProcess:
 
     def _create_upload_session(self) -> Optional[dict]:
         """Try create an upload session 3 times."""
-        chapter_upload_session_retry = 0
         chapter_upload_session_successful = False
 
         route = Route(
@@ -719,11 +735,18 @@ class ChapterUploaderProcess:
             json={"manga": self.mangadex_manga_id, "groups": [self.mplus_group]},
         )
 
-        while chapter_upload_session_retry < self.upload_retry_total:
+        for chapter_upload_session_retry in range(self.upload_retry_total):
             # Delete existing upload session if exists
             self._delete_exising_upload_session(chapter_upload_session_retry)
             # Start the upload session
             upload_session_response = request(self.session, route, self.md_auth_object)
+            check_session_id = self._delete_exising_upload_session(0, True)
+
+            if check_session_id is None:
+                logging.warning(
+                    f"Checking for just-made session returned an error, retrying."
+                )
+                continue
 
             if upload_session_response.status_code != 200:
                 logging.error(
@@ -731,16 +754,18 @@ class ChapterUploaderProcess:
                 )
                 print("Couldn't create an upload session.")
 
-            if upload_session_response.data is not None:
+            if (
+                upload_session_response.status_code == 200
+                and upload_session_response.data is not None
+            ):
                 chapter_upload_session_successful = True
-                chapter_upload_session_retry == self.upload_retry_total
                 return upload_session_response.data
             else:
                 upload_session_response_json_message = f"Couldn't convert successful upload session creation into a json, retrying. {self.manga_generic_error_message}."
                 logging.error(upload_session_response_json_message)
                 print(upload_session_response_json_message)
 
-            chapter_upload_session_retry += 1
+            continue
 
         # Couldn't create an upload session, skip the chapter
         if not chapter_upload_session_successful:
@@ -751,7 +776,6 @@ class ChapterUploaderProcess:
 
     def _commit_chapter(self) -> bool:
         """Try commit the chapter to mangadex."""
-        commit_retries = 0
         succesful_upload = False
 
         route = Route(
@@ -762,7 +786,7 @@ class ChapterUploaderProcess:
                     "volume": None,
                     "chapter": self.chapter.chapter_number,
                     "title": self.chapter.chapter_title,
-                    "translatedLanguage": self.chapter_language,
+                    "translatedLanguage": self.chapter.chapter_language,
                     "externalUrl": self.mplus_chapter_url.format(
                         self.chapter.chapter_id
                     ),
@@ -774,7 +798,7 @@ class ChapterUploaderProcess:
             },
         )
 
-        while commit_retries < self.upload_retry_total:
+        for commit_retries in range(self.upload_retry_total):
             chapter_commit_response = request(self.session, route, self.md_auth_object)
 
             if chapter_commit_response.status_code == 200:
@@ -789,25 +813,25 @@ class ChapterUploaderProcess:
                     update_database(
                         self.database_connection, self.chapter, succesful_upload_id
                     )
-                    commit_retries == self.upload_retry_total
-                    return True
+                    break
 
                 chapter_commit_response_json_message = f"Couldn't convert successful chapter commit api response into a json"
                 logging.error(chapter_commit_response_json_message)
                 print(chapter_commit_response_json_message)
-                return True
+                break
 
             else:
                 logging.warning(f"Failed to commit {self.upload_session_id}, retrying.")
 
-            commit_retries += 1
+            continue
 
         if not succesful_upload:
-            error_message = f"Couldn't commit {self.upload_session_id}, manga {self.mangadex_manga_id} - {self.chapter.manga_id} chapter {self.chapter.chapter_number}."
+            error_message = f"Couldn't commit {self.upload_session_id}, manga {self.mangadex_manga_id} - {self.chapter.manga_id} chapter {self.chapter.chapter_number} language {self.chapter.chapter_language}."
             logging.error(error_message)
             print(error_message)
             self.remove_upload_session()
             return False
+        return True
 
     def start_upload(self, manga_chapters: list) -> Literal[0, 1, 2]:
         duplicate_chapter = self._check_for_duplicate_chapter(manga_chapters)
@@ -819,6 +843,9 @@ class ChapterUploaderProcess:
             return 1
 
         self.upload_session_id = upload_session_response_json["data"]["id"]
+        logging.info(
+            f"Created upload session: {self.upload_session_id} - {self.chapter}"
+        )
         chapter_committed = self._commit_chapter()
         if not chapter_committed:
             self.remove_upload_session()
@@ -1375,9 +1402,9 @@ class MPlusAPI:
             with open(title_regex_path, "r") as title_regex_fp:
                 title_regexes = json.load(title_regex_fp)
             logging.info("Opened title regex file.")
-        except json.JSONDecodeError:
+        except json.JSONDecodeError as e:
             logging.critical("Title regex file is corrupted.")
-            raise json.JSONDecodeError("Title regex file is corrupted.")
+            raise json.JSONDecodeError(e.msg, e.doc, e.pos)
         except FileNotFoundError:
             logging.critical("Title regex file is missing.")
             raise FileNotFoundError("Couldn't file title regex file.")
@@ -1848,6 +1875,7 @@ if __name__ == "__main__":
     )
 
     multiprocessing_manager = multiprocessing.Manager()
+    main()
     schedule = Scheduler(tzinfo=timezone.utc)
     schedule.daily(
         dtTime(
