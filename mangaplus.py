@@ -21,7 +21,7 @@ from scheduler import Scheduler
 
 import proto.response_pb2 as response_pb
 
-__version__ = "1.3.1"
+__version__ = "1.3.2"
 
 mplus_language_map = {
     "0": "en",
@@ -911,6 +911,7 @@ class ChapterDeleterProcess:
         self._delete_expired_chapters()
 
     def delete_async(self) -> multiprocessing.Process:
+        return
         """Delete chapters concurrently."""
         if self.chapters_to_delete:
             self.md_auth_object.login()
@@ -1585,11 +1586,13 @@ class MPlusAPI:
         self, chapter: Chapter, chapter_number: List[Union[str, None]]
     ) -> Optional[str]:
         """Strip away the title prefix."""
-        colon_regex = re.compile(r"^.+:\s?")
-        no_title_regex = re.compile(r"^\S+\s?\d+(?:(?:\,|\-)\d{0,2})?$")
-        hashtag_regex = re.compile(r"^(?:\S+\s?)?#\d+(?:(?:\,|\-)\d{0,2})?\s?")
-        period_regex = re.compile(r"^(?:\S+\s?)?\d+(?:(?:\,|\-)\d{0,2})?\s?[\.\/\-]\s?")
-        spaces_regex = re.compile(r"^(?:\S+\s?)?\d+(?:(?:\,|\-)\d{0,2})?\s?")
+        colon_regex = re.compile(r"^.+:\s?", re.I)
+        no_title_regex = re.compile(r"^\S+\s?\d+(?:(?:\,|\-)\d{0,2})?$", re.I)
+        hashtag_regex = re.compile(r"^(?:\S+\s?)?#\d+(?:(?:\,|\-)\d{0,2})?\s?", re.I)
+        period_regex = re.compile(
+            r"^(?:\S+\s?)?\d+(?:(?:\,|\-)\d{0,2})?\s?[\.\/\-]\s?", re.I
+        )
+        spaces_regex = re.compile(r"^(?:\S+\s?)?\d+(?:(?:\,|\-)\d{0,2})?\s?", re.I)
 
         title = str(chapter.chapter_title)
         normalised_title = title
@@ -1604,11 +1607,9 @@ class MPlusAPI:
             normalised_title = None
         elif chapter.manga_id in self.title_regexes.get("noformat", []):
             return title
-        elif chapter.manga_id in self.title_regexes.get("custom", {}):
+        elif str(chapter.manga_id) in self.title_regexes.get("custom", {}):
             pattern_to_use = re.compile(
-                self.title_regexes["custom"][str(chapter.manga_id)]
-                .encode("utf-8")
-                .decode("unicode_escape")
+                self.title_regexes["custom"][str(chapter.manga_id)], re.I
             )
         elif ":" in title:
             pattern_to_use = colon_regex
