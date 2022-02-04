@@ -1872,7 +1872,7 @@ if __name__ == "__main__":
             minute=daily_run_time_checks_minute,
             tzinfo=timezone.utc,
         ),
-        move_chapters,
+        main,
     )
 
     while True:
