@@ -277,12 +277,13 @@ def print_error(error_response: requests.Response) -> str:
         if not errors:
             errors = http_error_codes.get(str(status_code), "")
 
-        error_message = f"Error: {errors}."
+        error_message = f"Error: {errors}"
         logging.warning(error_message)
         print(error_message)
     except KeyError:
         error_message = f"KeyError {status_code}: {error_json}."
         logging.warning(error_message)
+        print(error_message)
 
     return error_message
 
@@ -386,7 +387,6 @@ class AuthMD:
                 self._save_session(login_token)
                 return True
 
-        logging.error(f"Couldn't login to mangadex using the details provided.")
         error = print_error(login_response)
         logging.error(
             f"Couldn't login to mangadex using the details provided. Error: {error}."
@@ -467,7 +467,7 @@ def update_database(
         (mplus_chapter_id,),
     )
 
-    logging.warning(f"Added to database: {succesful_upload_id} - {chapter}")
+    logging.debug(f"Added to database: {succesful_upload_id} - {chapter}")
     database_connection.commit()
 
 
@@ -477,9 +477,11 @@ def open_manga_id_map(manga_map_path: Path) -> Dict[str, List[int]]:
         with open(manga_map_path, "r") as manga_map_fp:
             manga_map = json.load(manga_map_fp)
         logging.info("Opened manga id map file.")
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as e:
         logging.critical("Manga map file is corrupted.")
-        raise json.JSONDecodeError("Manga map file is corrupted.")
+        raise json.JSONDecodeError(
+            msg="Manga map file is corrupted.", doc=e.doc, pos=e.pos
+        )
     except FileNotFoundError:
         logging.critical("Manga map file is missing.")
         raise FileNotFoundError("Couldn't file manga map file.")
@@ -495,7 +497,6 @@ class ChapterUploaderProcess:
         self.md_auth_object: AuthMD = kwargs["md_auth_object"]
         self.mplus_group: str = kwargs["mplus_group"]
 
-        self.chapter_language = self.chapter.chapter_language
         self.mplus_chapter_url = "https://mangaplus.shueisha.co.jp/viewer/{}"
 
         self.manga_generic_error_message = f"Manga: {self.chapter.manga.manga_name}, {self.mangadex_manga_id} - {self.chapter.manga_id}, chapter: {self.chapter.chapter_number}, language: {self.chapter.chapter_language}, title: {self.chapter.chapter_title}"
@@ -533,11 +534,11 @@ class ChapterUploaderProcess:
                         f"Couldn't convert exising upload session response into a json, retrying."
                     )
                 else:
+                    if check_for_session:
+                        return existing_session_json["data"]["id"]
                     self.remove_upload_session(existing_session_json["data"]["id"])
                     return
 
-                if check_for_session:
-                    return existing_session.data["data"]["id"]
             elif existing_session.status_code == 404:
                 logging.info("No existing upload session found.")
                 return
@@ -591,11 +592,15 @@ class ChapterUploaderProcess:
                 json={"manga": self.mangadex_manga_id, "groups": [self.mplus_group]},
             )
 
+            check_session_id = self._delete_exising_upload_session(0, True)
+
             if check_session_id is None:
                 logging.warning(
                     f"Checking for just-made session returned an error, retrying."
                 )
+                chapter_upload_session_retry += 1
                 continue
+
             if upload_session_response.status_code == 401:
                 self.md_auth_object.login()
 
@@ -640,7 +645,7 @@ class ChapterUploaderProcess:
                         "volume": None,
                         "chapter": self.chapter.chapter_number,
                         "title": self.chapter.chapter_title,
-                        "translatedLanguage": self.chapter_language,
+                        "translatedLanguage": self.chapter.chapter_language,
                         "externalUrl": self.mplus_chapter_url.format(
                             self.chapter.chapter_id
                         ),
@@ -1293,7 +1298,9 @@ class MPlusAPI:
             logging.info("Opened title regex file.")
         except json.JSONDecodeError as e:
             logging.critical("Title regex file is corrupted.")
-            raise json.JSONDecodeError(e.msg, e.doc, e.pos)
+            raise json.JSONDecodeError(
+                msg="Title regex file is corrupted.", doc=e.doc, pos=e.pos
+            )
         except FileNotFoundError:
             logging.critical("Title regex file is missing.")
             raise FileNotFoundError("Couldn't file title regex file.")
@@ -1624,7 +1631,7 @@ def main(db_connection: Optional[sqlite3.Connection] = None):
 
     # Get new manga and chapter updates
     mplus_api = MPlusAPI(manga_map_mplus_ids, posted_chapters_ids)
-    updated_manga = mplus_api.untracked_manga
+    # updated_manga = mplus_api.untracked_manga
     updates = mplus_api.updated_chapters
     all_mplus_chapters = mplus_api.all_mplus_chapters
 
