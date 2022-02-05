@@ -232,6 +232,7 @@ def convert_json(response_to_convert: requests.Response) -> Optional[dict]:
     return converted_response
 
 
+def print_error(error_response: requests.Response) -> str:
     """Print the errors the site returns."""
     status_code = error_response.status_code
     error_converting_json_log_message = "{} when converting error_response into json."
@@ -243,6 +244,7 @@ def convert_json(response_to_convert: requests.Response) -> Optional[dict]:
     if status_code == 429:
         error_message = f"429: {http_error_codes.get(str(status_code))}"
         logging.error(error_message)
+        print(error_message)
         time.sleep(mangadex_ratelimit_time * 4)
         return error_message
 
@@ -251,6 +253,7 @@ def convert_json(response_to_convert: requests.Response) -> Optional[dict]:
         error_json = error_response.json()
     except json.JSONDecodeError as e:
         logging.error(error_converting_json_log_message.format(e))
+        print(error_converting_json_print_message)
         return error_converting_json_print_message
     # Maybe already a json object
     except AttributeError:
@@ -260,6 +263,7 @@ def convert_json(response_to_convert: requests.Response) -> Optional[dict]:
             error_json = json.loads(error_response.content)
         except json.JSONDecodeError as e:
             logging.error(error_converting_json_log_message.format(e))
+            print(error_converting_json_print_message)
             return error_converting_json_print_message
 
     # Api response doesn't follow the normal api error format
@@ -273,7 +277,9 @@ def convert_json(response_to_convert: requests.Response) -> Optional[dict]:
         if not errors:
             errors = http_error_codes.get(str(status_code), "")
 
+        error_message = f"Error: {errors}."
         logging.warning(error_message)
+        print(error_message)
     except KeyError:
         error_message = f"KeyError {status_code}: {error_json}."
         logging.warning(error_message)
@@ -471,7 +477,9 @@ def open_manga_id_map(manga_map_path: Path) -> Dict[str, List[int]]:
         with open(manga_map_path, "r") as manga_map_fp:
             manga_map = json.load(manga_map_fp)
         logging.info("Opened manga id map file.")
+    except json.JSONDecodeError:
         logging.critical("Manga map file is corrupted.")
+        raise json.JSONDecodeError("Manga map file is corrupted.")
     except FileNotFoundError:
         logging.critical("Manga map file is missing.")
         raise FileNotFoundError("Couldn't file manga map file.")
