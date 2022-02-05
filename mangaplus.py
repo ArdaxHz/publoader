@@ -13,7 +13,7 @@ from datetime import date, datetime
 from datetime import time as dtTime
 from datetime import timezone
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Dict, List, Literal, Optional, Union
 
 import requests
 import scheduler.trigger as trigger
@@ -21,7 +21,7 @@ from scheduler import Scheduler
 
 import proto.response_pb2 as response_pb
 
-__version__ = "1.3.3"
+__version__ = "1.3.4"
 
 mplus_language_map = {
     "0": "en",
@@ -66,24 +66,16 @@ def load_config_info(config: configparser.RawConfigParser):
         config["Paths"]["mangadex_api_url"] = "https://api.mangadex.org"
 
     if config["Paths"].get("manga_id_map_path", "") == "":
-        logging.warning("Manga id map path empty, using default.")
+        logging.info("Manga id map path empty, using default.")
         config["Paths"]["manga_id_map_path"] = "manga.json"
 
     if config["Paths"].get("title_regex_path", "") == "":
-        logging.warning("Title regex map path empty, using default.")
+        logging.info("Title regex map path empty, using default.")
         config["Paths"]["title_regex_path"] = "title_regex.json"
 
     if config["Paths"].get("mdauth_path", "") == "":
-        logging.warning("mdauth path empty, using default.")
+        logging.info("mdauth path empty, using default.")
         config["Paths"]["mdauth_path"] = ".mdauth"
-
-    if config["User Set"].get("bot_run_time_daily", "") == "":
-        logging.warning("bot run time daily empty, using default.")
-        config["Paths"]["bot_run_time_daily"] = "15:10"
-
-    if config["User Set"].get("bot_run_time_checks", "") == "":
-        logging.warning("bot run time checks empty, using default.")
-        config["Paths"]["bot_run_time_checks"] = "00:00"
 
 
 def open_config_file() -> configparser.RawConfigParser:
@@ -102,7 +94,7 @@ def open_config_file() -> configparser.RawConfigParser:
 
 config = open_config_file()
 mangadex_api_url = config["Paths"]["mangadex_api_url"]
-md_upload_api_url = "upload"
+md_upload_api_url = f"{mangadex_api_url}/upload"
 
 try:
     mangadex_ratelimit_time = int(config["User Set"].get("mangadex_ratelimit_time", ""))
@@ -236,13 +228,10 @@ def convert_json(response_to_convert: requests.Response) -> Optional[dict]:
             print(critical_decode_error_message)
             return
 
-    # logging.debug("Converted api response into json.")
+    logging.debug("Convert api response into json.")
     return converted_response
 
 
-def print_error(
-    error_response: requests.Response, show_error: bool = True
-) -> Optional[str]:
     """Print the errors the site returns."""
     status_code = error_response.status_code
     error_converting_json_log_message = "{} when converting error_response into json."
@@ -251,14 +240,10 @@ def print_error(
     )
     error_message = ""
 
-    if status_code in range(200, 300):
-        return
-
     if status_code == 429:
         error_message = f"429: {http_error_codes.get(str(status_code))}"
         logging.error(error_message)
-        if show_error:
-            print(error_message)
+        time.sleep(mangadex_ratelimit_time * 4)
         return error_message
 
     # Api didn't return json object
@@ -266,8 +251,6 @@ def print_error(
         error_json = error_response.json()
     except json.JSONDecodeError as e:
         logging.error(error_converting_json_log_message.format(e))
-        if show_error:
-            print(error_converting_json_print_message)
         return error_converting_json_print_message
     # Maybe already a json object
     except AttributeError:
@@ -277,8 +260,6 @@ def print_error(
             error_json = json.loads(error_response.content)
         except json.JSONDecodeError as e:
             logging.error(error_converting_json_log_message.format(e))
-            if show_error:
-                print(error_converting_json_print_message)
             return error_converting_json_print_message
 
     # Api response doesn't follow the normal api error format
@@ -292,147 +273,12 @@ def print_error(
         if not errors:
             errors = http_error_codes.get(str(status_code), "")
 
-        error_message = f"Error: {errors}"
         logging.warning(error_message)
-        if show_error:
-            print(error_message)
     except KeyError:
         error_message = f"KeyError {status_code}: {error_json}."
         logging.warning(error_message)
-        if show_error:
-            print(error_message)
 
     return error_message
-
-
-class CustomResponse:
-    def __init__(
-        self,
-        status_code: int,
-        *,
-        data: Optional[dict] = None,
-        error: Optional[str] = None,
-    ) -> None:
-        self.status_code = status_code
-        self.data = data
-        self.error = error
-
-
-class Route:
-    def __init__(
-        self,
-        verb: str,
-        path: str,
-        *,
-        params: dict = {},
-        json: dict = {},
-        data: Optional[Any] = None,
-        files: Optional[Any] = None,
-    ) -> None:
-        self.verb: str = verb.upper()
-        self.path: str = path
-        self.url: str = f"{mangadex_api_url}/{self.path}"
-        self.params = params
-        self.json = json
-        self.data = data
-        self.files = files
-
-
-def request(
-    session: requests.Session,
-    route: Route,
-    md_auth_object: Optional["AuthMD"] = None,
-    show_error: bool = True,
-) -> CustomResponse:
-    response: Optional[requests.Response] = None
-    for tries in range(5):
-        try:
-            response = session.request(
-                route.verb,
-                route.url,
-                params=route.params,
-                json=route.json,
-                data=route.data,
-                files=route.files,
-            )
-            logging.debug(f"Current request url: {route.verb} {response.url}")
-            # The total ratelimit session hits
-            limit = response.headers.get("x-ratelimit-limit", None)
-            logging.debug(f"limit is: {limit}")
-            # Requests remaining before ratelimit
-            remaining = response.headers.get("x-ratelimit-remaining", None)
-            logging.debug(f"remaining is: {remaining}")
-            # Timestamp for when current ratelimit session(?) expires
-            retry = response.headers.get("x-ratelimit-retry-after", None)
-            logging.debug(f"retry is: {retry}")
-            if retry is not None:
-                retry = datetime.fromtimestamp(int(retry))
-
-            if remaining is not None and remaining == "0":
-                if retry is not None:
-                    delta = retry - datetime.now()
-                    sleep = delta.total_seconds() + 1
-                else:
-                    sleep = 5
-
-                logging.warning(
-                    f"A ratelimit has been exhausted, sleeping for: {sleep}"
-                )
-                time.sleep(sleep)
-                if response.status_code == 429:
-                    logging.debug(f"Hit a 429, retrying. {route}")
-                    continue
-
-            if limit is not None and remaining is not None:
-                if int(remaining) == 0:
-                    remaining = limit
-                sleep_ = int(limit) / int(remaining)
-                logging.debug(f"Sleeping for {sleep_}.")
-                time.sleep(sleep_)
-            elif limit is None and remaining is None:
-                logging.debug(f"Sleeping for {mangadex_ratelimit_time}.")
-                time.sleep(mangadex_ratelimit_time)
-
-            data = convert_json(response)
-
-            if 300 > response.status_code >= 200:
-                if data is not None:
-                    return CustomResponse(response.status_code, data=data)
-                else:
-                    sleep_ = 1 + tries * 2
-                    logging.warning("Couldn't convert api response into a json.")
-                    time.sleep(sleep_)
-                    continue
-
-            error = print_error(response, show_error)
-
-            if response.status_code == 429:
-                if retry is not None:
-                    delta = retry - datetime.now()
-                    sleep = delta.total_seconds() + 1
-                else:
-                    sleep = 5
-                logging.warning(f"A ratelimit has been hit, sleeping for: {sleep}")
-                time.sleep(sleep)
-                continue
-
-            if response.status_code in (500, 502, 504):
-                sleep_ = 1 + tries * 2
-                logging.warning(f"Hit an API error, trying again in: {sleep_}")
-                time.sleep(sleep_)
-                continue
-
-            if response.status_code in (401, 403) and md_auth_object is not None:
-                md_auth_object.login()
-                continue
-
-            return CustomResponse(response.status_code, error=error)
-        except (requests.RequestException,) as error:
-            logging.error(f"Requests error occurred: {error}")
-            time.sleep(5)
-            continue
-
-    return CustomResponse(0, error="Unreachable code in HTTP handling.")
 
 
 class AuthMD:
@@ -443,7 +289,7 @@ class AuthMD:
         self.successful_login = False
         self.refresh_token = None
         self.token_file = root_path.joinpath(config["Paths"]["mdauth_path"])
-        self.md_auth_api_route = "auth"
+        self.md_auth_api_url = f"{mangadex_api_url}/auth"
 
     def _open_auth_file(self) -> Optional[str]:
         try:
@@ -470,16 +316,12 @@ class AuthMD:
 
     def _refresh_token(self) -> bool:
         """Use the refresh token to get a new session token."""
-        route = Route(
-            "POST",
-            f"{self.md_auth_api_route}/refresh",
-            json={"token": self.refresh_token},
+        refresh_response = self.session.post(
+            f"{self.md_auth_api_url}/refresh", json={"token": self.refresh_token}
         )
 
-        refresh_response = request(self.session, route)
-
         if refresh_response.status_code == 200:
-            refresh_response_json = refresh_response.data
+            refresh_response_json = convert_json(refresh_response)
             if refresh_response_json is not None:
                 refresh_data = refresh_response_json["token"]
 
@@ -488,31 +330,26 @@ class AuthMD:
                 return True
             return False
         elif refresh_response.status_code in (401, 403):
-            error = refresh_response.error
+            error = print_error(refresh_response)
             logging.warning(
                 f"Couldn't login using refresh token, logging in using your account. Error: {error}"
             )
             return self._login_using_details()
         else:
-            error = refresh_response.error
+            error = print_error(refresh_response)
             logging.error(f"Couldn't refresh token. Error: {error}")
             return False
 
     def _check_login(self) -> bool:
         """Try login using saved session token."""
-        route = Route(
-            "GET",
-            f"{self.md_auth_api_route}/check",
-        )
+        auth_check_response = self.session.get(f"{self.md_auth_api_url}/check")
 
-        auth_check_response = request(self.session, route)
-        if (
-            auth_check_response.status_code == 200
-            and auth_check_response.data is not None
-        ):
-            if auth_check_response.data["isAuthenticated"]:
-                logging.info("Already logged in.")
-                return True
+        if auth_check_response.status_code == 200:
+            auth_data = convert_json(auth_check_response)
+            if auth_data is not None:
+                if auth_data["isAuthenticated"]:
+                    logging.info("Already logged in.")
+                    return True
 
         if self.refresh_token is None:
             self.refresh_token = self._open_auth_file()
@@ -530,20 +367,24 @@ class AuthMD:
             logging.critical(critical_message)
             raise Exception(critical_message)
 
-        route = Route(
-            "POST",
-            f"{self.md_auth_api_route}/login",
+        login_response = self.session.post(
+            f"{self.md_auth_api_url}/login",
             json={"username": username, "password": password},
         )
 
-        login_response = request(self.session, route)
-        if login_response.status_code == 200 and login_response.data is not None:
-            login_token = login_response.data["token"]
-            self._update_headers(login_token["session"])
-            self._save_session(login_token)
-            return True
+        if login_response.status_code == 200:
+            login_response_json = convert_json(login_response)
+            if login_response_json is not None:
+                login_token = login_response_json["token"]
+                self._update_headers(login_token["session"])
+                self._save_session(login_token)
+                return True
 
         logging.error(f"Couldn't login to mangadex using the details provided.")
+        error = print_error(login_response)
+        logging.error(
+            f"Couldn't login to mangadex using the details provided. Error: {error}."
+        )
         return False
 
     def login(self, check_login=True):
@@ -630,9 +471,7 @@ def open_manga_id_map(manga_map_path: Path) -> Dict[str, List[int]]:
         with open(manga_map_path, "r") as manga_map_fp:
             manga_map = json.load(manga_map_fp)
         logging.info("Opened manga id map file.")
-    except json.JSONDecodeError as e:
         logging.critical("Manga map file is corrupted.")
-        raise json.JSONDecodeError(e.msg, e.doc, e.pos)
     except FileNotFoundError:
         logging.critical("Manga map file is missing.")
         raise FileNotFoundError("Couldn't file manga map file.")
@@ -647,6 +486,8 @@ class ChapterUploaderProcess:
         self.chapter: Chapter = kwargs["chapter"]
         self.md_auth_object: AuthMD = kwargs["md_auth_object"]
         self.mplus_group: str = kwargs["mplus_group"]
+
+        self.chapter_language = self.chapter.chapter_language
         self.mplus_chapter_url = "https://mangaplus.shueisha.co.jp/viewer/{}"
 
         self.manga_generic_error_message = f"Manga: {self.chapter.manga.manga_name}, {self.mangadex_manga_id} - {self.chapter.manga_id}, chapter: {self.chapter.chapter_number}, language: {self.chapter.chapter_language}, title: {self.chapter.chapter_title}"
@@ -658,8 +499,7 @@ class ChapterUploaderProcess:
         if session_id is None:
             session_id = self.upload_session_id
 
-        route = Route("DELETE", f"{md_upload_api_url}/{session_id}")
-        request(self.session, route, show_error=False)
+        self.session.delete(f"{md_upload_api_url}/{session_id}")
         logging.info(f"Sent {session_id} to be deleted.")
 
     def _delete_exising_upload_session(
@@ -669,37 +509,41 @@ class ChapterUploaderProcess:
         if chapter_upload_session_retry > 0:
             return
 
-        route = Route("GET", f"{md_upload_api_url}")
         logging.debug(
             f"Checking for upload sessions for manga {self.mangadex_manga_id}, chapter {self.chapter}."
         )
+        removal_retry = 0
+        while removal_retry < self.upload_retry_total:
+            existing_session = self.session.get(f"{md_upload_api_url}")
 
-        if check_for_session:
-            time.sleep(0.5)
+            if existing_session.status_code == 200:
+                existing_session_json = convert_json(existing_session)
 
-        for removal_retry in range(self.upload_retry_total):
-            existing_session = request(self.session, route, show_error=False)
+                if existing_session_json is None:
+                    removal_retry += 1
+                    logging.warning(
+                        f"Couldn't convert exising upload session response into a json, retrying."
+                    )
+                else:
+                    self.remove_upload_session(existing_session_json["data"]["id"])
+                    return
 
-            if (
-                existing_session.status_code == 200
-                and existing_session.data is not None
-            ):
                 if check_for_session:
                     return existing_session.data["data"]["id"]
-                self.remove_upload_session(existing_session.data["data"]["id"])
-                return
             elif existing_session.status_code == 404:
                 logging.info("No existing upload session found.")
                 return
             elif existing_session.status_code == 401:
                 logging.warning("Not logged in, logging in and retrying.")
                 self.md_auth_object.login()
-                continue
+                removal_retry += 1
             else:
+                removal_retry += 1
                 logging.warning(
                     f"Couldn't delete the exising upload session, retrying."
                 )
-                continue
+
+            time.sleep(mangadex_ratelimit_time)
 
         logging.error("Exising upload session not deleted.")
         raise Exception(f"Couldn't delete existing upload session.")
@@ -727,45 +571,47 @@ class ChapterUploaderProcess:
 
     def _create_upload_session(self) -> Optional[dict]:
         """Try create an upload session 3 times."""
+        chapter_upload_session_retry = 0
         chapter_upload_session_successful = False
-
-        route = Route(
-            "POST",
-            f"{md_upload_api_url}/begin",
-            json={"manga": self.mangadex_manga_id, "groups": [self.mplus_group]},
-        )
-
-        for chapter_upload_session_retry in range(self.upload_retry_total):
+        while chapter_upload_session_retry < self.upload_retry_total:
             # Delete existing upload session if exists
             self._delete_exising_upload_session(chapter_upload_session_retry)
+            time.sleep(mangadex_ratelimit_time)
             # Start the upload session
-            upload_session_response = request(self.session, route, self.md_auth_object)
-            check_session_id = self._delete_exising_upload_session(0, True)
+            upload_session_response = self.session.post(
+                f"{md_upload_api_url}/begin",
+                json={"manga": self.mangadex_manga_id, "groups": [self.mplus_group]},
+            )
 
             if check_session_id is None:
                 logging.warning(
                     f"Checking for just-made session returned an error, retrying."
                 )
                 continue
+            if upload_session_response.status_code == 401:
+                self.md_auth_object.login()
 
-            if upload_session_response.status_code != 200:
+            elif upload_session_response.status_code != 200:
+                print_error(upload_session_response)
                 logging.error(
                     f"Couldn't create an upload session for {self.mangadex_manga_id}, chapter {self.chapter.chapter_number}."
                 )
                 print("Couldn't create an upload session.")
 
-            if (
-                upload_session_response.status_code == 200
-                and upload_session_response.data is not None
-            ):
-                chapter_upload_session_successful = True
-                return upload_session_response.data
-            else:
-                upload_session_response_json_message = f"Couldn't convert successful upload session creation into a json, retrying. {self.manga_generic_error_message}."
-                logging.error(upload_session_response_json_message)
-                print(upload_session_response_json_message)
+            if upload_session_response.status_code == 200:
+                upload_session_response_json = convert_json(upload_session_response)
 
-            continue
+                if upload_session_response_json is not None:
+                    chapter_upload_session_successful = True
+                    chapter_upload_session_retry == self.upload_retry_total
+                    return upload_session_response_json
+                else:
+                    upload_session_response_json_message = f"Couldn't convert successful upload session creation into a json, retrying. {self.manga_generic_error_message}."
+                    logging.error(upload_session_response_json_message)
+                    print(upload_session_response_json_message)
+
+            chapter_upload_session_retry += 1
+            time.sleep(mangadex_ratelimit_time)
 
         # Couldn't create an upload session, skip the chapter
         if not chapter_upload_session_successful:
@@ -776,34 +622,31 @@ class ChapterUploaderProcess:
 
     def _commit_chapter(self) -> bool:
         """Try commit the chapter to mangadex."""
+        commit_retries = 0
         succesful_upload = False
-
-        route = Route(
-            "POST",
-            f"{md_upload_api_url}/{self.upload_session_id}/commit",
-            json={
-                "chapterDraft": {
-                    "volume": None,
-                    "chapter": self.chapter.chapter_number,
-                    "title": self.chapter.chapter_title,
-                    "translatedLanguage": self.chapter.chapter_language,
-                    "externalUrl": self.mplus_chapter_url.format(
-                        self.chapter.chapter_id
-                    ),
-                    "publishAt": datetime.fromtimestamp(
-                        self.chapter.chapter_expire
-                    ).strftime("%Y-%m-%dT%H:%M:%S%z"),
+        while commit_retries < self.upload_retry_total:
+            chapter_commit_response = self.session.post(
+                f"{md_upload_api_url}/{self.upload_session_id}/commit",
+                json={
+                    "chapterDraft": {
+                        "volume": None,
+                        "chapter": self.chapter.chapter_number,
+                        "title": self.chapter.chapter_title,
+                        "translatedLanguage": self.chapter_language,
+                        "externalUrl": self.mplus_chapter_url.format(
+                            self.chapter.chapter_id
+                        ),
+                        "publishAt": datetime.fromtimestamp(
+                            self.chapter.chapter_expire
+                        ).strftime("%Y-%m-%dT%H:%M:%S%z"),
+                    },
+                    "pageOrder": [],
                 },
-                "pageOrder": [],
-            },
-        )
-
-        for commit_retries in range(self.upload_retry_total):
-            chapter_commit_response = request(self.session, route, self.md_auth_object)
+            )
 
             if chapter_commit_response.status_code == 200:
                 succesful_upload = True
-                chapter_commit_response_json = chapter_commit_response.data
+                chapter_commit_response_json = convert_json(chapter_commit_response)
 
                 if chapter_commit_response_json is not None:
                     succesful_upload_id = chapter_commit_response_json["data"]["id"]
@@ -813,17 +656,23 @@ class ChapterUploaderProcess:
                     update_database(
                         self.database_connection, self.chapter, succesful_upload_id
                     )
-                    break
+                    commit_retries == self.upload_retry_total
+                    return True
 
                 chapter_commit_response_json_message = f"Couldn't convert successful chapter commit api response into a json"
                 logging.error(chapter_commit_response_json_message)
                 print(chapter_commit_response_json_message)
-                break
+                return True
+
+            elif chapter_commit_response.status_code == 401:
+                self.md_auth_object.login()
 
             else:
                 logging.warning(f"Failed to commit {self.upload_session_id}, retrying.")
+                print_error(chapter_commit_response)
 
-            continue
+            commit_retries += 1
+            time.sleep(mangadex_ratelimit_time)
 
         if not succesful_upload:
             error_message = f"Couldn't commit {self.upload_session_id}, manga {self.mangadex_manga_id} - {self.chapter.manga_id} chapter {self.chapter.chapter_number} language {self.chapter.chapter_language}."
@@ -840,6 +689,7 @@ class ChapterUploaderProcess:
 
         upload_session_response_json = self._create_upload_session()
         if upload_session_response_json is None:
+            time.sleep(mangadex_ratelimit_time)
             return 1
 
         self.upload_session_id = upload_session_response_json["data"]["id"]
@@ -849,8 +699,10 @@ class ChapterUploaderProcess:
         chapter_committed = self._commit_chapter()
         if not chapter_committed:
             self.remove_upload_session()
+            time.sleep(mangadex_ratelimit_time)
             return 2
 
+        time.sleep(mangadex_ratelimit_time)
         return 0
 
 
@@ -908,17 +760,33 @@ class ChapterDeleterProcess:
         deleted_message = f'{md_chapter_id}: {chapter["chapter_id"]}, manga {chapter["manga_id"]}, chapter {chapter["chapter_number"]}, language {chapter["chapter_language"]}.'
 
         if md_chapter_id is not None:
-            route = Route("DELETE", f"chapter/{md_chapter_id}")
-            delete_reponse = request(self.session, route, self.md_auth_object)
+            delete_reponse = self.session.delete(
+                f"{mangadex_api_url}/chapter/{md_chapter_id}"
+            )
+
+            if delete_reponse.status_code != 200:
+                logging.error(f"Couldn't delete expired chapter {deleted_message}")
+                print_error(delete_reponse)
+
+                if delete_reponse.status_code == 401:
+                    unauthorised_message = (
+                        f"You're not logged in to delete this chapter {chapter}."
+                    )
+                    logging.error(unauthorised_message)
+                    print(unauthorised_message)
+
+                    self.md_auth_object.login()
+                    time.sleep(mangadex_ratelimit_time)
+
+                    self._remove_old_chapter(chapter)
 
             if delete_reponse.status_code == 200:
                 logging.info(f"Deleted {chapter}.")
                 print(f"----Deleted {deleted_message}")
-            else:
-                logging.error(f"Couldn't delete expired chapter {deleted_message}")
 
         if self.on_db:
             self._delete_from_database(chapter)
+        time.sleep(self.chapter_delete_ratelimit)
 
     def _delete_expired_chapters(self):
         """Delete expired chapters from mangadex."""
@@ -928,6 +796,7 @@ class ChapterDeleterProcess:
         for count, chapter_to_delete in enumerate(self.chapters_to_delete, start=1):
             if count % 3 == 0:
                 self.md_auth_object.login()
+                time.sleep(mangadex_ratelimit_time)
 
             self._remove_old_chapter(chapter_to_delete)
 
@@ -938,7 +807,6 @@ class ChapterDeleterProcess:
         self._delete_expired_chapters()
 
     def delete_async(self) -> multiprocessing.Process:
-        return
         """Delete chapters concurrently."""
         if self.chapters_to_delete:
             self.md_auth_object.login()
@@ -1037,6 +905,7 @@ class MangaUploaderProcess:
             chapter: Chapter = chapter
             if not self.skipped_chapter and count % 5 == 0:
                 self.md_auth_object.login()
+                time.sleep(mangadex_ratelimit_time)
 
             chapter_to_upload_process = ChapterUploaderProcess(
                 **{
@@ -1065,6 +934,7 @@ class MangaUploaderProcess:
 
         if self.second_process_object is not None:
             del self.second_process_object
+        time.sleep(mangadex_ratelimit_time * 2)
 
 
 class BotProcess:
@@ -1159,11 +1029,12 @@ class BotProcess:
         iteration = 1
         created_at_since_time = "2000-01-01T00:00:00"
 
-        route = Route("GET", "chapter", params=params)
+        parameters = {}
+        parameters.update(params)
 
         while True:
             # Update the parameters with the new offset
-            route.params.update(
+            parameters.update(
                 {
                     "limit": limit,
                     "offset": offset,
@@ -1172,13 +1043,16 @@ class BotProcess:
             )
 
             # Call the api and get the json data
-            chapters_response = request(self.session, route, self.md_auth_object)
+            chapters_response = self.session.get(
+                f"{mangadex_api_url}/chapter", params=parameters
+            )
             if chapters_response.status_code != 200:
                 manga_response_message = f"Couldn't get the chapters of the group."
+                print_error(chapters_response)
                 logging.error(manga_response_message)
                 continue
 
-            chapters_response_data = chapters_response.data
+            chapters_response_data = convert_json(chapters_response)
             if chapters_response_data is None:
                 logging.warning(f"Couldn't convert chapters data into json, retrying.")
                 continue
@@ -1198,6 +1072,10 @@ class BotProcess:
 
                 logging.debug(f"{pages} page(s) for group chapters.")
 
+            # Wait every 5 pages
+            if iteration % 5 == 0 and pages != 5:
+                time.sleep(mangadex_ratelimit_time)
+
             # End the loop when all the pages have been gone through
             # Offset 10000 is the highest you can go, reset offset and get next
             # 10k batch using the last available chapter's created at date
@@ -1214,10 +1092,13 @@ class BotProcess:
                     offset = 0
                     pages = 1
                     iteration = 1
+                    time.sleep(5)
                     continue
                 break
 
             iteration += 1
+
+        time.sleep(mangadex_ratelimit_time)
         return chapters
 
     def _get_mplus_chapters(self) -> Dict[str, List[dict]]:
