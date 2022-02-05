@@ -21,7 +21,7 @@ from scheduler import Scheduler
 
 import proto.response_pb2 as response_pb
 
-__version__ = "1.3.4"
+__version__ = "1.3.5"
 
 mplus_language_map = {
     "0": "en",
@@ -47,13 +47,18 @@ config_file_path = root_path.joinpath("config").with_suffix(".ini")
 log_folder_path = root_path.joinpath("logs")
 log_folder_path.mkdir(parents=True, exist_ok=True)
 
-logs_path = log_folder_path.joinpath(f"mplus_md_uploader_{str(date.today())}.log")
-logging.basicConfig(
-    filename=logs_path,
-    level=logging.DEBUG,
-    format="%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s",
-    datefmt="%Y-%m-%d:%H:%M:%S",
-)
+
+def setup_logs():
+    logs_path = log_folder_path.joinpath(f"mplus_md_uploader_{str(date.today())}.log")
+    logging.basicConfig(
+        filename=logs_path,
+        level=logging.DEBUG,
+        format="%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s",
+        datefmt="%Y-%m-%d:%H:%M:%S",
+    )
+
+
+setup_logs()
 
 
 def load_config_info(config: configparser.RawConfigParser):
@@ -1597,6 +1602,7 @@ class MPlusAPI:
 
 def main(db_connection: Optional[sqlite3.Connection] = None):
     """Main function for getting the updates."""
+    setup_logs()
     manga_id_map = open_manga_id_map(Path(config["Paths"]["manga_id_map_path"]))
     if db_connection is not None:
         database_connection = db_connection
