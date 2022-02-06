@@ -19,7 +19,7 @@ import requests
 import scheduler.trigger as trigger
 from scheduler import Scheduler
 
-import proto.response_pb2 as response_pb
+import response_pb2 as response_pb
 
 __version__ = "1.3.5"
 
@@ -50,12 +50,18 @@ log_folder_path.mkdir(parents=True, exist_ok=True)
 
 def setup_logs():
     logs_path = log_folder_path.joinpath(f"mplus_md_uploader_{str(date.today())}.log")
-    logging.basicConfig(
-        filename=logs_path,
-        level=logging.DEBUG,
-        format="%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s",
-        datefmt="%Y-%m-%d:%H:%M:%S",
+    fileh = logging.FileHandler(logs_path, "a")
+    formatter = logging.Formatter(
+        "%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s"
     )
+    fileh.setFormatter(formatter)
+
+    log = logging.getLogger()  # root logger
+    for hdlr in log.handlers[:]:  # remove all old handlers
+        if isinstance(hdlr, logging.FileHandler):
+            log.removeHandler(hdlr)
+    log.addHandler(fileh)
+    log.setLevel(logging.DEBUG)
 
 
 setup_logs()
@@ -119,7 +125,8 @@ def make_tables(database_connection: sqlite3.Connection):
         chapter_title       TEXT,
         chapter_number      TEXT,
         manga_id            INTEGER,
-        md_chapter_id       TEXT NOT NULL PRIMARY KEY)"""
+        md_chapter_id       TEXT NOT NULL PRIMARY KEY
+        md_manga_id         TEXT)"""
     )
     database_connection.execute(
         """CREATE TABLE IF NOT EXISTS deleted_chapters
@@ -130,7 +137,8 @@ def make_tables(database_connection: sqlite3.Connection):
         chapter_title       TEXT,
         chapter_number      TEXT,
         manga_id            INTEGER,
-        md_chapter_id       TEXT NOT NULL PRIMARY KEY)"""
+        md_chapter_id       TEXT NOT NULL PRIMARY KEY
+        md_manga_id         TEXT)"""
     )
     database_connection.execute(
         """CREATE TABLE IF NOT EXISTS posted_mplus_ids
@@ -178,14 +186,13 @@ class Manga:
     manga_language: str
 
     def __post_init__(self):
+        language = self.manga_language
         try:
-            self.manga_language = int(self.manga_language)
+            language = int(language)
         except ValueError:
             pass
         else:
-            self.manga_language = mplus_language_map.get(
-                str(self.manga_language), "NULL"
-            )
+            self.manga_language = mplus_language_map.get(str(language), "NULL")
 
 
 @dataclass()
@@ -196,19 +203,19 @@ class Chapter:
     chapter_number: str
     chapter_language: str
     chapter_id: Optional[int] = field(default=None)
-    manga_id: Optional[int] = field(default=None)
-    manga: Optional[Manga] = field(default=None)
     md_chapter_id: Optional[str] = field(default=None)
+    manga_id: Optional[int] = field(default=None)
+    md_manga_id: Optional[str] = field(default=None)
+    manga: Optional[Manga] = field(default=None)
 
     def __post_init__(self):
+        language = self.chapter_language
         try:
-            self.chapter_language = int(self.chapter_language)
+            language = int(language)
         except ValueError:
             pass
         else:
-            self.chapter_language = mplus_language_map.get(
-                str(self.chapter_language), "NULL"
-            )
+            self.chapter_language = mplus_language_map.get(str(language), "NULL")
 
 
 def convert_json(response_to_convert: requests.Response) -> Optional[dict]:
@@ -454,8 +461,8 @@ def update_database(
     else:
         logging.info(f"Adding new chapter to database: {chapter}.")
         database_connection.execute(
-            """INSERT INTO chapters (chapter_id, chapter_timestamp, chapter_expire, chapter_language, chapter_title, chapter_number, manga_id, md_chapter_id) VALUES
-                                                            (:chapter_id, :chapter_timestamp, :chapter_expire, :chapter_language, :chapter_title, :chapter_number, :manga_id, :md_chapter_id)""",
+            """INSERT INTO chapters (chapter_id, chapter_timestamp, chapter_expire, chapter_language, chapter_title, chapter_number, manga_id, md_chapter_id, md_manga_id) VALUES
+                                                            (:chapter_id, :chapter_timestamp, :chapter_expire, :chapter_language, :chapter_title, :chapter_number, :manga_id, :md_chapter_id, :md_manga_id)""",
             {
                 "chapter_id": mplus_chapter_id,
                 "chapter_timestamp": chapter.chapter_timestamp,
@@ -465,6 +472,7 @@ def update_database(
                 "chapter_number": chapter.chapter_number,
                 "manga_id": chapter.manga_id,
                 "md_chapter_id": succesful_upload_id,
+                "md_manga_id": chapter.md_manga_id,
             },
         )
     database_connection.execute(
@@ -516,9 +524,7 @@ class ChapterUploaderProcess:
         self.session.delete(f"{md_upload_api_url}/{session_id}")
         logging.info(f"Sent {session_id} to be deleted.")
 
-    def _delete_exising_upload_session(
-        self, chapter_upload_session_retry: int, check_for_session=False
-    ) -> Optional[str]:
+    def _delete_exising_upload_session(self, chapter_upload_session_retry: int):
         """Remove any exising upload sessions to not error out as mangadex only allows one upload session at a time."""
         if chapter_upload_session_retry > 0:
             return
@@ -526,21 +532,17 @@ class ChapterUploaderProcess:
         logging.debug(
             f"Checking for upload sessions for manga {self.mangadex_manga_id}, chapter {self.chapter}."
         )
-        removal_retry = 0
-        while removal_retry < self.upload_retry_total:
+        for removal_retry in range(self.upload_retry_total):
             existing_session = self.session.get(f"{md_upload_api_url}")
 
             if existing_session.status_code == 200:
                 existing_session_json = convert_json(existing_session)
 
                 if existing_session_json is None:
-                    removal_retry += 1
                     logging.warning(
                         f"Couldn't convert exising upload session response into a json, retrying."
                     )
                 else:
-                    if check_for_session:
-                        return existing_session_json["data"]["id"]
                     self.remove_upload_session(existing_session_json["data"]["id"])
                     return
 
@@ -550,9 +552,7 @@ class ChapterUploaderProcess:
             elif existing_session.status_code == 401:
                 logging.warning("Not logged in, logging in and retrying.")
                 self.md_auth_object.login()
-                removal_retry += 1
             else:
-                removal_retry += 1
                 logging.warning(
                     f"Couldn't delete the exising upload session, retrying."
                 )
@@ -585,9 +585,8 @@ class ChapterUploaderProcess:
 
     def _create_upload_session(self) -> Optional[dict]:
         """Try create an upload session 3 times."""
-        chapter_upload_session_retry = 0
         chapter_upload_session_successful = False
-        while chapter_upload_session_retry < self.upload_retry_total:
+        for chapter_upload_session_retry in range(self.upload_retry_total):
             # Delete existing upload session if exists
             self._delete_exising_upload_session(chapter_upload_session_retry)
             time.sleep(mangadex_ratelimit_time)
@@ -597,18 +596,8 @@ class ChapterUploaderProcess:
                 json={"manga": self.mangadex_manga_id, "groups": [self.mplus_group]},
             )
 
-            check_session_id = self._delete_exising_upload_session(0, True)
-
-            if check_session_id is None:
-                logging.warning(
-                    f"Checking for just-made session returned an error, retrying."
-                )
-                chapter_upload_session_retry += 1
-                continue
-
             if upload_session_response.status_code == 401:
                 self.md_auth_object.login()
-
             elif upload_session_response.status_code != 200:
                 print_error(upload_session_response)
                 logging.error(
@@ -621,14 +610,12 @@ class ChapterUploaderProcess:
 
                 if upload_session_response_json is not None:
                     chapter_upload_session_successful = True
-                    chapter_upload_session_retry == self.upload_retry_total
                     return upload_session_response_json
                 else:
                     upload_session_response_json_message = f"Couldn't convert successful upload session creation into a json, retrying. {self.manga_generic_error_message}."
                     logging.error(upload_session_response_json_message)
                     print(upload_session_response_json_message)
 
-            chapter_upload_session_retry += 1
             time.sleep(mangadex_ratelimit_time)
 
         # Couldn't create an upload session, skip the chapter
@@ -640,9 +627,8 @@ class ChapterUploaderProcess:
 
     def _commit_chapter(self) -> bool:
         """Try commit the chapter to mangadex."""
-        commit_retries = 0
         succesful_upload = False
-        while commit_retries < self.upload_retry_total:
+        for commit_retries in range(self.upload_retry_total):
             chapter_commit_response = self.session.post(
                 f"{md_upload_api_url}/{self.upload_session_id}/commit",
                 json={
@@ -674,22 +660,18 @@ class ChapterUploaderProcess:
                     update_database(
                         self.database_connection, self.chapter, succesful_upload_id
                     )
-                    commit_retries == self.upload_retry_total
-                    return True
-
-                chapter_commit_response_json_message = f"Couldn't convert successful chapter commit api response into a json"
-                logging.error(chapter_commit_response_json_message)
-                print(chapter_commit_response_json_message)
-                return True
-
+                else:
+                    chapter_commit_response_json_message = f"Couldn't convert successful chapter commit api response into a json"
+                    logging.error(chapter_commit_response_json_message)
+                    print(chapter_commit_response_json_message)
+                break
             elif chapter_commit_response.status_code == 401:
                 self.md_auth_object.login()
-
             else:
+                succesful_upload = False
                 logging.warning(f"Failed to commit {self.upload_session_id}, retrying.")
                 print_error(chapter_commit_response)
 
-            commit_retries += 1
             time.sleep(mangadex_ratelimit_time)
 
         if not succesful_upload:
@@ -697,8 +679,7 @@ class ChapterUploaderProcess:
             logging.error(error_message)
             print(error_message)
             self.remove_upload_session()
-            return False
-        return True
+        return succesful_upload
 
     def start_upload(self, manga_chapters: list) -> Literal[0, 1, 2]:
         duplicate_chapter = self._check_for_duplicate_chapter(manga_chapters)
@@ -775,7 +756,10 @@ class ChapterDeleterProcess:
         # the md chapter id is available, try delete
         logging.info(f"Moving {chapter} from chapters table to deleted_chapters table.")
         md_chapter_id = chapter["md_chapter_id"]
-        deleted_message = f'{md_chapter_id}: {chapter["chapter_id"]}, manga {chapter["manga_id"]}, chapter {chapter["chapter_number"]}, language {chapter["chapter_language"]}.'
+        manga_id = chapter.get("manga_id", None)
+        if manga_id is None:
+            manga_id = chapter.get("md_manga_id", None)
+        deleted_message = f'{md_chapter_id}: {chapter["chapter_id"]}, manga {manga_id}, chapter {chapter["chapter_number"]}, language {chapter["chapter_language"]}.'
 
         if md_chapter_id is not None:
             delete_reponse = self.session.delete(
@@ -876,7 +860,7 @@ class MangaUploaderProcess:
                 chapter_language=expired["attributes"]["translatedLanguage"],
                 chapter_title=expired["attributes"]["title"],
                 chapter_number=expired["attributes"]["chapter"],
-                manga_id=self.mangadex_manga_id,
+                md_manga_id=self.mangadex_manga_id,
                 md_chapter_id=md_chapter_id,
             )
 
@@ -998,7 +982,7 @@ class BotProcess:
                         chapter_language=expired["attributes"]["translatedLanguage"],
                         chapter_title=expired["attributes"]["title"],
                         chapter_number=expired["attributes"]["chapter"],
-                        manga_id=manga_id,
+                        md_manga_id=manga_id,
                         md_chapter_id=md_chapter_id,
                     )
 
@@ -1511,7 +1495,7 @@ class MPlusAPI:
         return chapter_number_split
 
     def _normalise_chapter_title(
-        self, chapter: Chapter, chapter_number: List[Union[str, None]]
+        self, chapter: Chapter, chapter_number: List[Optional[str]]
     ) -> Optional[str]:
         """Strip away the title prefix."""
         colon_regex = re.compile(r"^.+:\s?", re.I)
@@ -1534,7 +1518,7 @@ class MPlusAPI:
         ):
             normalised_title = None
         elif chapter.manga_id in self.title_regexes.get("noformat", []):
-            return title
+            normalised_title = title
         elif str(chapter.manga_id) in self.title_regexes.get("custom", {}):
             pattern_to_use = re.compile(
                 self.title_regexes["custom"][str(chapter.manga_id)], re.I
@@ -1674,6 +1658,7 @@ def main(db_connection: Optional[sqlite3.Connection] = None):
 
 
 def move_chapters():
+    setup_logs()
     database_connection, _ = open_database(database_path)
 
     db_files = [
@@ -1735,6 +1720,7 @@ def move_chapters():
 
 
 def clean_db():
+    setup_logs()
     version = 1
     found = False
 
@@ -1777,7 +1763,9 @@ if __name__ == "__main__":
     )
 
     multiprocessing_manager = multiprocessing.Manager()
+    print("Initial run of bot.")
     main()
+    print("End of initial run, starting scheduler.")
     schedule = Scheduler(tzinfo=timezone.utc)
     schedule.daily(
         dtTime(
