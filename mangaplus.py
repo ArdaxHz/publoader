@@ -21,7 +21,7 @@ from scheduler import Scheduler
 
 import response_pb2 as response_pb
 
-__version__ = "1.3.5"
+__version__ = "1.3.6"
 
 mplus_language_map = {
     "0": "en",
@@ -223,6 +223,14 @@ def convert_json(response_to_convert: requests.Response) -> Optional[dict]:
     critical_decode_error_message = (
         "Couldn't convert mangadex api response into a json."
     )
+
+    logging.debug(
+        f"Request id: {response_to_convert.headers.get('x-request-id', None)}"
+    )
+    logging.debug(
+        f"Correlation id: {response_to_convert.headers.get('x-correlation-id', None)}"
+    )
+
     try:
         converted_response = response_to_convert.json()
     except json.JSONDecodeError:
@@ -252,11 +260,6 @@ def print_error(error_response: requests.Response) -> str:
         f"{status_code}: Couldn't convert api reposnse into json."
     )
     error_message = ""
-
-    logging.warning(f"Request id: {error_response.headers.get('X-request-ID', None)}")
-    logging.warning(
-        f"Correlation id: {error_response.headers.get('X-correlation-ID', None)}"
-    )
 
     if status_code == 429:
         error_message = f"429: {http_error_codes.get(str(status_code))}"
