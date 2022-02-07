@@ -125,7 +125,7 @@ def make_tables(database_connection: sqlite3.Connection):
         chapter_title       TEXT,
         chapter_number      TEXT,
         manga_id            INTEGER,
-        md_chapter_id       TEXT NOT NULL PRIMARY KEY
+        md_chapter_id       TEXT NOT NULL PRIMARY KEY,
         md_manga_id         TEXT)"""
     )
     database_connection.execute(
@@ -137,7 +137,7 @@ def make_tables(database_connection: sqlite3.Connection):
         chapter_title       TEXT,
         chapter_number      TEXT,
         manga_id            INTEGER,
-        md_chapter_id       TEXT NOT NULL PRIMARY KEY
+        md_chapter_id       TEXT NOT NULL PRIMARY KEY,
         md_manga_id         TEXT)"""
     )
     database_connection.execute(
