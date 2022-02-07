@@ -253,6 +253,11 @@ def print_error(error_response: requests.Response) -> str:
     )
     error_message = ""
 
+    logging.warning(f"Request id: {error_response.headers.get('X-request-ID', None)}")
+    logging.warning(
+        f"Correlation id: {error_response.headers.get('X-correlation-ID', None)}"
+    )
+
     if status_code == 429:
         error_message = f"429: {http_error_codes.get(str(status_code))}"
         logging.error(error_message)
@@ -587,9 +592,10 @@ class ChapterUploaderProcess:
         """Try create an upload session 3 times."""
         chapter_upload_session_successful = False
         for chapter_upload_session_retry in range(self.upload_retry_total):
-            # Delete existing upload session if exists
-            self._delete_exising_upload_session(chapter_upload_session_retry)
-            time.sleep(mangadex_ratelimit_time)
+            if chapter_upload_session_retry == 0:
+                # Delete existing upload session if exists
+                self._delete_exising_upload_session(chapter_upload_session_retry)
+                time.sleep(mangadex_ratelimit_time)
             # Start the upload session
             upload_session_response = self.session.post(
                 f"{md_upload_api_url}/begin",
