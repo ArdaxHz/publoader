@@ -21,7 +21,7 @@ from scheduler import Scheduler
 
 import response_pb2 as response_pb
 
-__version__ = "1.3.6"
+__version__ = "1.3.7"
 
 mplus_language_map = {
     "0": "en",
@@ -532,9 +532,11 @@ class ChapterUploaderProcess:
         self.session.delete(f"{md_upload_api_url}/{session_id}")
         logging.info(f"Sent {session_id} to be deleted.")
 
-    def _delete_exising_upload_session(self, chapter_upload_session_retry: int):
+    def _delete_exising_upload_session(
+        self, chapter_upload_session_retry: int, json_error=False
+    ):
         """Remove any exising upload sessions to not error out as mangadex only allows one upload session at a time."""
-        if chapter_upload_session_retry > 0:
+        if chapter_upload_session_retry > 0 and not json_error:
             return
 
         logging.debug(
@@ -553,7 +555,6 @@ class ChapterUploaderProcess:
                 else:
                     self.remove_upload_session(existing_session_json["data"]["id"])
                     return
-
             elif existing_session.status_code == 404:
                 logging.info("No existing upload session found.")
                 return
@@ -594,36 +595,40 @@ class ChapterUploaderProcess:
     def _create_upload_session(self) -> Optional[dict]:
         """Try create an upload session 3 times."""
         chapter_upload_session_successful = False
+        json_error = False
         for chapter_upload_session_retry in range(self.upload_retry_total):
-            if chapter_upload_session_retry == 0:
+            if chapter_upload_session_retry == 0 or json_error:
                 # Delete existing upload session if exists
-                self._delete_exising_upload_session(chapter_upload_session_retry)
+                self._delete_exising_upload_session(
+                    chapter_upload_session_retry, json_error
+                )
                 time.sleep(mangadex_ratelimit_time)
             # Start the upload session
             upload_session_response = self.session.post(
                 f"{md_upload_api_url}/begin",
                 json={"manga": self.mangadex_manga_id, "groups": [self.mplus_group]},
             )
-
-            if upload_session_response.status_code == 401:
-                self.md_auth_object.login()
-            elif upload_session_response.status_code != 200:
-                print_error(upload_session_response)
-                logging.error(
-                    f"Couldn't create an upload session for {self.mangadex_manga_id}, chapter {self.chapter.chapter_number}."
-                )
-                print("Couldn't create an upload session.")
+            json_error = False
 
             if upload_session_response.status_code == 200:
                 upload_session_response_json = convert_json(upload_session_response)
 
                 if upload_session_response_json is not None:
                     chapter_upload_session_successful = True
-                    return upload_session_response_json
+                    break
                 else:
                     upload_session_response_json_message = f"Couldn't convert successful upload session creation into a json, retrying. {self.manga_generic_error_message}."
                     logging.error(upload_session_response_json_message)
                     print(upload_session_response_json_message)
+                    json_error = True
+            elif upload_session_response.status_code == 401:
+                self.md_auth_object.login()
+            else:
+                print_error(upload_session_response)
+                logging.error(
+                    f"Couldn't create an upload session for {self.mangadex_manga_id}, chapter {self.chapter.chapter_number}."
+                )
+                print("Couldn't create an upload session.")
 
             time.sleep(mangadex_ratelimit_time)
 
@@ -632,7 +637,9 @@ class ChapterUploaderProcess:
             upload_session_response_json_message = f"Couldn't create an upload session for {self.manga_generic_error_message}."
             logging.error(upload_session_response_json_message)
             print(upload_session_response_json_message)
-            return
+
+        time.sleep(mangadex_ratelimit_time)
+        return upload_session_response_json
 
     def _commit_chapter(self) -> bool:
         """Try commit the chapter to mangadex."""
@@ -673,7 +680,7 @@ class ChapterUploaderProcess:
                     chapter_commit_response_json_message = f"Couldn't convert successful chapter commit api response into a json"
                     logging.error(chapter_commit_response_json_message)
                     print(chapter_commit_response_json_message)
-                break
+                return True
             elif chapter_commit_response.status_code == 401:
                 self.md_auth_object.login()
             else:
@@ -681,13 +688,14 @@ class ChapterUploaderProcess:
                 logging.warning(f"Failed to commit {self.upload_session_id}, retrying.")
                 print_error(chapter_commit_response)
 
-            time.sleep(mangadex_ratelimit_time)
+            time.sleep(mangadex_ratelimit_time * 2)
 
         if not succesful_upload:
             error_message = f"Couldn't commit {self.upload_session_id}, manga {self.mangadex_manga_id} - {self.chapter.manga_id} chapter {self.chapter.chapter_number} language {self.chapter.chapter_language}."
             logging.error(error_message)
             print(error_message)
             self.remove_upload_session()
+            return False
         return succesful_upload
 
     def start_upload(self, manga_chapters: list) -> Literal[0, 1, 2]:
