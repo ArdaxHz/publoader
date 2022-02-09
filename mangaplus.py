@@ -21,7 +21,7 @@ from scheduler import Scheduler
 
 import response_pb2 as response_pb
 
-__version__ = "1.3.7"
+__version__ = "1.3.8"
 
 mplus_language_map = {
     "0": "en",
@@ -517,6 +517,7 @@ class ChapterUploaderProcess:
         self.chapter: Chapter = kwargs["chapter"]
         self.md_auth_object: AuthMD = kwargs["md_auth_object"]
         self.mplus_group: str = kwargs["mplus_group"]
+        self.posted_md_updates: List[Chapter] = kwargs["posted_md_updates"]
 
         self.mplus_chapter_url = "https://mangaplus.shueisha.co.jp/viewer/{}"
 
@@ -571,7 +572,7 @@ class ChapterUploaderProcess:
         logging.error("Exising upload session not deleted.")
         raise Exception(f"Couldn't delete existing upload session.")
 
-    def _check_for_duplicate_chapter(self, manga_chapters: List[dict]) -> bool:
+    def _check_for_duplicate_chapter_md_list(self, manga_chapters: List[dict]) -> bool:
         """Check for duplicate chapters on mangadex."""
         # Skip duplicate chapters
         for md_chapter in manga_chapters:
@@ -698,9 +699,23 @@ class ChapterUploaderProcess:
             return False
         return succesful_upload
 
+    def _check_already_uploaded(self) -> bool:
+        for chap in self.posted_md_updates:
+            if (
+                chap.chapter_id == self.chapter.chapter_id
+                and chap.chapter_number == self.chapter.chapter_number
+                and chap.chapter_language == self.chapter.chapter_language
+            ):
+                return True
+        return False
+
     def start_upload(self, manga_chapters: list) -> Literal[0, 1, 2]:
-        duplicate_chapter = self._check_for_duplicate_chapter(manga_chapters)
+        duplicate_chapter = self._check_for_duplicate_chapter_md_list(manga_chapters)
         if duplicate_chapter:
+            return 1
+
+        already_uploaded = self._check_already_uploaded()
+        if already_uploaded:
             return 1
 
         upload_session_response_json = self._create_upload_session()
@@ -718,6 +733,7 @@ class ChapterUploaderProcess:
             time.sleep(mangadex_ratelimit_time)
             return 2
 
+        self.posted_md_updates.append(self.chapter)
         time.sleep(mangadex_ratelimit_time)
         return 0
 
@@ -851,6 +867,7 @@ class MangaUploaderProcess:
         ]
         self.md_auth_object: AuthMD = kwargs["md_auth_object"]
         self.mplus_group: str = kwargs["mplus_group"]
+        self.posted_md_updates: List[Chapter] = kwargs["posted_md_updates"]
 
         self.second_process = None
         self.second_process_object = None
@@ -934,6 +951,7 @@ class MangaUploaderProcess:
                     "chapter": chapter,
                     "md_auth_object": self.md_auth_object,
                     "mplus_group": self.mplus_group,
+                    "posted_md_updates": self.posted_md_updates,
                 }
             )
 
@@ -982,6 +1000,8 @@ class BotProcess:
             for m in list(self.mplus_group_chapters.keys())
             if m not in list(self.manga_id_map.keys())
         ]
+
+        self.posted_md_updates: List[Chapter] = []
         logging.info(f"Manga not tracked but on mangadex: {self.manga_untracked}")
 
     def _remove_chapters_not_mplus(self) -> List[dict]:
@@ -1195,6 +1215,7 @@ class BotProcess:
                     "mplus_group_chapters": self.mplus_group_chapters.get(
                         mangadex_manga_id, []
                     ),
+                    "posted_md_updates": self.posted_md_updates,
                 }
             )
             manga_uploader.start_manga_uploading_process()
