@@ -21,7 +21,7 @@ from scheduler import Scheduler
 
 import response_pb2 as response_pb
 
-__version__ = "1.3.9"
+__version__ = "1.4.0"
 
 mplus_language_map = {
     "0": "en",
@@ -344,7 +344,9 @@ class AuthMD:
     def _refresh_token(self) -> bool:
         """Use the refresh token to get a new session token."""
         refresh_response = self.session.post(
-            f"{self.md_auth_api_url}/refresh", json={"token": self.refresh_token}
+            f"{self.md_auth_api_url}/refresh",
+            json={"token": self.refresh_token},
+            verify=False,
         )
 
         if refresh_response.status_code == 200:
@@ -369,7 +371,9 @@ class AuthMD:
 
     def _check_login(self) -> bool:
         """Try login using saved session token."""
-        auth_check_response = self.session.get(f"{self.md_auth_api_url}/check")
+        auth_check_response = self.session.get(
+            f"{self.md_auth_api_url}/check", verify=False
+        )
 
         if auth_check_response.status_code == 200:
             auth_data = convert_json(auth_check_response)
@@ -397,6 +401,7 @@ class AuthMD:
         login_response = self.session.post(
             f"{self.md_auth_api_url}/login",
             json={"username": username, "password": password},
+            verify=False,
         )
 
         if login_response.status_code == 200:
@@ -530,7 +535,7 @@ class ChapterUploaderProcess:
         if session_id is None:
             session_id = self.upload_session_id
 
-        self.session.delete(f"{md_upload_api_url}/{session_id}")
+        self.session.delete(f"{md_upload_api_url}/{session_id}", verify=False)
         logging.info(f"Sent {session_id} to be deleted.")
 
     def _delete_exising_upload_session(
@@ -545,8 +550,11 @@ class ChapterUploaderProcess:
         )
         for removal_retry in range(self.upload_retry_total):
             try:
-                existing_session = self.session.get(f"{md_upload_api_url}")
-            except requests.RequestException:
+                existing_session = self.session.get(
+                    f"{md_upload_api_url}", verify=False
+                )
+            except requests.RequestException as e:
+                logging.error(e)
                 continue
 
             if existing_session.status_code == 200:
@@ -616,8 +624,10 @@ class ChapterUploaderProcess:
                         "manga": self.mangadex_manga_id,
                         "groups": [self.mplus_group],
                     },
+                    verify=False,
                 )
-            except requests.RequestException:
+            except requests.RequestException as e:
+                logging.error(e)
                 continue
             json_error = False
 
@@ -674,8 +684,10 @@ class ChapterUploaderProcess:
                         },
                         "pageOrder": [],
                     },
+                    verify=False,
                 )
-            except requests.RequestException:
+            except requests.RequestException as e:
+                logging.error(e)
                 continue
 
             if chapter_commit_response.status_code == 200:
@@ -809,7 +821,7 @@ class ChapterDeleterProcess:
 
         if md_chapter_id is not None:
             delete_reponse = self.session.delete(
-                f"{mangadex_api_url}/chapter/{md_chapter_id}"
+                f"{mangadex_api_url}/chapter/{md_chapter_id}", verify=False
             )
 
             if delete_reponse.status_code != 200:
@@ -1096,7 +1108,7 @@ class BotProcess:
 
             # Call the api and get the json data
             chapters_response = self.session.get(
-                f"{mangadex_api_url}/chapter", params=parameters
+                f"{mangadex_api_url}/chapter", params=parameters, verify=False
             )
             if chapters_response.status_code != 200:
                 manga_response_message = f"Couldn't get the chapters of the group."
