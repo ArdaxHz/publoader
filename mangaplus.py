@@ -21,7 +21,7 @@ from scheduler import Scheduler
 
 import response_pb2 as response_pb
 
-__version__ = "1.3.8"
+__version__ = "1.3.9"
 
 mplus_language_map = {
     "0": "en",
@@ -544,7 +544,10 @@ class ChapterUploaderProcess:
             f"Checking for upload sessions for manga {self.mangadex_manga_id}, chapter {self.chapter}."
         )
         for removal_retry in range(self.upload_retry_total):
-            existing_session = self.session.get(f"{md_upload_api_url}")
+            try:
+                existing_session = self.session.get(f"{md_upload_api_url}")
+            except requests.RequestException:
+                continue
 
             if existing_session.status_code == 200:
                 existing_session_json = convert_json(existing_session)
@@ -604,11 +607,18 @@ class ChapterUploaderProcess:
                     chapter_upload_session_retry, json_error
                 )
                 time.sleep(mangadex_ratelimit_time)
-            # Start the upload session
-            upload_session_response = self.session.post(
-                f"{md_upload_api_url}/begin",
-                json={"manga": self.mangadex_manga_id, "groups": [self.mplus_group]},
-            )
+
+            try:
+                # Start the upload session
+                upload_session_response = self.session.post(
+                    f"{md_upload_api_url}/begin",
+                    json={
+                        "manga": self.mangadex_manga_id,
+                        "groups": [self.mplus_group],
+                    },
+                )
+            except requests.RequestException:
+                continue
             json_error = False
 
             if upload_session_response.status_code == 200:
@@ -646,24 +656,27 @@ class ChapterUploaderProcess:
         """Try commit the chapter to mangadex."""
         succesful_upload = False
         for commit_retries in range(self.upload_retry_total):
-            chapter_commit_response = self.session.post(
-                f"{md_upload_api_url}/{self.upload_session_id}/commit",
-                json={
-                    "chapterDraft": {
-                        "volume": None,
-                        "chapter": self.chapter.chapter_number,
-                        "title": self.chapter.chapter_title,
-                        "translatedLanguage": self.chapter.chapter_language,
-                        "externalUrl": self.mplus_chapter_url.format(
-                            self.chapter.chapter_id
-                        ),
-                        "publishAt": datetime.fromtimestamp(
-                            self.chapter.chapter_expire
-                        ).strftime("%Y-%m-%dT%H:%M:%S%z"),
+            try:
+                chapter_commit_response = self.session.post(
+                    f"{md_upload_api_url}/{self.upload_session_id}/commit",
+                    json={
+                        "chapterDraft": {
+                            "volume": None,
+                            "chapter": self.chapter.chapter_number,
+                            "title": self.chapter.chapter_title,
+                            "translatedLanguage": self.chapter.chapter_language,
+                            "externalUrl": self.mplus_chapter_url.format(
+                                self.chapter.chapter_id
+                            ),
+                            "publishAt": datetime.fromtimestamp(
+                                self.chapter.chapter_expire
+                            ).strftime("%Y-%m-%dT%H:%M:%S%z"),
+                        },
+                        "pageOrder": [],
                     },
-                    "pageOrder": [],
-                },
-            )
+                )
+            except requests.RequestException:
+                continue
 
             if chapter_commit_response.status_code == 200:
                 succesful_upload = True
