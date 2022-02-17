@@ -21,7 +21,7 @@ from scheduler import Scheduler
 
 import response_pb2 as response_pb
 
-__version__ = "1.4.0"
+__version__ = "1.4.1"
 
 mplus_language_map = {
     "0": "en",
@@ -308,6 +308,80 @@ def print_error(error_response: requests.Response) -> str:
     return error_message
 
 
+def _get_md_id(manga_id_map: Dict[str, List[int]], mangaplus_id: int) -> Optional[str]:
+    """Get the mangadex id from the mangaplus one."""
+    for md_id in manga_id_map:
+        if mangaplus_id in manga_id_map[md_id]:
+            return md_id
+
+
+def update_database(
+    database_connection: sqlite3.Connection,
+    chapter: Chapter,
+    succesful_upload_id: Optional[str] = None,
+):
+    """Update the database with the new chapter."""
+    mplus_chapter_id = chapter.chapter_id
+
+    chapter_id_exists = database_connection.execute(
+        "SELECT * FROM chapters WHERE EXISTS(SELECT 1 FROM chapters WHERE md_chapter_id=(?))",
+        (succesful_upload_id,),
+    )
+    chapter_id_exists_dict = chapter_id_exists.fetchone()
+    if chapter_id_exists_dict is not None:
+        if (
+            dict(chapter_id_exists_dict).get("chapter_id", None) is None
+            and chapter.chapter_id is not None
+        ):
+            print("Updating database with new mangadex and mangaplus chapter ids.")
+            logging.info(f"Updating existing record in the database: {chapter}.")
+            database_connection.execute(
+                "UPDATE chapters SET md_chapter_id=:md_id WHERE chapter_id=:mplus_id",
+                {"md_id": succesful_upload_id, "mplus_id": mplus_chapter_id},
+            )
+    else:
+        logging.info(f"Adding new chapter to database: {chapter}.")
+        database_connection.execute(
+            """INSERT INTO chapters (chapter_id, chapter_timestamp, chapter_expire, chapter_language, chapter_title, chapter_number, manga_id, md_chapter_id, md_manga_id) VALUES
+                                                            (:chapter_id, :chapter_timestamp, :chapter_expire, :chapter_language, :chapter_title, :chapter_number, :manga_id, :md_chapter_id, :md_manga_id)""",
+            {
+                "chapter_id": mplus_chapter_id,
+                "chapter_timestamp": chapter.chapter_timestamp,
+                "chapter_expire": chapter.chapter_expire,
+                "chapter_language": chapter.chapter_language,
+                "chapter_title": chapter.chapter_title,
+                "chapter_number": chapter.chapter_number,
+                "manga_id": chapter.manga_id,
+                "md_chapter_id": succesful_upload_id,
+                "md_manga_id": chapter.md_manga_id,
+            },
+        )
+    database_connection.execute(
+        "INSERT OR IGNORE INTO posted_mplus_ids (chapter_id) VALUES (?)",
+        (mplus_chapter_id,),
+    )
+
+    logging.debug(f"Added to database: {succesful_upload_id} - {chapter}")
+    database_connection.commit()
+
+
+def open_manga_id_map(manga_map_path: Path) -> Dict[str, List[int]]:
+    """Open mangaplus id to mangadex id map."""
+    try:
+        with open(manga_map_path, "r") as manga_map_fp:
+            manga_map = json.load(manga_map_fp)
+        logging.info("Opened manga id map file.")
+    except json.JSONDecodeError as e:
+        logging.critical("Manga map file is corrupted.")
+        raise json.JSONDecodeError(
+            msg="Manga map file is corrupted.", doc=e.doc, pos=e.pos
+        )
+    except FileNotFoundError:
+        logging.critical("Manga map file is missing.")
+        raise FileNotFoundError("Couldn't file manga map file.")
+    return manga_map
+
+
 class AuthMD:
     def __init__(self, session: requests.Session, config: configparser.RawConfigParser):
         self.session = session
@@ -445,73 +519,6 @@ class AuthMD:
         else:
             logging.critical("Couldn't login.")
             raise Exception("Couldn't login.")
-
-
-def update_database(
-    database_connection: sqlite3.Connection,
-    chapter: Chapter,
-    succesful_upload_id: Optional[str] = None,
-):
-    """Update the database with the new chapter."""
-    mplus_chapter_id = chapter.chapter_id
-
-    chapter_id_exists = database_connection.execute(
-        "SELECT * FROM chapters WHERE EXISTS(SELECT 1 FROM chapters WHERE md_chapter_id=(?))",
-        (succesful_upload_id,),
-    )
-    chapter_id_exists_dict = chapter_id_exists.fetchone()
-    if chapter_id_exists_dict is not None:
-        if (
-            dict(chapter_id_exists_dict).get("chapter_id", None) is None
-            and chapter.chapter_id is not None
-        ):
-            print("Updating database with new mangadex and mangaplus chapter ids.")
-            logging.info(f"Updating existing record in the database: {chapter}.")
-            database_connection.execute(
-                "UPDATE chapters SET md_chapter_id=:md_id WHERE chapter_id=:mplus_id",
-                {"md_id": succesful_upload_id, "mplus_id": mplus_chapter_id},
-            )
-    else:
-        logging.info(f"Adding new chapter to database: {chapter}.")
-        database_connection.execute(
-            """INSERT INTO chapters (chapter_id, chapter_timestamp, chapter_expire, chapter_language, chapter_title, chapter_number, manga_id, md_chapter_id, md_manga_id) VALUES
-                                                            (:chapter_id, :chapter_timestamp, :chapter_expire, :chapter_language, :chapter_title, :chapter_number, :manga_id, :md_chapter_id, :md_manga_id)""",
-            {
-                "chapter_id": mplus_chapter_id,
-                "chapter_timestamp": chapter.chapter_timestamp,
-                "chapter_expire": chapter.chapter_expire,
-                "chapter_language": chapter.chapter_language,
-                "chapter_title": chapter.chapter_title,
-                "chapter_number": chapter.chapter_number,
-                "manga_id": chapter.manga_id,
-                "md_chapter_id": succesful_upload_id,
-                "md_manga_id": chapter.md_manga_id,
-            },
-        )
-    database_connection.execute(
-        "INSERT OR IGNORE INTO posted_mplus_ids (chapter_id) VALUES (?)",
-        (mplus_chapter_id,),
-    )
-
-    logging.debug(f"Added to database: {succesful_upload_id} - {chapter}")
-    database_connection.commit()
-
-
-def open_manga_id_map(manga_map_path: Path) -> Dict[str, List[int]]:
-    """Open mangaplus id to mangadex id map."""
-    try:
-        with open(manga_map_path, "r") as manga_map_fp:
-            manga_map = json.load(manga_map_fp)
-        logging.info("Opened manga id map file.")
-    except json.JSONDecodeError as e:
-        logging.critical("Manga map file is corrupted.")
-        raise json.JSONDecodeError(
-            msg="Manga map file is corrupted.", doc=e.doc, pos=e.pos
-        )
-    except FileNotFoundError:
-        logging.critical("Manga map file is missing.")
-        raise FileNotFoundError("Couldn't file manga map file.")
-    return manga_map
 
 
 class ChapterUploaderProcess:
@@ -1188,12 +1195,6 @@ class BotProcess:
                 chapters_sorted[manga_id] = [chapter]
         return chapters_sorted
 
-    def _get_md_id(self, mangaplus_id: int) -> Optional[str]:
-        """Get the mangadex id from the mangaplus one."""
-        for md_id in self.manga_id_map:
-            if mangaplus_id in self.manga_id_map[md_id]:
-                return md_id
-
     def _sort_chapters_by_manga(
         self, updates: List[Chapter]
     ) -> Dict[str, List[Chapter]]:
@@ -1201,7 +1202,7 @@ class BotProcess:
         chapters_sorted = {}
 
         for chapter in updates:
-            md_id = self._get_md_id(chapter.manga_id)
+            md_id = _get_md_id(self.manga_id_map, chapter.manga_id)
             if md_id is None:
                 logging.warning(
                     f"No mangadex id found for mplus id {chapter.manga_id}."
@@ -1250,9 +1251,15 @@ class BotProcess:
 
 
 class MPlusAPI:
-    def __init__(self, manga_map_mplus_ids: List[int], posted_chapters_ids: List[int]):
+    def __init__(
+        self,
+        manga_map_mplus_ids: List[int],
+        posted_chapters_ids: List[int],
+        manga_id_map: Dict[str, List[int]],
+    ):
         self.tracked_manga = manga_map_mplus_ids
         self.posted_chapters_ids = posted_chapters_ids
+        self.manga_id_map = manga_id_map
         self.updated_chapters: List[Chapter] = []
         self.all_mplus_chapters: List[Chapter] = []
         self.untracked_manga: List[Manga] = []
@@ -1371,6 +1378,7 @@ class MPlusAPI:
                 chapter_number=chapter.chapter_number,
                 chapter_language=manga_object.manga_language,
                 manga_id=manga_object.manga_id,
+                md_manga_id=_get_md_id(self.manga_id_map, manga_object.manga_id),
                 manga=manga_object,
             )
             for chapter in chapter_list
@@ -1683,7 +1691,7 @@ def main(db_connection: Optional[sqlite3.Connection] = None):
     first_process = first_process_object.delete_async()
 
     # Get new manga and chapter updates
-    mplus_api = MPlusAPI(manga_map_mplus_ids, posted_chapters_ids)
+    mplus_api = MPlusAPI(manga_map_mplus_ids, posted_chapters_ids, manga_id_map)
     # updated_manga = mplus_api.untracked_manga
     updates = mplus_api.updated_chapters
     all_mplus_chapters = mplus_api.all_mplus_chapters
