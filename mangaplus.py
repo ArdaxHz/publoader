@@ -21,7 +21,7 @@ from scheduler import Scheduler
 
 import response_pb2 as response_pb
 
-__version__ = "1.4.1"
+__version__ = "1.4.2"
 
 mplus_language_map = {
     "0": "en",
@@ -226,9 +226,6 @@ def convert_json(response_to_convert: requests.Response) -> Optional[dict]:
 
     logging.debug(
         f"Request id: {response_to_convert.headers.get('x-request-id', None)}"
-    )
-    logging.debug(
-        f"Correlation id: {response_to_convert.headers.get('x-correlation-id', None)}"
     )
 
     try:
@@ -1586,6 +1583,7 @@ class MPlusAPI:
             chapter.manga_id in self.title_regexes.get("empty", [])
             and None not in chapter_number
             or title.lower() in ("final chapter",)
+            or "final chapter" in title.lower()
         ):
             normalised_title = None
         elif chapter.manga_id in self.title_regexes.get("noformat", []):
@@ -1846,16 +1844,16 @@ if __name__ == "__main__":
         ),
         main,
     )
-    schedule.weekly(
-        trigger.Monday(
-            dtTime(
-                hour=daily_run_time_checks_hour,
-                minute=daily_run_time_checks_minute,
-                tzinfo=timezone.utc,
-            )
-        ),
-        clean_db,
-    )
+    # schedule.weekly(
+    #     trigger.Monday(
+    #         dtTime(
+    #             hour=daily_run_time_checks_hour,
+    #             minute=daily_run_time_checks_minute,
+    #             tzinfo=timezone.utc,
+    #         )
+    #     ),
+    #     clean_db,
+    # )
     schedule.daily(
         dtTime(
             hour=daily_run_time_checks_hour,
