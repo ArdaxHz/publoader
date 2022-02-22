@@ -21,7 +21,7 @@ from scheduler import Scheduler
 
 import response_pb2 as response_pb
 
-__version__ = "1.4.3"
+__version__ = "1.4.4"
 
 mplus_language_map = {
     "0": "en",
@@ -575,6 +575,7 @@ class ChapterUploaderProcess:
                 logging.info("No existing upload session found.")
                 return
             elif existing_session.status_code == 401:
+                print_error(existing_session)
                 logging.warning("Not logged in, logging in and retrying.")
                 self.md_auth_object.login()
             else:
@@ -647,6 +648,7 @@ class ChapterUploaderProcess:
                     print(upload_session_response_json_message)
                     json_error = True
             elif upload_session_response.status_code == 401:
+                print_error(upload_session_response)
                 self.md_auth_object.login()
             else:
                 print_error(upload_session_response)
@@ -714,6 +716,7 @@ class ChapterUploaderProcess:
                     print(chapter_commit_response_json_message)
                 return True
             elif chapter_commit_response.status_code == 401:
+                print_error(chapter_commit_response)
                 self.md_auth_object.login()
             else:
                 succesful_upload = False
