@@ -21,7 +21,7 @@ from scheduler import Scheduler
 
 import response_pb2 as response_pb
 
-__version__ = "1.4.2"
+__version__ = "1.4.3"
 
 mplus_language_map = {
     "0": "en",
@@ -662,6 +662,8 @@ class ChapterUploaderProcess:
             upload_session_response_json_message = f"Couldn't create an upload session for {self.manga_generic_error_message}."
             logging.error(upload_session_response_json_message)
             print(upload_session_response_json_message)
+            time.sleep(mangadex_ratelimit_time)
+            return
 
         time.sleep(mangadex_ratelimit_time)
         return upload_session_response_json
@@ -1653,7 +1655,7 @@ class MPlusAPI:
         return updated_chapters
 
 
-def main(db_connection: Optional[sqlite3.Connection] = None):
+def main(db_connection: Optional[sqlite3.Connection] = None, clean_db=False):
     """Main function for getting the updates."""
     setup_logs()
     manga_id_map = open_manga_id_map(Path(config["Paths"]["manga_id_map_path"]))
@@ -1669,7 +1671,9 @@ def main(db_connection: Optional[sqlite3.Connection] = None):
     posted_chapters_ids_data = database_connection.execute(
         "SELECT * FROM posted_mplus_ids"
     ).fetchall()
-    posted_chapters_ids = [job["chapter_id"] for job in posted_chapters_ids_data]
+    posted_chapters_ids = (
+        [job["chapter_id"] for job in posted_chapters_ids_data] if not clean_db else []
+    )
     manga_map_mplus_ids = [
         mplus_id for md_id in manga_id_map for mplus_id in manga_id_map[md_id]
     ]
@@ -1790,30 +1794,30 @@ def move_chapters():
 
 def clean_db():
     setup_logs()
-    version = 1
-    found = False
+    # version = 1
+    # found = False
 
     database_connection, _ = open_database(database_path)
-    while True:
-        version += 1
-        new_database_path = Path(
-            f"{database_name.rsplit('.', 1)[0]}-{version}"
-        ).with_suffix(".db")
-        if not os.path.exists(new_database_path):
-            found = True
-            break
+    # while True:
+    #     version += 1
+    #     new_database_path = Path(
+    #         f"{database_name.rsplit('.', 1)[0]}-{version}"
+    #     ).with_suffix(".db")
+    #     if not os.path.exists(new_database_path):
+    #         found = True
+    #         break
 
-    if found:
-        database_connection.commit()
-        db_con, _ = open_database(new_database_path)
-        database_connection.backup(db_con)
-        db_con.close()
-        database_connection.execute("DELETE FROM chapters")
-        database_connection.execute("DELETE FROM deleted_chapters")
-        database_connection.execute("DELETE FROM posted_mplus_ids")
-        database_connection.commit()
+    # if found:
+    #     database_connection.commit()
+    #     db_con, _ = open_database(new_database_path)
+    #     database_connection.backup(db_con)
+    #     db_con.close()
+    #     database_connection.execute("DELETE FROM chapters")
+    #     database_connection.execute("DELETE FROM deleted_chapters")
+    #     database_connection.execute("DELETE FROM posted_mplus_ids")
+    #     database_connection.commit()
 
-    main(database_connection)
+    main(database_connection, clean_db=True)
 
 
 if __name__ == "__main__":
@@ -1844,16 +1848,16 @@ if __name__ == "__main__":
         ),
         main,
     )
-    # schedule.weekly(
-    #     trigger.Monday(
-    #         dtTime(
-    #             hour=daily_run_time_checks_hour,
-    #             minute=daily_run_time_checks_minute,
-    #             tzinfo=timezone.utc,
-    #         )
-    #     ),
-    #     clean_db,
-    # )
+    schedule.weekly(
+        trigger.Monday(
+            dtTime(
+                hour=daily_run_time_checks_hour,
+                minute=daily_run_time_checks_minute,
+                tzinfo=timezone.utc,
+            )
+        ),
+        clean_db,
+    )
     schedule.daily(
         dtTime(
             hour=daily_run_time_checks_hour,
