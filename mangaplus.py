@@ -1797,11 +1797,11 @@ def move_chapters():
 
 
 def clean_db():
-    setup_logs()
+    # setup_logs()
     # version = 1
     # found = False
 
-    database_connection, _ = open_database(database_path)
+    # database_connection, _ = open_database(database_path)
     # while True:
     #     version += 1
     #     new_database_path = Path(
@@ -1821,7 +1821,7 @@ def clean_db():
     #     database_connection.execute("DELETE FROM posted_mplus_ids")
     #     database_connection.commit()
 
-    main(database_connection, clean_db=True)
+    main(clean_db=True)
 
 
 if __name__ == "__main__":
@@ -1852,23 +1852,13 @@ if __name__ == "__main__":
         ),
         main,
     )
-    schedule.weekly(
-        trigger.Monday(
-            dtTime(
-                hour=daily_run_time_checks_hour,
-                minute=daily_run_time_checks_minute,
-                tzinfo=timezone.utc,
-            )
-        ),
-        clean_db,
-    )
     schedule.daily(
         dtTime(
             hour=daily_run_time_checks_hour,
             minute=daily_run_time_checks_minute,
             tzinfo=timezone.utc,
         ),
-        main,
+        clean_db,
     )
 
     while True:
