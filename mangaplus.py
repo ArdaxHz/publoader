@@ -358,7 +358,8 @@ def update_database(
         (mplus_chapter_id,),
     )
 
-    logging.debug(f"Added to database: {succesful_upload_id} - {chapter}")
+    if chapter_id_exists_dict is None:
+        logging.debug(f"Added to database: {succesful_upload_id} - {chapter}")
     database_connection.commit()
 
 
