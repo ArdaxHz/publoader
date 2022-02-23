@@ -851,8 +851,7 @@ class ChapterDeleterProcess:
 
                         self.md_auth_object.login()
                         time.sleep(mangadex_ratelimit_time)
-
-                        self._remove_old_chapter(chapter)
+                        continue
 
                 if delete_reponse.status_code == 200:
                     logging.info(f"Deleted {chapter}.")
