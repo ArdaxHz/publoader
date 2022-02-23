@@ -21,7 +21,7 @@ from scheduler import Scheduler
 
 import response_pb2 as response_pb
 
-__version__ = "1.4.4"
+__version__ = "1.4.5"
 
 mplus_language_map = {
     "0": "en",
@@ -830,29 +830,34 @@ class ChapterDeleterProcess:
         deleted_message = f'{md_chapter_id}: {chapter["chapter_id"]}, manga {manga_id}, chapter {chapter["chapter_number"]}, language {chapter["chapter_language"]}.'
 
         if md_chapter_id is not None:
-            delete_reponse = self.session.delete(
-                f"{mangadex_api_url}/chapter/{md_chapter_id}", verify=False
-            )
-
-            if delete_reponse.status_code != 200:
-                logging.error(f"Couldn't delete expired chapter {deleted_message}")
-                print_error(delete_reponse)
-
-                if delete_reponse.status_code == 401:
-                    unauthorised_message = (
-                        f"You're not logged in to delete this chapter {chapter}."
+            for i in range(5):
+                try:
+                    delete_reponse = self.session.delete(
+                        f"{mangadex_api_url}/chapter/{md_chapter_id}", verify=False
                     )
-                    logging.error(unauthorised_message)
-                    print(unauthorised_message)
+                except requests.RequestException:
+                    continue
 
-                    self.md_auth_object.login()
-                    time.sleep(mangadex_ratelimit_time)
+                if delete_reponse.status_code != 200:
+                    logging.error(f"Couldn't delete expired chapter {deleted_message}")
+                    print_error(delete_reponse)
 
-                    self._remove_old_chapter(chapter)
+                    if delete_reponse.status_code == 401:
+                        unauthorised_message = (
+                            f"You're not logged in to delete this chapter {chapter}."
+                        )
+                        logging.error(unauthorised_message)
+                        print(unauthorised_message)
 
-            if delete_reponse.status_code == 200:
-                logging.info(f"Deleted {chapter}.")
-                print(f"----Deleted {deleted_message}")
+                        self.md_auth_object.login()
+                        time.sleep(mangadex_ratelimit_time)
+
+                        self._remove_old_chapter(chapter)
+
+                if delete_reponse.status_code == 200:
+                    logging.info(f"Deleted {chapter}.")
+                    print(f"----Deleted {deleted_message}")
+                    break
 
         if self.on_db:
             self._delete_from_database(chapter)
@@ -1019,6 +1024,7 @@ class BotProcess:
         md_auth_object: AuthMD,
         manga_id_map: Dict[str, List[int]],
         database_connection: sqlite3.Connection,
+        posted_md_updates: List[Chapter],
     ):
         self.session = session
         self.updates = updates
@@ -1036,7 +1042,7 @@ class BotProcess:
             if m not in list(self.manga_id_map.keys())
         ]
 
-        self.posted_md_updates: List[Chapter] = []
+        self.posted_md_updates = posted_md_updates
         logging.info(f"Manga not tracked but on mangadex: {self.manga_untracked}")
 
     def _remove_chapters_not_mplus(self) -> List[dict]:
@@ -1701,6 +1707,7 @@ def main(db_connection: Optional[sqlite3.Connection] = None, clean_db=False):
     # updated_manga = mplus_api.untracked_manga
     updates = mplus_api.updated_chapters
     all_mplus_chapters = mplus_api.all_mplus_chapters
+    posted_md_updates: List[Chapter] = []
 
     if not updates:
         logging.info("No new updates found.")
@@ -1708,15 +1715,22 @@ def main(db_connection: Optional[sqlite3.Connection] = None, clean_db=False):
     else:
         logging.info(f"Found {len(updates)} update(s).")
         print(f"Found {len(updates)} update(s).")
-        BotProcess(
-            session,
-            updates,
-            all_mplus_chapters,
-            first_process_object,
-            md_auth_object,
-            manga_id_map,
-            database_connection,
-        ).upload_chapters()
+        while True:
+            try:
+                BotProcess(
+                    session,
+                    updates,
+                    all_mplus_chapters,
+                    first_process_object,
+                    md_auth_object,
+                    manga_id_map,
+                    database_connection,
+                    posted_md_updates,
+                ).upload_chapters()
+            except requests.RequestException:
+                continue
+            else:
+                break
         print("Uploaded all update(s).")
 
     if first_process is not None:
