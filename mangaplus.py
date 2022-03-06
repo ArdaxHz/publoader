@@ -21,7 +21,7 @@ from scheduler import Scheduler
 
 import response_pb2 as response_pb
 
-__version__ = "1.4.6"
+__version__ = "1.4.7"
 
 mplus_language_map = {
     "0": "en",
@@ -1600,7 +1600,6 @@ class MPlusAPI:
             chapter.manga_id in self.title_regexes.get("empty", [])
             and None not in chapter_number
             or title.lower() in ("final chapter",)
-            or "final chapter" in title.lower()
         ):
             normalised_title = None
         elif chapter.manga_id in self.title_regexes.get("noformat", []):
