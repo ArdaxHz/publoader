@@ -21,7 +21,7 @@ from scheduler import Scheduler
 
 import response_pb2 as response_pb
 
-__version__ = "1.4.7"
+__version__ = "1.4.8"
 
 mplus_language_map = {
     "0": "en",
@@ -1731,7 +1731,7 @@ def main(db_connection: Optional[sqlite3.Connection] = None, clean_db=False):
                     database_connection,
                     posted_md_updates,
                 ).upload_chapters()
-            except requests.RequestException:
+            except (requests.RequestException, sqlite3.OperationalError):
                 continue
             else:
                 break
