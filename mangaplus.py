@@ -21,7 +21,7 @@ from scheduler import Scheduler
 
 import response_pb2 as response_pb
 
-__version__ = "1.4.8"
+__version__ = "1.4.9"
 
 mplus_language_map = {
     "0": "en",
@@ -1696,6 +1696,7 @@ def main(db_connection: Optional[sqlite3.Connection] = None, clean_db=False):
     )
 
     session = requests.Session()
+    session.headers.update({"User-Agent": f"MP_MD_bot/{__version__}"})
     md_auth_object = AuthMD(session, config)
 
     # Start deleting expired chapters
