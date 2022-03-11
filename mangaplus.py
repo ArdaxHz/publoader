@@ -589,11 +589,11 @@ class ChapterDeleterProcess:
         # If the expiry date of the chapter is less than the current time and
         # the md chapter id is available, try delete
         logging.info(f"Moving {chapter} from chapters table to deleted_chapters table.")
-        md_chapter_id = chapter["md_chapter_id"]
+        md_chapter_id = chapter.get("md_chapter_id", None)
         manga_id = chapter.get("manga_id", None)
         if manga_id is None:
             manga_id = chapter.get("md_manga_id", None)
-        deleted_message = f'{md_chapter_id}: {chapter["chapter_id"]}, manga {manga_id}, chapter {chapter["chapter_number"]}, language {chapter["chapter_language"]}.'
+        deleted_message = f'{md_chapter_id}: {chapter.get("chapter_id", None)}, manga {manga_id}, chapter {chapter.get("chapter_number", None)}, language {chapter.get("chapter_language", None)}.'
 
         if md_chapter_id is not None:
             for i in range(UPLOAD_RETRY):
@@ -1764,7 +1764,7 @@ class DeleteDuplicatesMD:
             g["id"] for g in chapter["relationships"] if g["type"] == "scanlation_group"
         ]
 
-    def check_chapters(self, chapters: List[dict]) -> List[str]:
+    def check_chapters(self, chapters: List[dict]) -> List[dict]:
         to_return_ids = []
         to_check = []
 
@@ -1805,12 +1805,12 @@ class DeleteDuplicatesMD:
             newest_id = newest["id"]
             to_return_ids = [c["id"] for c in to_check]
             to_return_ids.remove(newest_id)
+            to_check.remove(newest)
 
             if to_return_ids:
                 print(f"Found dupes of {newest_id} to delete: {to_return_ids}")
                 logging.info(f"Found dupes of {newest_id} to delete: {to_return_ids}")
-
-        return to_return_ids
+        return to_check
 
     def delete_dupes(self):
         for manga_id in self.tracked_mangadex_ids:
@@ -1833,9 +1833,17 @@ class DeleteDuplicatesMD:
                         continue
 
                     chapters_to_delete = self.check_chapters(chapters_md)
-                    self.first_process_object.add_more_chapters(
-                        chapters_to_delete, on_db=False
-                    )
+                    chapters_to_delete_dict: Dict[str, str] = [
+                        {
+                            "md_chapter_id": c["id"],
+                            "md_manga_id": manga_id,
+                            "chapter_language": c["attributes"]["translatedLanguage"],
+                            "chapter_number": c["attributes"]["chapter"],
+                        }
+                        for c in chapters_to_delete
+                    ]
+
+                    self.first_process_object.add_more_chapters(chapters_to_delete_dict)
                 time.sleep(RATELIMIT_TIME)
             time.sleep(RATELIMIT_TIME)
 
