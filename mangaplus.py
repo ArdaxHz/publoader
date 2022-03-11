@@ -21,7 +21,7 @@ from scheduler import Scheduler
 
 import response_pb2 as response_pb
 
-__version__ = "1.4.9"
+__version__ = "1.5.0"
 
 mplus_language_map = {
     "0": "en",
@@ -106,6 +106,7 @@ def open_config_file() -> configparser.RawConfigParser:
 config = open_config_file()
 mangadex_api_url = config["Paths"]["mangadex_api_url"]
 md_upload_api_url = f"{mangadex_api_url}/upload"
+MPLUS_GROUP_ID = "4f1de6a2-f0c5-4ac5-bce5-02c7dbb67deb"
 
 try:
     RATELIMIT_TIME = int(config["User Set"].get("mangadex_ratelimit_time", ""))
@@ -255,19 +256,28 @@ def convert_json(response_to_convert: requests.Response) -> Optional[dict]:
     return converted_response
 
 
-def print_error(error_response: requests.Response) -> str:
+def print_error(
+    error_response: requests.Response,
+    *,
+    show_error: bool = True,
+    log_error: bool = False,
+) -> str:
     """Print the errors the site returns."""
     status_code = error_response.status_code
-    error_converting_json_log_message = "{} when converting error_response into json."
+    error_converting_json_log_message = (
+        "{} when converting the error response into json."
+    )
     error_converting_json_print_message = (
-        f"{status_code}: Couldn't convert api reposnse into json."
+        f"{status_code}: Couldn't convert api response into json."
     )
     error_message = ""
 
     if status_code == 429:
         error_message = f"429: {http_error_codes.get(str(status_code))}"
-        logging.error(error_message)
-        print(error_message)
+        if log_error:
+            logging.error(error_message)
+        if show_error:
+            print(error_message)
         time.sleep(RATELIMIT_TIME * 4)
         return error_message
 
@@ -280,7 +290,7 @@ def print_error(error_response: requests.Response) -> str:
         return error_converting_json_print_message
     # Maybe already a json object
     except AttributeError:
-        logging.error(f"error_response is already a json.")
+        logging.error(f"Error response is already a json.")
         # Try load as a json object
         try:
             error_json = json.loads(error_response.content)
@@ -301,12 +311,16 @@ def print_error(error_response: requests.Response) -> str:
             errors = http_error_codes.get(str(status_code), "")
 
         error_message = f"Error: {errors}"
-        logging.warning(error_message)
-        print(error_message)
+        if log_error:
+            logging.warning(error_message)
+        if show_error:
+            print(error_message)
     except KeyError:
         error_message = f"KeyError {status_code}: {error_json}."
-        logging.warning(error_message)
-        print(error_message)
+        if log_error:
+            logging.warning(error_message)
+        if show_error:
+            print(error_message)
 
     return error_message
 
@@ -592,7 +606,7 @@ class ChapterDeleterProcess:
 
                 if delete_reponse.status_code != 200:
                     logging.error(f"Couldn't delete expired chapter {deleted_message}")
-                    print_error(delete_reponse)
+                    print_error(delete_reponse, log_error=True)
 
                     if delete_reponse.status_code == 401:
                         unauthorised_message = (
@@ -625,6 +639,28 @@ class ChapterDeleterProcess:
                 time.sleep(RATELIMIT_TIME)
 
             self._remove_old_chapter(chapter_to_delete)
+
+    def add_more_chapters(
+        self, chapters_to_add: List[dict], on_db: bool = True
+    ) -> Optional["ChapterDeleterProcess"]:
+        self.on_db = on_db
+
+        if self.chapter_delete_process is None:
+            second_process_object = ChapterDeleterProcess(
+                session=self.session,
+                posted_chapters=chapters_to_add,
+                md_auth_object=self.md_auth_object,
+            )
+            return second_process_object
+        else:
+            if not self.chapter_delete_process.is_alive():
+                if not self.chapters_to_delete:
+                    self.chapters_to_delete = chapters_to_add
+                else:
+                    self.chapters_to_delete.extend(chapters_to_add)
+                self.delete_async()
+            else:
+                self.chapters_to_delete.extend(chapters_to_add)
 
     def delete(self):
         """Delete chapters non-concurrently."""
@@ -701,7 +737,7 @@ class ChapterUploaderProcess:
                 logging.info("No existing upload session found.")
                 return
             elif existing_session.status_code == 401:
-                print_error(existing_session)
+                print_error(existing_session, log_error=True)
                 logging.warning("Not logged in, logging in and retrying.")
                 self.md_auth_object.login()
             else:
@@ -774,10 +810,10 @@ class ChapterUploaderProcess:
                     print(upload_session_response_json_message)
                     json_error = True
             elif upload_session_response.status_code == 401:
-                print_error(upload_session_response)
+                print_error(upload_session_response, log_error=True)
                 self.md_auth_object.login()
             else:
-                print_error(upload_session_response)
+                print_error(upload_session_response, log_error=True)
                 logging.error(
                     f"Couldn't create an upload session for {self.mangadex_manga_id}, chapter {self.chapter.chapter_number}."
                 )
@@ -842,12 +878,12 @@ class ChapterUploaderProcess:
                     print(chapter_commit_response_json_message)
                 return True
             elif chapter_commit_response.status_code == 401:
-                print_error(chapter_commit_response)
+                print_error(chapter_commit_response, log_error=True)
                 self.md_auth_object.login()
             else:
                 succesful_upload = False
                 logging.warning(f"Failed to commit {self.upload_session_id}, retrying.")
-                print_error(chapter_commit_response)
+                print_error(chapter_commit_response, log_error=True)
 
             time.sleep(RATELIMIT_TIME * 2)
 
@@ -911,8 +947,8 @@ class MangaUploaderProcess:
             "deleter_process_object"
         ]
         self.md_auth_object: AuthMD = kwargs["md_auth_object"]
-        self.mplus_group: str = kwargs["mplus_group"]
         self.posted_md_updates: List[Chapter] = kwargs["posted_md_updates"]
+        self.mplus_group = MPLUS_GROUP_ID
 
         self.second_process = None
         self.second_process_object = None
@@ -953,10 +989,7 @@ class MangaUploaderProcess:
     def _delete_extra_chapters(self):
         chapters_to_delete = self._remove_chapters_not_mplus()
         if chapters_to_delete:
-            if (
-                self.deleter_process_object is None
-                or self.deleter_process_object.chapter_delete_process is None
-            ):
+            if self.deleter_process_object is None:
                 self.second_process_object = ChapterDeleterProcess(
                     session=self.session,
                     posted_chapters=chapters_to_delete,
@@ -964,20 +997,11 @@ class MangaUploaderProcess:
                 )
                 self.second_process_object.delete()
             else:
-                if not self.deleter_process_object.chapter_delete_process.is_alive():
-                    if not self.deleter_process_object.chapters_to_delete:
-                        self.deleter_process_object.chapters_to_delete = (
-                            chapters_to_delete
-                        )
-                    else:
-                        self.deleter_process_object.chapters_to_delete.extend(
-                            chapters_to_delete
-                        )
-                    self.deleter_process_object.delete_async()
-                else:
-                    self.deleter_process_object.chapters_to_delete.extend(
-                        chapters_to_delete
-                    )
+                self.second_process_object = (
+                    self.deleter_process_object.add_more_chapters(chapters_to_delete)
+                )
+                if self.second_process_object is not None:
+                    self.second_process_object.delete()
 
     def start_manga_uploading_process(self):
         self.skipped = 0
@@ -1039,7 +1063,7 @@ class BotProcess:
         self.manga_id_map = manga_id_map
         self.database_connection = database_connection
         self.processes: List[multiprocessing.Process] = []
-        self.mplus_group = "4f1de6a2-f0c5-4ac5-bce5-02c7dbb67deb"
+        self.mplus_group = MPLUS_GROUP_ID
         self.mplus_group_chapters = self._get_mplus_chapters()
         self.manga_untracked = [
             m
@@ -1133,7 +1157,7 @@ class BotProcess:
             )
             if chapters_response.status_code != 200:
                 manga_response_message = f"Couldn't get the chapters of the group."
-                print_error(chapters_response)
+                print_error(chapters_response, log_error=True)
                 logging.error(manga_response_message)
                 continue
 
@@ -1251,7 +1275,6 @@ class BotProcess:
                     "mangadex_manga_id": mangadex_manga_id,
                     "deleter_process_object": self.deleter_process_object,
                     "md_auth_object": self.md_auth_object,
-                    "mplus_group": self.mplus_group,
                     "mplus_group_chapters": self.mplus_group_chapters.get(
                         mangadex_manga_id, []
                     ),
@@ -1669,6 +1692,154 @@ class MPlusAPI:
         return updated_chapters
 
 
+class DeleteDuplicatesMD:
+    def __init__(
+        self,
+        session: requests.Session,
+        manga_id_map: Dict[str, List[int]],
+        first_process_object: "ChapterDeleterProcess",
+    ) -> None:
+        self.session = session
+        self.manga_id_map = manga_id_map
+        self.first_process_object = first_process_object
+        self.tracked_mangadex_ids = list(manga_id_map.keys())
+        self.languages = list(set(mplus_language_map.values()))
+        self.to_delete = []
+
+    def get_aggregate(self, manga_id: str, language: str) -> Optional[dict]:
+        logging.info(
+            f"Getting aggregate info for manga {manga_id} in language {language}."
+        )
+        aggregate_response = self.session.get(
+            f"{mangadex_api_url}/manga/{manga_id}/aggregate",
+            params={"translatedLanguage[]": [language], "groups[]": [MPLUS_GROUP_ID]},
+        )
+
+        if aggregate_response.status_code in range(200, 300):
+            aggregate_response_json = convert_json(aggregate_response)
+            if aggregate_response_json is not None:
+                return aggregate_response_json["volumes"]
+
+        error = print_error(aggregate_response)
+        logging.error(
+            f"Error returned from aggregate response for manga {manga_id}: {error}"
+        )
+
+    def check_count(self, aggregate_chapters: dict) -> List[dict]:
+        to_check = []
+        for volume in aggregate_chapters:
+            if isinstance(aggregate_chapters, dict):
+                volume_itter = aggregate_chapters[volume]["chapters"]
+            elif isinstance(aggregate_chapters, list):
+                volume_itter = volume["chapters"]
+                for chapter in volume["chapters"]:
+                    if chapter["count"] > 1:
+                        to_check.append(chapter)
+
+            for chapter in volume_itter:
+                if isinstance(chapter, str):
+                    chapter_itter = aggregate_chapters[volume]["chapters"][chapter]
+                elif isinstance(chapter, (list, dict)):
+                    chapter_itter = chapter
+
+                if chapter_itter["count"] > 1:
+                    to_check.append(chapter_itter)
+        return to_check
+
+    def get_chapters(self, chapters: List[str]) -> Optional[List[dict]]:
+        logging.debug(f"Getting chapter data for chapter ids: {chapters}")
+        chapters_response = self.session.get(
+            f"{mangadex_api_url}/chapter", params={"ids[]": chapters, "limit": 100}
+        )
+
+        if chapters_response.status_code in range(200, 300):
+            chapters_response_json = convert_json(chapters_response)
+            if chapters_response_json is not None:
+                return chapters_response_json["data"]
+
+        error = print_error(chapters_response, log_error=True)
+
+    def filter_group(self, chapter: dict) -> List[str]:
+        return [
+            g["id"] for g in chapter["relationships"] if g["type"] == "scanlation_group"
+        ]
+
+    def check_chapters(self, chapters: List[dict]) -> List[str]:
+        to_return_ids = []
+        to_check = []
+
+        for chapter in chapters[1:]:
+            current_index = chapters.index(chapter)
+            previous_chapter = chapters[current_index - 1]
+
+            current_attributes = chapter["attributes"]
+            current_groups = self.filter_group(chapter)
+
+            previous_attributes = previous_chapter["attributes"]
+            previous_groups = self.filter_group(previous_chapter)
+
+            if MPLUS_GROUP_ID in current_groups and MPLUS_GROUP_ID in previous_groups:
+                if (
+                    current_attributes["translatedLanguage"]
+                    == previous_attributes["translatedLanguage"]
+                    and current_attributes["chapter"] == previous_attributes["chapter"]
+                    and current_attributes["externalUrl"]
+                    == previous_attributes["externalUrl"]
+                ):
+                    if chapter not in to_check:
+                        to_check.append(chapter)
+
+                    if previous_chapter not in to_check:
+                        to_check.append(previous_chapter)
+
+        if to_check:
+            newest = to_check[0]
+            for chapter in to_check:
+                if datetime.strptime(
+                    chapter["attributes"]["createdAt"], "%Y-%m-%dT%H:%M:%S%z"
+                ) > datetime.strptime(
+                    newest["attributes"]["createdAt"], "%Y-%m-%dT%H:%M:%S%z"
+                ):
+                    newest = chapter
+
+            newest_id = newest["id"]
+            to_return_ids = [c["id"] for c in to_check]
+            to_return_ids.remove(newest_id)
+
+            if to_return_ids:
+                print(f"Found dupes of {newest_id} to delete: {to_return_ids}")
+                logging.info(f"Found dupes of {newest_id} to delete: {to_return_ids}")
+
+        return to_return_ids
+
+    def delete_dupes(self):
+        for manga_id in self.tracked_mangadex_ids:
+            for language in self.languages:
+                aggregate_chapters_unchecked = self.get_aggregate(manga_id, language)
+                if aggregate_chapters_unchecked is None:
+                    continue
+
+                aggregate_chapters = self.check_count(aggregate_chapters_unchecked)
+                logging.debug(
+                    f"Aggregate chapters with more than one count: {aggregate_chapters}"
+                )
+                for chapter in aggregate_chapters:
+                    chapters_ids = []
+                    chapters_ids.append(chapter["id"])
+                    chapters_ids.extend(chapter["others"])
+
+                    chapters_md = self.get_chapters(chapters_ids)
+                    if chapters_md is None:
+                        continue
+
+                    chapters_to_delete = self.check_chapters(chapters_md)
+                    self.first_process_object.add_more_chapters(
+                        chapters_to_delete, on_db=False
+                    )
+                time.sleep(RATELIMIT_TIME)
+            time.sleep(RATELIMIT_TIME)
+
+
 def main(db_connection: Optional[sqlite3.Connection] = None, clean_db=False):
     """Main function for getting the updates."""
     setup_logs()
@@ -1737,6 +1908,15 @@ def main(db_connection: Optional[sqlite3.Connection] = None, clean_db=False):
             else:
                 break
         print("Uploaded all update(s).")
+
+    if clean_db:
+        try:
+            dupes_deleter = DeleteDuplicatesMD(
+                session, manga_id_map, first_process_object
+            )
+            dupes_deleter.delete_dupes()
+        except (UnboundLocalError, TypeError, IndexError, KeyError, ValueError):
+            pass
 
     if first_process is not None:
         first_process.join()
