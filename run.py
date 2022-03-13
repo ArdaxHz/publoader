@@ -11,7 +11,7 @@ from scheduler import Scheduler
 root_path = Path(".")
 config_file_path = root_path.joinpath("config").with_suffix(".ini")
 
-if sys.platform == "linux":
+if sys.platform.startswith("linux"):
     RUNNER = "python3"
 else:
     RUNNER = "python"
