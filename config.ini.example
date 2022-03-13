@@ -11,6 +11,7 @@ BOT_RUN_TIME_CHECKS=00:00
 
 [Paths]
 MANGADEX_API_URL=https://api.mangadex.org
+COMPONENTS_PATH=components
 DATABASE_PATH=chapters.db
 MANGA_ID_MAP_PATH=manga.json
 TITLE_REGEX_PATH=title_regex.json

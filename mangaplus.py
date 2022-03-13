@@ -1,27 +1,23 @@
+import argparse
 import configparser
 import json
 import logging
 import math
 import multiprocessing
-import os
 import re
 import sqlite3
 import string
 import time
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime
-from datetime import time as dtTime
-from datetime import timezone
 from pathlib import Path
 from typing import Dict, List, Literal, Optional, Union
 
 import requests
-import scheduler.trigger as trigger
-from scheduler import Scheduler
 
 import response_pb2 as response_pb
 
-__version__ = "1.5.0"
+__version__ = "1.5.1"
 
 mplus_language_map = {
     "0": "en",
@@ -88,6 +84,10 @@ def load_config_info(config: configparser.RawConfigParser):
         logging.info("mdauth path empty, using default.")
         config["Paths"]["mdauth_path"] = ".mdauth"
 
+    if config["Paths"].get("components_path", "") == "":
+        logging.info("components path empty, using default.")
+        config["Paths"]["components_path"] = "components_path"
+
 
 def open_config_file() -> configparser.RawConfigParser:
     # Open config file and read values
@@ -104,6 +104,9 @@ def open_config_file() -> configparser.RawConfigParser:
 
 
 config = open_config_file()
+components_path = root_path.joinpath(config["Paths"]["components_path"])
+components_path.mkdir(parents=True, exist_ok=True)
+
 mangadex_api_url = config["Paths"]["mangadex_api_url"]
 md_upload_api_url = f"{mangadex_api_url}/upload"
 MPLUS_GROUP_ID = "4f1de6a2-f0c5-4ac5-bce5-02c7dbb67deb"
@@ -171,7 +174,7 @@ def check_table_exists(database_connection: sqlite3.Connection) -> bool:
 
 
 database_name = config["Paths"]["database_path"]
-database_path = Path(database_name)
+database_path = components_path.joinpath(database_name)
 
 
 def open_database(db_path: Path) -> tuple[sqlite3.Connection, bool]:
@@ -407,7 +410,7 @@ class AuthMD:
         self.first_login = True
         self.successful_login = False
         self.refresh_token = None
-        self.token_file = root_path.joinpath(config["Paths"]["mdauth_path"])
+        self.token_file = components_path.joinpath(config["Paths"]["mdauth_path"])
         self.md_auth_api_url = f"{mangadex_api_url}/auth"
 
     def _open_auth_file(self) -> Optional[str]:
@@ -1303,7 +1306,7 @@ class MPlusAPI:
         self.mplus_base_api_url = "https://jumpg-webapi.tokyo-cdn.com"
 
         self.title_regexes = self._open_title_regex(
-            Path(config["Paths"]["title_regex_path"])
+            components_path.joinpath(config["Paths"]["title_regex_path"])
         )
 
         self.get_mplus_updated_manga()
@@ -1851,7 +1854,9 @@ class DeleteDuplicatesMD:
 def main(db_connection: Optional[sqlite3.Connection] = None, clean_db=False):
     """Main function for getting the updates."""
     setup_logs()
-    manga_id_map = open_manga_id_map(Path(config["Paths"]["manga_id_map_path"]))
+    manga_id_map = open_manga_id_map(
+        components_path.joinpath(config["Paths"]["manga_id_map_path"])
+    )
     if db_connection is not None:
         database_connection = db_connection
     else:
@@ -1933,7 +1938,7 @@ def main(db_connection: Optional[sqlite3.Connection] = None, clean_db=False):
     # Save and close database
     database_connection.commit()
     backup_database_connection, _ = open_database(
-        Path(database_name).with_suffix(".bak")
+        components_path.joinpath(database_name).with_suffix(".bak")
     )
     database_connection.backup(backup_database_connection)
     backup_database_connection.close()
@@ -1947,7 +1952,7 @@ def move_chapters():
 
     db_files = [
         file
-        for file in root_path.iterdir()
+        for file in components_path.iterdir()
         if file != database_path and file.suffix == ".db"
     ]
     for file in db_files:
@@ -2011,7 +2016,7 @@ def clean_db():
     # database_connection, _ = open_database(database_path)
     # while True:
     #     version += 1
-    #     new_database_path = Path(
+    #     new_database_path = components_path.joinpath(
     #         f"{database_name.rsplit('.', 1)[0]}-{version}"
     #     ).with_suffix(".db")
     #     if not os.path.exists(new_database_path):
@@ -2033,41 +2038,31 @@ def clean_db():
 
 if __name__ == "__main__":
 
-    daily_run_time_daily_hour = int(
-        config["User Set"]["bot_run_time_daily"].split(":")[0]
-    )
-    daily_run_time_daily_minute = int(
-        config["User Set"]["bot_run_time_daily"].split(":")[1]
-    )
-    daily_run_time_checks_hour = int(
-        config["User Set"]["bot_run_time_checks"].split(":")[0]
-    )
-    daily_run_time_checks_minute = int(
-        config["User Set"]["bot_run_time_checks"].split(":")[1]
-    )
-
     multiprocessing_manager = multiprocessing.Manager()
-    print("Initial run of bot.")
-    main()
-    print("End of initial run, starting scheduler.")
-    schedule = Scheduler(tzinfo=timezone.utc)
-    schedule.daily(
-        dtTime(
-            hour=daily_run_time_daily_hour,
-            minute=daily_run_time_daily_minute,
-            tzinfo=timezone.utc,
-        ),
-        main,
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument(
+        "--clean",
+        "-c",
+        default=False,
+        const=True,
+        nargs="?",
+        help="Clean the database.",
     )
-    schedule.daily(
-        dtTime(
-            hour=daily_run_time_checks_hour,
-            minute=daily_run_time_checks_minute,
-            tzinfo=timezone.utc,
-        ),
-        clean_db,
+    parser.add_argument(
+        "--move",
+        "-m",
+        default=False,
+        const=True,
+        nargs="?",
+        help="Move data from other databases into the main database.",
     )
 
-    while True:
-        schedule.exec_jobs()
-        time.sleep(1)
+    vargs = vars(parser.parse_args())
+
+    if vargs["clean"]:
+        clean_db()
+    elif vargs["move"]:
+        move_chapters()
+    else:
+        main()
