@@ -1,5 +1,6 @@
 import configparser
 import subprocess
+import sys
 import time
 from datetime import time as dtTime
 from datetime import timezone
@@ -9,6 +10,11 @@ from scheduler import Scheduler
 
 root_path = Path(".")
 config_file_path = root_path.joinpath("config").with_suffix(".ini")
+
+if sys.platform == "linux":
+    RUNNER = "python3"
+else:
+    RUNNER = "python"
 
 
 def open_config_file() -> configparser.RawConfigParser:
@@ -27,19 +33,19 @@ config = open_config_file()
 
 def main(clean_db=False, move_chapters=False):
     """Call the main function of the mangaplus bot."""
-    subprocess.call(["python", "mangaplus.py"])
+    subprocess.call([RUNNER, "mangaplus.py"])
 
 
 def move_chapters():
     """Call the move_chapters function of the mangaplus bot."""
     print("Running the move chapters function.")
-    subprocess.call(["python", "mangaplus.py", "-m"])
+    subprocess.call([RUNNER, "mangaplus.py", "-m"])
 
 
 def clean_db():
     """Call the clean_db function of the mangaplus bot."""
     print("Running the clean database function.")
-    subprocess.call(["python", "mangaplus.py", "-c"])
+    subprocess.call([RUNNER, "mangaplus.py", "-c"])
 
 
 if __name__ == "__main__":
