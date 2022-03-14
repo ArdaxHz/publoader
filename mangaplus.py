@@ -1698,7 +1698,7 @@ class MPlusAPI:
 
         if pattern_to_use is not None:
             normalised_title = pattern_to_use.sub(
-                repl=replace_string, string=title
+                repl=replace_string, string=title, count=1
             ).strip()
 
         if normalised_title == "":
