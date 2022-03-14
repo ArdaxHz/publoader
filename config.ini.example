@@ -16,3 +16,4 @@ DATABASE_PATH=chapters.db
 MANGA_ID_MAP_PATH=manga.json
 TITLE_REGEX_PATH=title_regex.json
 MDAUTH_PATH=.mdauth
+WEBHOOK_URL=

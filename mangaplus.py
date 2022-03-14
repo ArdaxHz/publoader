@@ -16,12 +16,13 @@ from typing import Dict, List, Literal, Optional, Union
 import requests
 
 import response_pb2 as response_pb
+from webhook import MPlusBotWebhook
 
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
-__version__ = "1.5.2"
+__version__ = "1.5.3"
 
 mplus_language_map = {
     "0": "en",
@@ -44,7 +45,7 @@ http_error_codes = {
 root_path = Path(".")
 config_file_path = root_path.joinpath("config").with_suffix(".ini")
 
-log_folder_path = root_path.joinpath("logs")
+log_folder_path = root_path.joinpath("logs").joinpath("bot")
 log_folder_path.mkdir(parents=True, exist_ok=True)
 
 
@@ -887,6 +888,7 @@ class ChapterUploaderProcess:
                 if chapter_commit_response_json is not None:
                     succesful_upload_id = chapter_commit_response_json["data"]["id"]
                     succesful_upload_message = f"Committed {succesful_upload_id} - {self.chapter.chapter_id} for {self.manga_generic_error_message}."
+                    self.chapter.md_chapter_id = succesful_upload_id
                     logging.info(succesful_upload_message)
                     print(succesful_upload_message)
                     update_database(
@@ -984,7 +986,7 @@ class ChapterUploaderProcess:
         upload_session_response_json = self._create_upload_session()
         if upload_session_response_json is None:
             time.sleep(RATELIMIT_TIME)
-            return 1
+            return 2
 
         self.upload_session_id = upload_session_response_json["data"]["id"]
         logging.info(
@@ -1015,7 +1017,10 @@ class MangaUploaderProcess:
         ]
         self.md_auth_object: AuthMD = kwargs["md_auth_object"]
         self.posted_md_updates: List[Chapter] = kwargs["posted_md_updates"]
-        self.same_chapter_dict = kwargs["same_chapter_dict"]
+        self.same_chapter_dict: Dict[str, List[int]] = kwargs["same_chapter_dict"]
+        self.mangadex_manga_data: dict = kwargs["mangadex_manga_data"]
+        self.posted_chapters: List[Chapter] = []
+        self.failed_uploads: List[Chapter] = []
         self.mplus_group = MPLUS_GROUP_ID
 
         self.second_process = None
@@ -1074,6 +1079,7 @@ class MangaUploaderProcess:
     def start_manga_uploading_process(self):
         self.skipped = 0
         self.skipped_chapter = False
+        chapter = self.chapters[0]
         for count, chapter in enumerate(self.chapters, start=1):
             chapter: Chapter = chapter
             if not self.skipped_chapter and count % 5 == 0:
@@ -1098,14 +1104,26 @@ class MangaUploaderProcess:
                 self.skipped += 1
                 if uploaded in (1,):
                     self.skipped_chapter = True
+                if uploaded in (2,):
+                    self.failed_uploads.append(chapter)
                 continue
 
             self.skipped_chapter = False
+            self.posted_chapters.append(chapter)
 
         if self.skipped != 0:
             skipped_chapters_message = f"Skipped {self.skipped} chapters out of {len(self.chapters)} for manga {chapter.manga.manga_name}: {self.mangadex_manga_id} - {chapter.manga_id}."
             logging.info(skipped_chapters_message)
             print(skipped_chapters_message)
+
+        MPlusBotWebhook(
+            self.mangadex_manga_data,
+            self.posted_chapters,
+            self.failed_uploads,
+            self.skipped,
+        ).main()
+
+        setup_logs()
 
         if self.second_process_object is not None:
             del self.second_process_object
@@ -1123,7 +1141,7 @@ class BotProcess:
         manga_id_map: Dict[str, List[int]],
         database_connection: sqlite3.Connection,
         posted_md_updates: List[Chapter],
-        same_chapter_dict: dict,
+        same_chapter_dict: Dict[str, List[int]],
     ):
         self.session = session
         self.updates = updates
@@ -1134,6 +1152,7 @@ class BotProcess:
         self.database_connection = database_connection
         self.same_chapter_dict = same_chapter_dict
         self.processes: List[multiprocessing.Process] = []
+        self.md_manga_objs = {}
         self.mplus_group = MPLUS_GROUP_ID
         self.mplus_group_chapters = self._get_mplus_chapters()
         self.manga_untracked = [
@@ -1295,13 +1314,16 @@ class BotProcess:
         logging.debug("Sorting the uploaded chapters by MD ID.")
         chapters_sorted = {}
         for chapter in chapters_unsorted:
-            manga_id = [
-                g["id"] for g in chapter["relationships"] if g["type"] == "manga"
-            ][0]
+            manga = [g for g in chapter["relationships"] if g["type"] == "manga"][0]
+            manga_id = manga["id"]
+
             try:
                 chapters_sorted[manga_id].append(chapter)
             except (KeyError, ValueError, AttributeError):
                 chapters_sorted[manga_id] = [chapter]
+
+            if manga_id not in self.md_manga_objs:
+                self.md_manga_objs.update({manga_id: manga})
         return chapters_sorted
 
     def _sort_chapters_by_manga(
@@ -1351,6 +1373,9 @@ class BotProcess:
                     ),
                     "posted_md_updates": self.posted_md_updates,
                     "same_chapter_dict": self.same_chapter_dict,
+                    "mangadex_manga_data": self.md_manga_objs.get(
+                        mangadex_manga_id, {}
+                    ),
                 }
             )
             manga_uploader.start_manga_uploading_process()
