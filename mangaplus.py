@@ -17,7 +17,11 @@ import requests
 
 import response_pb2 as response_pb
 
-__version__ = "1.5.1"
+from requests.packages.urllib3.exceptions import InsecureRequestWarning
+
+requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
+
+__version__ = "1.5.2"
 
 mplus_language_map = {
     "0": "en",
@@ -328,7 +332,12 @@ def print_error(
     return error_message
 
 
-def _get_md_id(manga_id_map: Dict[str, List[int]], mangaplus_id: int) -> Optional[str]:
+def flatten(t: List[list]) -> list:
+    """Flatten nested lists into one list."""
+    return [item for sublist in t for item in sublist]
+
+
+def get_md_id(manga_id_map: Dict[str, List[int]], mangaplus_id: int) -> Optional[str]:
     """Get the mangadex id from the mangaplus one."""
     for md_id in manga_id_map:
         if mangaplus_id in manga_id_map[md_id]:
@@ -401,6 +410,23 @@ def open_manga_id_map(manga_map_path: Path) -> Dict[str, List[int]]:
         logging.critical("Manga map file is missing.")
         raise FileNotFoundError("Couldn't file manga map file.")
     return manga_map
+
+
+def open_title_regex(title_regex_path: Path) -> dict:
+    """Open the chapter title regex."""
+    try:
+        with open(title_regex_path, "r") as title_regex_fp:
+            title_regexes = json.load(title_regex_fp)
+        logging.info("Opened title regex file.")
+    except json.JSONDecodeError as e:
+        logging.critical("Title regex file is corrupted.")
+        raise json.JSONDecodeError(
+            msg="Title regex file is corrupted.", doc=e.doc, pos=e.pos
+        )
+    except FileNotFoundError:
+        logging.critical("Title regex file is missing.")
+        raise FileNotFoundError("Couldn't file title regex file.")
+    return title_regexes
 
 
 class AuthMD:
@@ -633,8 +659,10 @@ class ChapterDeleterProcess:
 
     def _delete_expired_chapters(self):
         """Delete expired chapters from mangadex."""
-        logging.info(f"Started deleting expired chapters process.")
-        print("Deleting expired chapters.")
+        looped_all = False
+        if self.chapters_to_delete:
+            logging.info(f"Started deleting expired chapters process.")
+            print("Deleting expired chapters.")
 
         for count, chapter_to_delete in enumerate(self.chapters_to_delete, start=1):
             if count % 3 == 0:
@@ -642,6 +670,15 @@ class ChapterDeleterProcess:
                 time.sleep(RATELIMIT_TIME)
 
             self._remove_old_chapter(chapter_to_delete)
+
+            if (
+                self.chapters_to_delete.index(chapter_to_delete)
+                == len(self.chapters_to_delete) - 1
+            ):
+                looped_all = True
+
+        if looped_all:
+            self.chapters_to_delete = []
 
     def add_more_chapters(
         self, chapters_to_add: List[dict], on_db: bool = True
@@ -669,7 +706,7 @@ class ChapterDeleterProcess:
         """Delete chapters non-concurrently."""
         if self.chapters_to_delete:
             self.md_auth_object.login()
-        self._delete_expired_chapters()
+            self._delete_expired_chapters()
 
     def delete_async(self) -> multiprocessing.Process:
         """Delete chapters concurrently."""
@@ -692,6 +729,7 @@ class ChapterUploaderProcess:
         self.md_auth_object: AuthMD = kwargs["md_auth_object"]
         self.mplus_group: str = kwargs["mplus_group"]
         self.posted_md_updates: List[Chapter] = kwargs["posted_md_updates"]
+        self.same_chapter_dict: Dict[str, List[int]] = kwargs["same_chapter_dict"]
 
         self.mplus_chapter_url = "https://mangaplus.shueisha.co.jp/viewer/{}"
 
@@ -752,27 +790,6 @@ class ChapterUploaderProcess:
 
         logging.error("Exising upload session not deleted.")
         raise Exception(f"Couldn't delete existing upload session.")
-
-    def _check_for_duplicate_chapter_md_list(self, manga_chapters: List[dict]) -> bool:
-        """Check for duplicate chapters on mangadex."""
-        # Skip duplicate chapters
-        for md_chapter in manga_chapters:
-            if (
-                md_chapter["attributes"]["chapter"] == self.chapter.chapter_number
-                and md_chapter["attributes"]["translatedLanguage"]
-                == self.chapter.chapter_language
-                and md_chapter["attributes"]["externalUrl"] is not None
-            ):
-                dupe_chapter_message = f"{self.manga_generic_error_message} already exists on mangadex, skipping."
-                logging.info(dupe_chapter_message)
-                print(dupe_chapter_message)
-                # Add duplicate chapter to database to avoid checking it again
-                # in the future
-                update_database(
-                    self.database_connection, self.chapter, md_chapter["id"]
-                )
-                return True
-        return False
 
     def _create_upload_session(self) -> Optional[dict]:
         """Try create an upload session 3 times."""
@@ -898,6 +915,27 @@ class ChapterUploaderProcess:
             return False
         return succesful_upload
 
+    def _check_for_duplicate_chapter_md_list(self, manga_chapters: List[dict]) -> bool:
+        """Check for duplicate chapters on mangadex."""
+        # Skip duplicate chapters
+        for md_chapter in manga_chapters:
+            if (
+                md_chapter["attributes"]["chapter"] == self.chapter.chapter_number
+                and md_chapter["attributes"]["translatedLanguage"]
+                == self.chapter.chapter_language
+                and md_chapter["attributes"]["externalUrl"] is not None
+            ):
+                dupe_chapter_message = f"{self.manga_generic_error_message} already exists on mangadex, skipping."
+                logging.info(dupe_chapter_message)
+                print(dupe_chapter_message)
+                # Add duplicate chapter to database to avoid checking it again
+                # in the future
+                update_database(
+                    self.database_connection, self.chapter, md_chapter["id"]
+                )
+                return True
+        return False
+
     def _check_already_uploaded(self) -> bool:
         for chap in self.posted_md_updates:
             if (
@@ -908,13 +946,39 @@ class ChapterUploaderProcess:
                 return True
         return False
 
+    def _check_uploaded_same_ids(self, manga_chapters: List[dict]) -> bool:
+        same_chapter_list_md = [
+            re.sub(
+                r"https\:\/\/mangaplus\.shueisha\.co\.jp\/viewer\/",
+                "",
+                c["attributes"]["externalUrl"],
+            )
+            for c in manga_chapters
+            if c["attributes"]["chapter"] == self.chapter.chapter_number
+            and c["attributes"]["translatedLanguage"] == self.chapter.chapter_language
+        ]
+        same_chapter_list_posted_ids = [
+            str(c.chapter_id) for c in self.posted_md_updates
+        ]
+
+        if self.chapter.chapter_id in flatten(list(self.same_chapter_dict.values())):
+            master_id = get_md_id(self.same_chapter_dict, self.chapter.chapter_id)
+            if master_id is not None:
+                if (
+                    master_id in same_chapter_list_md
+                    or master_id in same_chapter_list_posted_ids
+                ):
+                    return True
+        return False
+
     def start_upload(self, manga_chapters: list) -> Literal[0, 1, 2]:
-        duplicate_chapter = self._check_for_duplicate_chapter_md_list(manga_chapters)
-        if duplicate_chapter:
+        if self._check_for_duplicate_chapter_md_list(manga_chapters):
             return 1
 
-        already_uploaded = self._check_already_uploaded()
-        if already_uploaded:
+        if self._check_already_uploaded():
+            return 1
+
+        if self._check_uploaded_same_ids(manga_chapters):
             return 1
 
         upload_session_response_json = self._create_upload_session()
@@ -951,6 +1015,7 @@ class MangaUploaderProcess:
         ]
         self.md_auth_object: AuthMD = kwargs["md_auth_object"]
         self.posted_md_updates: List[Chapter] = kwargs["posted_md_updates"]
+        self.same_chapter_dict = kwargs["same_chapter_dict"]
         self.mplus_group = MPLUS_GROUP_ID
 
         self.second_process = None
@@ -1024,6 +1089,7 @@ class MangaUploaderProcess:
                     "md_auth_object": self.md_auth_object,
                     "mplus_group": self.mplus_group,
                     "posted_md_updates": self.posted_md_updates,
+                    "same_chapter_dict": self.same_chapter_dict,
                 }
             )
 
@@ -1057,6 +1123,7 @@ class BotProcess:
         manga_id_map: Dict[str, List[int]],
         database_connection: sqlite3.Connection,
         posted_md_updates: List[Chapter],
+        same_chapter_dict: dict,
     ):
         self.session = session
         self.updates = updates
@@ -1065,6 +1132,7 @@ class BotProcess:
         self.md_auth_object = md_auth_object
         self.manga_id_map = manga_id_map
         self.database_connection = database_connection
+        self.same_chapter_dict = same_chapter_dict
         self.processes: List[multiprocessing.Process] = []
         self.mplus_group = MPLUS_GROUP_ID
         self.mplus_group_chapters = self._get_mplus_chapters()
@@ -1243,7 +1311,7 @@ class BotProcess:
         chapters_sorted = {}
 
         for chapter in updates:
-            md_id = _get_md_id(self.manga_id_map, chapter.manga_id)
+            md_id = get_md_id(self.manga_id_map, chapter.manga_id)
             if md_id is None:
                 logging.warning(
                     f"No mangadex id found for mplus id {chapter.manga_id}."
@@ -1282,6 +1350,7 @@ class BotProcess:
                         mangadex_manga_id, []
                     ),
                     "posted_md_updates": self.posted_md_updates,
+                    "same_chapter_dict": self.same_chapter_dict,
                 }
             )
             manga_uploader.start_manga_uploading_process()
@@ -1296,6 +1365,7 @@ class MPlusAPI:
         manga_map_mplus_ids: List[int],
         posted_chapters_ids: List[int],
         manga_id_map: Dict[str, List[int]],
+        title_regexes: dict,
     ):
         self.tracked_manga = manga_map_mplus_ids
         self.posted_chapters_ids = posted_chapters_ids
@@ -1304,10 +1374,7 @@ class MPlusAPI:
         self.all_mplus_chapters: List[Chapter] = []
         self.untracked_manga: List[Manga] = []
         self.mplus_base_api_url = "https://jumpg-webapi.tokyo-cdn.com"
-
-        self.title_regexes = self._open_title_regex(
-            components_path.joinpath(config["Paths"]["title_regex_path"])
-        )
+        self.title_regexes = title_regexes
 
         self.get_mplus_updated_manga()
         self.get_mplus_updates()
@@ -1389,22 +1456,6 @@ class MPlusAPI:
             if process is not None:
                 process.join()
 
-    def _open_title_regex(self, title_regex_path: Path) -> dict:
-        """Open the chapter title regex."""
-        try:
-            with open(title_regex_path, "r") as title_regex_fp:
-                title_regexes = json.load(title_regex_fp)
-            logging.info("Opened title regex file.")
-        except json.JSONDecodeError as e:
-            logging.critical("Title regex file is corrupted.")
-            raise json.JSONDecodeError(
-                msg="Title regex file is corrupted.", doc=e.doc, pos=e.pos
-            )
-        except FileNotFoundError:
-            logging.critical("Title regex file is missing.")
-            raise FileNotFoundError("Couldn't file title regex file.")
-        return title_regexes
-
     def _normalise_chapter_object(
         self, chapter_list, manga_object: Manga
     ) -> List[Chapter]:
@@ -1418,7 +1469,7 @@ class MPlusAPI:
                 chapter_number=chapter.chapter_number,
                 chapter_language=manga_object.manga_language,
                 manga_id=manga_object.manga_id,
-                md_manga_id=_get_md_id(self.manga_id_map, manga_object.manga_id),
+                md_manga_id=get_md_id(self.manga_id_map, manga_object.manga_id),
                 manga=manga_object,
             )
             for chapter in chapter_list
@@ -1462,7 +1513,7 @@ class MPlusAPI:
             updated_chapters = self.get_latest_chapters(
                 manga_chapters_lists, self.posted_chapters_ids
             )
-            logging.info(updated_chapters)
+            logging.info(f"MangaPlus newly updated chapters: {updated_chapters}")
 
             if updated_chapters:
                 print(f"Manga {manga_object.manga_name}: {manga_object.manga_id}.")
@@ -1713,15 +1764,25 @@ class DeleteDuplicatesMD:
         logging.info(
             f"Getting aggregate info for manga {manga_id} in language {language}."
         )
-        aggregate_response = self.session.get(
-            f"{mangadex_api_url}/manga/{manga_id}/aggregate",
-            params={"translatedLanguage[]": [language], "groups[]": [MPLUS_GROUP_ID]},
-        )
 
-        if aggregate_response.status_code in range(200, 300):
-            aggregate_response_json = convert_json(aggregate_response)
-            if aggregate_response_json is not None:
-                return aggregate_response_json["volumes"]
+        for i in range(UPLOAD_RETRY):
+            try:
+                aggregate_response = self.session.get(
+                    f"{mangadex_api_url}/manga/{manga_id}/aggregate",
+                    params={
+                        "translatedLanguage[]": [language],
+                        "groups[]": [MPLUS_GROUP_ID],
+                    },
+                    verify=False,
+                )
+            except requests.RequestException as e:
+                logging.error(e)
+                continue
+
+            if aggregate_response.status_code in range(200, 300):
+                aggregate_response_json = convert_json(aggregate_response)
+                if aggregate_response_json is not None:
+                    return aggregate_response_json["volumes"]
 
         error = print_error(aggregate_response)
         logging.error(
@@ -1751,16 +1812,23 @@ class DeleteDuplicatesMD:
 
     def get_chapters(self, chapters: List[str]) -> Optional[List[dict]]:
         logging.debug(f"Getting chapter data for chapter ids: {chapters}")
-        chapters_response = self.session.get(
-            f"{mangadex_api_url}/chapter", params={"ids[]": chapters, "limit": 100}
-        )
+        for i in range(UPLOAD_RETRY):
+            try:
+                chapters_response = self.session.get(
+                    f"{mangadex_api_url}/chapter",
+                    params={"ids[]": chapters, "limit": 100},
+                    verify=False,
+                )
+            except requests.RequestException as e:
+                logging.error(e)
+                continue
 
-        if chapters_response.status_code in range(200, 300):
-            chapters_response_json = convert_json(chapters_response)
-            if chapters_response_json is not None:
-                return chapters_response_json["data"]
+            if chapters_response.status_code in range(200, 300):
+                chapters_response_json = convert_json(chapters_response)
+                if chapters_response_json is not None:
+                    return chapters_response_json["data"]
 
-        error = print_error(chapters_response, log_error=True)
+            error = print_error(chapters_response, log_error=True)
 
     def filter_group(self, chapter: dict) -> List[str]:
         return [
@@ -1816,8 +1884,10 @@ class DeleteDuplicatesMD:
         return to_check
 
     def delete_dupes(self):
-        for manga_id in self.tracked_mangadex_ids:
-            for language in self.languages:
+        print("Looking for chapter dupes.")
+
+        for mang_index, manga_id in enumerate(self.tracked_mangadex_ids, start=1):
+            for lang_index, language in enumerate(self.languages, start=1):
                 aggregate_chapters_unchecked = self.get_aggregate(manga_id, language)
                 if aggregate_chapters_unchecked is None:
                     continue
@@ -1842,13 +1912,19 @@ class DeleteDuplicatesMD:
                             "md_manga_id": manga_id,
                             "chapter_language": c["attributes"]["translatedLanguage"],
                             "chapter_number": c["attributes"]["chapter"],
+                            "chapter_timestamp": 946684799,
+                            "chapter_expire": 946684799,
                         }
                         for c in chapters_to_delete
                     ]
 
                     self.first_process_object.add_more_chapters(chapters_to_delete_dict)
+                if lang_index % 4 == 0:
+                    time.sleep(RATELIMIT_TIME)
+            if mang_index % 4 == 0:
                 time.sleep(RATELIMIT_TIME)
-            time.sleep(RATELIMIT_TIME)
+
+        print("Finished looking for chapter dupes.")
 
 
 def main(db_connection: Optional[sqlite3.Connection] = None, clean_db=False):
@@ -1857,6 +1933,10 @@ def main(db_connection: Optional[sqlite3.Connection] = None, clean_db=False):
     manga_id_map = open_manga_id_map(
         components_path.joinpath(config["Paths"]["manga_id_map_path"])
     )
+    title_regexes = open_title_regex(
+        components_path.joinpath(config["Paths"]["title_regex_path"])
+    )
+
     if db_connection is not None:
         database_connection = db_connection
     else:
@@ -1892,7 +1972,9 @@ def main(db_connection: Optional[sqlite3.Connection] = None, clean_db=False):
     first_process = first_process_object.delete_async()
 
     # Get new manga and chapter updates
-    mplus_api = MPlusAPI(manga_map_mplus_ids, posted_chapters_ids, manga_id_map)
+    mplus_api = MPlusAPI(
+        manga_map_mplus_ids, posted_chapters_ids, manga_id_map, title_regexes
+    )
     # updated_manga = mplus_api.untracked_manga
     updates = mplus_api.updated_chapters
     all_mplus_chapters = mplus_api.all_mplus_chapters
@@ -1915,6 +1997,7 @@ def main(db_connection: Optional[sqlite3.Connection] = None, clean_db=False):
                     manga_id_map,
                     database_connection,
                     posted_md_updates,
+                    title_regexes.get("same", {}),
                 ).upload_chapters()
             except (requests.RequestException, sqlite3.OperationalError):
                 continue
