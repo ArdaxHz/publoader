@@ -16,13 +16,13 @@ from typing import Dict, List, Literal, Optional, Union
 import requests
 
 import response_pb2 as response_pb
-from webhook import MPlusBotWebhook
+from webhook import MPlusBotUpdatesWebhook, MPlusBotDupesWebhook, webhook as WEBHOOK
 
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
-__version__ = "1.5.3"
+__version__ = "1.5.4"
 
 mplus_language_map = {
     "0": "en",
@@ -1076,7 +1076,7 @@ class MangaUploaderProcess:
                 if self.second_process_object is not None:
                     self.second_process_object.delete()
 
-    def start_manga_uploading_process(self):
+    def start_manga_uploading_process(self, last_manga: bool):
         self.skipped = 0
         self.skipped_chapter = False
         chapter = self.chapters[0]
@@ -1116,12 +1116,12 @@ class MangaUploaderProcess:
             logging.info(skipped_chapters_message)
             print(skipped_chapters_message)
 
-        MPlusBotWebhook(
+        MPlusBotUpdatesWebhook(
             self.mangadex_manga_data,
             self.posted_chapters,
             self.failed_uploads,
             self.skipped,
-        ).main()
+        ).main(last_manga)
 
         setup_logs()
 
@@ -1378,7 +1378,9 @@ class BotProcess:
                     ),
                 }
             )
-            manga_uploader.start_manga_uploading_process()
+            manga_uploader.start_manga_uploading_process(
+                index == len(updated_manga_chapters)
+            )
 
             if index % 10 == 0:
                 self.md_auth_object.login()
@@ -1841,7 +1843,7 @@ class DeleteDuplicatesMD:
             try:
                 chapters_response = self.session.get(
                     f"{mangadex_api_url}/chapter",
-                    params={"ids[]": chapters, "limit": 100},
+                    params={"ids[]": chapters, "limit": 100, "includes[]": ["manga"]},
                     verify=False,
                 )
             except requests.RequestException as e:
@@ -1855,12 +1857,24 @@ class DeleteDuplicatesMD:
 
             error = print_error(chapters_response, log_error=True)
 
+    def sort_manga_data(self, chapters: list):
+        manga_data = {}
+        for chapter in chapters:
+            manga = [m for m in chapter["relationships"] if m["type"] == "manga"][0]
+            manga_id = manga["id"]
+
+            if manga_id not in manga_data:
+                manga_data({manga_id: manga})
+        return manga_data
+
     def filter_group(self, chapter: dict) -> List[str]:
         return [
             g["id"] for g in chapter["relationships"] if g["type"] == "scanlation_group"
         ]
 
-    def check_chapters(self, chapters: List[dict]) -> List[dict]:
+    def check_chapters(
+        self, chapters: List[dict], dupes_webhook: "MPlusBotDupesWebhook"
+    ) -> List[dict]:
         to_return_ids = []
         to_check = []
 
@@ -1904,6 +1918,7 @@ class DeleteDuplicatesMD:
             to_check.remove(newest)
 
             if to_return_ids:
+                dupes_webhook.add_chapters(newest, to_check)
                 print(f"Found dupes of {newest_id} to delete: {to_return_ids}")
                 logging.info(f"Found dupes of {newest_id} to delete: {to_return_ids}")
         return to_check
@@ -1912,6 +1927,8 @@ class DeleteDuplicatesMD:
         print("Looking for chapter dupes.")
 
         for mang_index, manga_id in enumerate(self.tracked_mangadex_ids, start=1):
+            dupes_webhook = MPlusBotDupesWebhook()
+
             for lang_index, language in enumerate(self.languages, start=1):
                 aggregate_chapters_unchecked = self.get_aggregate(manga_id, language)
                 if aggregate_chapters_unchecked is None:
@@ -1930,7 +1947,11 @@ class DeleteDuplicatesMD:
                     if chapters_md is None:
                         continue
 
-                    chapters_to_delete = self.check_chapters(chapters_md)
+                    if bool(dupes_webhook.manga):
+                        manga_data = self.sort_manga_data(chapters_md)
+                        dupes_webhook.init_manga(manga_data)
+
+                    chapters_to_delete = self.check_chapters(chapters_md, dupes_webhook)
                     chapters_to_delete_dict: Dict[str, str] = [
                         {
                             "md_chapter_id": c["id"],
@@ -1946,6 +1967,10 @@ class DeleteDuplicatesMD:
                     self.first_process_object.add_more_chapters(chapters_to_delete_dict)
                 if lang_index % 4 == 0:
                     time.sleep(RATELIMIT_TIME)
+
+            dupes_webhook.main()
+            setup_logs()
+
             if mang_index % 4 == 0:
                 time.sleep(RATELIMIT_TIME)
 
@@ -2174,3 +2199,6 @@ if __name__ == "__main__":
         move_chapters()
     else:
         main()
+
+    if WEBHOOK.embeds:
+        WEBHOOK.execute(remove_embeds=True)
