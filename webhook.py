@@ -58,7 +58,7 @@ def open_config_file() -> configparser.RawConfigParser:
 
 
 config = open_config_file()
-webhook = DiscordWebhook(url=config["Paths"]["webhook_url"])
+webhook = DiscordWebhook(url=config["Paths"]["webhook_url"], rate_limit_retry=True)
 
 
 class MPlusBotWebhook:
@@ -157,7 +157,7 @@ class MPlusBotWebhook:
                         {self._failed_upload_message(chapter.md_chapter_id, failed_upload)}
                         Chapter title: `{chapter.chapter_title}`
                         Chapter expiry: `{chapter.chapter_expire}`
-                        MangaPlus manga link: [here](f"{chapter.manga_id}""",
+                        MangaPlus manga link: [here]({self.mangaplus_manga_url.format(chapter.manga_id)})""",
         }
 
     def format_embed(self, chapters_to_use):
