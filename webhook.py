@@ -161,11 +161,10 @@ class MPlusBotUpdatesWebhook(WebhookBase):
     ) -> Dict[str, str]:
         return {
             "title": f"{self.manga_title}",
-            "description": f"""
-                        MangaDex manga link: [here]({self.mangadex_manga_url}")
-                        Uploaded: {chapter_count}
-                        Failed: {failed}
-                        Skipped: {skipped}""",
+            "description": f"MangaDex manga link: [here]({self.mangadex_manga_url})\n"
+            f"Uploaded: {chapter_count}\n"
+            f"Failed: {failed}\n"
+            f"Skipped: {skipped}",
             "timestamp": datetime.datetime.now().isoformat(),
             "color": self.colour,
         }
@@ -184,11 +183,11 @@ class MPlusBotUpdatesWebhook(WebhookBase):
     ) -> Dict[str, str]:
         return {
             "name": f"Chapter: {chapter.chapter_number}\nLanguage: {chapter.chapter_language}",
-            "value": f"""MangaPlus chapter link: [here]({self.mangaplus_chapter_url.format(chapter.chapter_id)})
-                        {self._failed_upload_message(chapter.md_chapter_id, failed_upload)}
-                        Chapter title: `{chapter.chapter_title}`
-                        Chapter expiry: `{chapter.chapter_expire}`
-                        MangaPlus manga link: [here]({self.mangaplus_manga_url.format(chapter.manga_id)})""",
+            "value": f"MangaPlus chapter link: [here]({self.mangaplus_chapter_url.format(chapter.chapter_id)})\n"
+            f"{self._failed_upload_message(chapter.md_chapter_id, failed_upload)}\n"
+            f"Chapter title: `{chapter.chapter_title}`\n"
+            f"Chapter expiry: `{chapter.chapter_expire}`\n"
+            f"MangaPlus manga link: [here]({self.mangaplus_manga_url.format(chapter.manga_id)})",
         }
 
     def format_embed(self, chapters_to_use: List[List[dict]]):
@@ -205,11 +204,15 @@ class MPlusBotUpdatesWebhook(WebhookBase):
     def main(self, last_manga: bool = True):
         setup_logs()
 
+        if self.uploaded > 0 or self.failed > 0:
+            self.send_webhook()
+
         if self.chapters:
             self.format_embed(self.normalised_chapters)
         if self.failed_chapters:
             self.format_embed(self.normalised_failed_chapters)
-        else:
+
+        if not self.chapters and not self.failed_chapters:
             embed = self.make_embed(self.normalised_manga)
             webhook.add_embed(embed)
 
@@ -235,7 +238,7 @@ class MPlusBotDupesWebhook(WebhookBase):
     def normalise_manga(self) -> Dict[str, str]:
         return {
             "title": f"{self.manga_title}",
-            "description": f"""MangaDex manga link: [here]({self.mangadex_manga_url}")""",
+            "description": f"""MangaDex manga link: [here]({self.mangadex_manga_url})""",
             "timestamp": datetime.datetime.now().isoformat(),
             "color": self.colour,
         }
@@ -243,9 +246,9 @@ class MPlusBotDupesWebhook(WebhookBase):
     def add_chapters(self, main_chapter: dict, chapters: List[dict]):
         self.chapters.append(
             {
-                "name": f"""Chapter ID: {main_chapter['id']}
-                    Chapter Number: {main_chapter['attributes']['chapter']}
-                    Chapter Language: {main_chapter['attributes']['translatedLanguage']}""",
+                "name": f"Chapter ID: {main_chapter['id']}\n"
+                f"Chapter Number: {main_chapter['attributes']['chapter']}\n"
+                f"Chapter Language: {main_chapter['attributes']['translatedLanguage']}",
                 "value": self.normalise_chapters(chapters),
             }
         )
