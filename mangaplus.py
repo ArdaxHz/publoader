@@ -16,13 +16,18 @@ from typing import Dict, List, Literal, Optional, Union
 import requests
 
 import response_pb2 as response_pb
-from webhook import MPlusBotUpdatesWebhook, MPlusBotDupesWebhook, webhook as WEBHOOK
+from webhook import (
+    MPlusBotUpdatesWebhook,
+    MPlusBotDupesWebhook,
+    MPlusBotDeleterWebhook,
+    webhook as WEBHOOK,
+)
 
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
-__version__ = "1.5.5"
+__version__ = "1.5.6"
 
 mplus_language_map = {
     "0": "en",
@@ -366,8 +371,12 @@ def update_database(
             print("Updating database with new mangadex and mangaplus chapter ids.")
             logging.info(f"Updating existing record in the database: {chapter}.")
             database_connection.execute(
-                "UPDATE chapters SET md_chapter_id=:md_id WHERE chapter_id=:mplus_id",
-                {"md_id": succesful_upload_id, "mplus_id": mplus_chapter_id},
+                "UPDATE chapters SET chapter_id=:mplus_id, md_manga_id=:md_manga_id WHERE md_chapter_id=:md_id",
+                {
+                    "md_id": succesful_upload_id,
+                    "mplus_id": mplus_chapter_id,
+                    "md_manga_id": chapter.md_manga_id,
+                },
             )
     else:
         logging.info(f"Adding new chapter to database: {chapter}.")
@@ -652,6 +661,8 @@ class ChapterDeleterProcess:
                 if delete_reponse.status_code == 200:
                     logging.info(f"Deleted {chapter}.")
                     print(f"----Deleted {deleted_message}")
+                    MPlusBotDeleterWebhook(chapter).main()
+                    setup_logs()
                     break
 
         if self.on_db:
@@ -1082,6 +1093,8 @@ class MangaUploaderProcess:
         chapter = self.chapters[0]
         for count, chapter in enumerate(self.chapters, start=1):
             chapter: Chapter = chapter
+            chapter.md_manga_id = self.mangadex_manga_id
+
             if not self.skipped_chapter and count % 5 == 0:
                 self.md_auth_object.login()
                 time.sleep(RATELIMIT_TIME)
