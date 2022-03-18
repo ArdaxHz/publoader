@@ -27,7 +27,7 @@ from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
-__version__ = "1.5.6"
+__version__ = "1.5.7"
 
 mplus_language_map = {
     "0": "en",
@@ -1708,7 +1708,7 @@ class MPlusAPI:
         )
         spaces_regex = re.compile(r"^(?:\S+\s?)?\d+(?:(?:\,|\-)\d{0,2})?\s?", re.I)
 
-        title = str(chapter.chapter_title)
+        title = str(chapter.chapter_title).strip()
         normalised_title = title
         pattern_to_use: Optional[re.Pattern[str]] = None
         replace_string = ""
@@ -1916,24 +1916,24 @@ class DeleteDuplicatesMD:
                         to_check.append(previous_chapter)
 
         if to_check:
-            newest = to_check[0]
+            oldest = to_check[0]
             for chapter in to_check:
                 if datetime.strptime(
                     chapter["attributes"]["createdAt"], "%Y-%m-%dT%H:%M:%S%z"
-                ) > datetime.strptime(
-                    newest["attributes"]["createdAt"], "%Y-%m-%dT%H:%M:%S%z"
+                ) < datetime.strptime(
+                    oldest["attributes"]["createdAt"], "%Y-%m-%dT%H:%M:%S%z"
                 ):
-                    newest = chapter
+                    oldest = chapter
 
-            newest_id = newest["id"]
+            oldest_id = oldest["id"]
             to_return_ids = [c["id"] for c in to_check]
-            to_return_ids.remove(newest_id)
-            to_check.remove(newest)
+            to_return_ids.remove(oldest_id)
+            to_check.remove(oldest)
 
             if to_return_ids:
-                dupes_webhook.add_chapters(newest, to_check)
-                print(f"Found dupes of {newest_id} to delete: {to_return_ids}")
-                logging.info(f"Found dupes of {newest_id} to delete: {to_return_ids}")
+                dupes_webhook.add_chapters(oldest, to_check)
+                print(f"Found dupes of {oldest_id} to delete: {to_return_ids}")
+                logging.info(f"Found dupes of {oldest_id} to delete: {to_return_ids}")
         return to_check
 
     def delete_dupes(self):
