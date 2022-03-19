@@ -69,7 +69,8 @@ webhook = make_webhook()
 
 class WebhookHelper:
     def __init__(self) -> None:
-        self.colour = "AE83DC"
+        setup_logs()
+        self.colour = "B86F8C"
         self.mangadex_chapter_url = "https://mangadex.org/chapter/{}"
         self.mangaplus_manga_url = "https://mangaplus.shueisha.co.jp/titles/{}"
         self.mangaplus_chapter_url = "https://mangaplus.shueisha.co.jp/viewer/{}"
@@ -281,7 +282,7 @@ class MPlusBotDupesWebhook(WebhookBase):
             "title": f"{self.manga_title}",
             "description": f"""MangaDex manga link: [here]({self.mangadex_manga_url})""",
             "timestamp": datetime.datetime.now().isoformat(),
-            "color": self.colour,
+            "color": "C8AA69",
         }
 
     def add_chapters(self, main_chapter: dict, chapters: List[dict]):
@@ -322,7 +323,7 @@ class MPlusBotDeleterWebhook(WebhookHelper):
             title=f"Deleted chapter {self.chapter['md_chapter_id']}",
             description=f"{self.normalised_chapter['name']}\n{self.normalised_chapter['value']}",
             **{
-                "color": self.colour,
+                "color": "C43542",
                 "timestamp": datetime.datetime.now().isoformat(),
             },
         )
@@ -334,6 +335,32 @@ class MPlusBotDeleterWebhook(WebhookHelper):
         embed = self.make_embed()
         self.webhook.add_embed(embed)
         self.send_webhook(self.webhook)
+
+
+class MPlusBotNotIndexedWebhook(WebhookHelper):
+    def __init__(self, chapter_ids: List[str]) -> None:
+        super().__init__()
+        self.chapter_ids = chapter_ids
+
+    def make_embed(self):
+        embed = DiscordEmbed(
+            title=f"Chapter ids not indexed",
+            description="\n".join(
+                [f"`{chapter_id}`" for chapter_id in self.chapter_ids]
+            ),
+            **{
+                "color": "45539B",
+                "timestamp": datetime.datetime.now().isoformat(),
+            },
+        )
+
+        logging.debug(f"Made embed: {embed.title}, {embed.description}")
+        return embed
+
+    def main(self):
+        embed = self.make_embed()
+        webhook.add_embed(embed)
+        self.send_webhook()
 
 
 if __name__ == "__main__":

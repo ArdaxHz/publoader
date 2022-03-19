@@ -20,6 +20,7 @@ from webhook import (
     MPlusBotUpdatesWebhook,
     MPlusBotDupesWebhook,
     MPlusBotDeleterWebhook,
+    MPlusBotNotIndexedWebhook,
     webhook as WEBHOOK,
 )
 
@@ -27,7 +28,7 @@ from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
-__version__ = "1.5.7"
+__version__ = "1.5.8"
 
 mplus_language_map = {
     "0": "en",
@@ -623,12 +624,14 @@ class ChapterDeleterProcess:
         )
         database_connection.commit()
 
-    def _remove_old_chapter(self, chapter: dict):
+    def _remove_old_chapter(
+        self, chapter: dict = {}, to_delete_id: Optional[str] = None
+    ):
         """Check if the chapters expired and remove off mangadex if they are."""
         # If the expiry date of the chapter is less than the current time and
         # the md chapter id is available, try delete
         logging.info(f"Moving {chapter} from chapters table to deleted_chapters table.")
-        md_chapter_id = chapter.get("md_chapter_id", None)
+        md_chapter_id = chapter.get("md_chapter_id", to_delete_id)
         manga_id = chapter.get("manga_id", None)
         if manga_id is None:
             manga_id = chapter.get("md_manga_id", None)
@@ -665,7 +668,7 @@ class ChapterDeleterProcess:
                     setup_logs()
                     break
 
-        if self.on_db:
+        if self.on_db and chapter:
             self._delete_from_database(chapter)
         time.sleep(self.chapter_delete_ratelimit)
 
@@ -1153,7 +1156,6 @@ class BotProcess:
         md_auth_object: AuthMD,
         manga_id_map: Dict[str, List[int]],
         database_connection: sqlite3.Connection,
-        posted_md_updates: List[Chapter],
         same_chapter_dict: Dict[str, List[int]],
     ):
         self.session = session
@@ -1165,6 +1167,7 @@ class BotProcess:
         self.database_connection = database_connection
         self.same_chapter_dict = same_chapter_dict
         self.processes: List[multiprocessing.Process] = []
+        self.posted_md_updates: List[Chapter] = []
         self.md_manga_objs = {}
         self.mplus_group = MPLUS_GROUP_ID
         self.mplus_group_chapters = self._get_mplus_chapters()
@@ -1174,7 +1177,6 @@ class BotProcess:
             if m not in list(self.manga_id_map.keys())
         ]
 
-        self.posted_md_updates = posted_md_updates
         logging.info(f"Manga not tracked but on mangadex: {self.manga_untracked}")
 
     def _remove_chapters_not_mplus(self) -> List[dict]:
@@ -1359,6 +1361,37 @@ class BotProcess:
                 chapters_sorted[md_id] = [chapter]
         return chapters_sorted
 
+    def _check_all_chapters_uploaded(self):
+        """Check if all the chapters uploaded to MangaDex were indexed correctly."""
+        logging.info(
+            "Checking if all currently uploaded chapters are available on MangaDex."
+        )
+        print("Checking which chapters weren't indexed.")
+
+        uploaded_chapter_ids = [
+            chapter.md_chapter_id
+            for chapter in self.posted_md_updates
+            if chapter.md_chapter_id is not None
+        ]
+
+        logging.debug(f"Uploaded chapters mangadex ids: {uploaded_chapter_ids}")
+        chapters_on_md = self._get_chapters(
+            params={
+                "ids[]": uploaded_chapter_ids,
+                "order[createdAt]": "desc",
+                "includes[]": ["manga"],
+            }
+        )
+
+        chapters_not_on_md = [
+            chapter["id"]
+            for chapter in chapters_on_md
+            if chapter["id"] not in uploaded_chapter_ids
+        ]
+
+        logging.info(f"Chapters not indexed: {chapters_not_on_md}")
+        MPlusBotNotIndexedWebhook(chapters_not_on_md).main()
+
     def upload_chapters(self):
         """Go through each new chapter and upload it to mangadex."""
         # Sort each chapter by manga
@@ -1397,6 +1430,10 @@ class BotProcess:
 
             if index % 10 == 0:
                 self.md_auth_object.login()
+
+        time.sleep(RATELIMIT_TIME)
+        self._check_all_chapters_uploaded()
+        setup_logs()
 
 
 class MPlusAPI:
@@ -2041,7 +2078,6 @@ def main(db_connection: Optional[sqlite3.Connection] = None, clean_db=False):
     # updated_manga = mplus_api.untracked_manga
     updates = mplus_api.updated_chapters
     all_mplus_chapters = mplus_api.all_mplus_chapters
-    posted_md_updates: List[Chapter] = []
 
     if not updates:
         logging.info("No new updates found.")
@@ -2059,7 +2095,6 @@ def main(db_connection: Optional[sqlite3.Connection] = None, clean_db=False):
                     md_auth_object,
                     manga_id_map,
                     database_connection,
-                    posted_md_updates,
                     title_regexes.get("same", {}),
                 ).upload_chapters()
             except (requests.RequestException, sqlite3.OperationalError):
