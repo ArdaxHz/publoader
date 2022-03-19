@@ -9,26 +9,25 @@ import sqlite3
 import string
 import time
 from dataclasses import dataclass, field, replace
-from datetime import date, datetime
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List, Literal, Optional, Union
 
 import requests
+from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
 import response_pb2 as response_pb
 from webhook import (
-    MPlusBotUpdatesWebhook,
-    MPlusBotDupesWebhook,
     MPlusBotDeleterWebhook,
+    MPlusBotDupesWebhook,
     MPlusBotNotIndexedWebhook,
-    webhook as WEBHOOK,
+    MPlusBotUpdatesWebhook,
 )
-
-from requests.packages.urllib3.exceptions import InsecureRequestWarning
+from webhook import webhook as WEBHOOK
 
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
-__version__ = "1.5.8"
+__version__ = "1.5.9"
 
 mplus_language_map = {
     "0": "en",
@@ -606,7 +605,8 @@ class ChapterDeleterProcess:
         return [
             dict(x)
             for x in self.posted_chapters
-            if datetime.fromtimestamp(x["chapter_expire"]) <= datetime.now()
+            if datetime.fromtimestamp(x["chapter_expire"], timezone.utc)
+            <= datetime.now(timezone.utc)
         ]
 
     def _delete_from_database(self, chapter: dict):
@@ -742,13 +742,18 @@ class ChapterUploaderProcess:
         self.mangadex_manga_id: str = kwargs["mangadex_manga_id"]
         self.chapter: Chapter = kwargs["chapter"]
         self.md_auth_object: AuthMD = kwargs["md_auth_object"]
-        self.mplus_group: str = kwargs["mplus_group"]
         self.posted_md_updates: List[Chapter] = kwargs["posted_md_updates"]
         self.same_chapter_dict: Dict[str, List[int]] = kwargs["same_chapter_dict"]
 
         self.mplus_chapter_url = "https://mangaplus.shueisha.co.jp/viewer/{}"
 
-        self.manga_generic_error_message = f"Manga: {self.chapter.manga.manga_name}, {self.mangadex_manga_id} - {self.chapter.manga_id}, chapter: {self.chapter.chapter_number}, language: {self.chapter.chapter_language}, title: {self.chapter.chapter_title}"
+        self.manga_generic_error_message = (
+            f"Manga: {self.chapter.manga.manga_name}, "
+            f"{self.mangadex_manga_id} - {self.chapter.manga_id}, "
+            f"chapter: {self.chapter.chapter_number}, "
+            f"language: {self.chapter.chapter_language}, "
+            f"title: {self.chapter.chapter_title}"
+        )
         self.upload_retry_total = UPLOAD_RETRY
         self.upload_session_id: Optional[str] = None
 
@@ -824,7 +829,7 @@ class ChapterUploaderProcess:
                     f"{md_upload_api_url}/begin",
                     json={
                         "manga": self.mangadex_manga_id,
-                        "groups": [self.mplus_group],
+                        "groups": [MPLUS_GROUP_ID],
                     },
                     verify=False,
                 )
@@ -884,7 +889,7 @@ class ChapterUploaderProcess:
                                 self.chapter.chapter_id
                             ),
                             "publishAt": datetime.fromtimestamp(
-                                self.chapter.chapter_expire
+                                self.chapter.chapter_expire, timezone.utc
                             ).strftime("%Y-%m-%dT%H:%M:%S%z"),
                         },
                         "pageOrder": [],
@@ -1023,7 +1028,6 @@ class MangaUploaderProcess:
         self.session: requests.Session = kwargs["session"]
         self.chapters: List[Chapter] = kwargs["updated_manga_chapters"]
         self.chapters_all: List[Chapter] = kwargs["all_manga_chapters"]
-        self.processes: list = kwargs["processes"]
         self.mangadex_manga_id: str = kwargs["mangadex_manga_id"]
         self.manga_chapters = kwargs["mplus_group_chapters"]
         self.deleter_process_object: Optional["ChapterDeleterProcess"] = kwargs[
@@ -1035,7 +1039,6 @@ class MangaUploaderProcess:
         self.mangadex_manga_data: dict = kwargs["mangadex_manga_data"]
         self.posted_chapters: List[Chapter] = []
         self.failed_uploads: List[Chapter] = []
-        self.mplus_group = MPLUS_GROUP_ID
 
         self.second_process = None
         self.second_process_object = None
@@ -1109,7 +1112,6 @@ class MangaUploaderProcess:
                     "mangadex_manga_id": self.mangadex_manga_id,
                     "chapter": chapter,
                     "md_auth_object": self.md_auth_object,
-                    "mplus_group": self.mplus_group,
                     "posted_md_updates": self.posted_md_updates,
                     "same_chapter_dict": self.same_chapter_dict,
                 }
@@ -1157,6 +1159,8 @@ class BotProcess:
         manga_id_map: Dict[str, List[int]],
         database_connection: sqlite3.Connection,
         same_chapter_dict: Dict[str, List[int]],
+        clean_db: bool,
+        posted_chapters_data: List[dict],
     ):
         self.session = session
         self.updates = updates
@@ -1166,10 +1170,11 @@ class BotProcess:
         self.manga_id_map = manga_id_map
         self.database_connection = database_connection
         self.same_chapter_dict = same_chapter_dict
+        self.clean_db = clean_db
+        self.posted_chapters_data = posted_chapters_data
         self.processes: List[multiprocessing.Process] = []
         self.posted_md_updates: List[Chapter] = []
         self.md_manga_objs = {}
-        self.mplus_group = MPLUS_GROUP_ID
         self.mplus_group_chapters = self._get_mplus_chapters()
         self.manga_untracked = [
             m
@@ -1320,7 +1325,7 @@ class BotProcess:
         print("Getting the mangaplus chapters on mangadex.")
         chapters_unsorted = self._get_chapters(
             params={
-                "groups[]": [self.mplus_group],
+                "groups[]": [MPLUS_GROUP_ID],
                 "order[createdAt]": "desc",
                 "includes[]": ["manga"],
             }
@@ -1374,6 +1379,18 @@ class BotProcess:
             if chapter.md_chapter_id is not None
         ]
 
+        if self.clean_db:
+            uploaded_chapter_ids.extend(
+                [
+                    chapter["md_chapter_id"]
+                    for chapter in self.posted_chapters_data
+                    if datetime.fromtimestamp(chapter["chapter_expire"], timezone.utc)
+                    >= datetime.now(timezone.utc)
+                    and chapter["md_chapter_id"] is not None
+                ]
+            )
+
+        uploaded_chapter_ids = list(set(uploaded_chapter_ids))
         logging.debug(f"Uploaded chapters mangadex ids: {uploaded_chapter_ids}")
         chapters_on_md = self._get_chapters(
             params={
@@ -1389,8 +1406,10 @@ class BotProcess:
             if chapter["id"] not in uploaded_chapter_ids
         ]
 
-        logging.info(f"Chapters not indexed: {chapters_not_on_md}")
-        MPlusBotNotIndexedWebhook(chapters_not_on_md).main()
+        if chapters_not_on_md:
+            logging.info(f"Chapters not indexed: {chapters_not_on_md}")
+            MPlusBotNotIndexedWebhook(chapters_not_on_md).main()
+            setup_logs()
 
     def upload_chapters(self):
         """Go through each new chapter and upload it to mangadex."""
@@ -1398,8 +1417,6 @@ class BotProcess:
         updated_manga_chapters = self._sort_chapters_by_manga(self.updates)
         all_manga_chapters = self._sort_chapters_by_manga(self.all_mplus_chapters)
         self._delete_extra_chapters()
-        processes = []
-
         self.md_auth_object.login()
 
         for index, mangadex_manga_id in enumerate(updated_manga_chapters, start=1):
@@ -1410,7 +1427,6 @@ class BotProcess:
                     "session": self.session,
                     "updated_manga_chapters": updated_manga_chapters[mangadex_manga_id],
                     "all_manga_chapters": all_manga_chapters[mangadex_manga_id],
-                    "processes": processes,
                     "mangadex_manga_id": mangadex_manga_id,
                     "deleter_process_object": self.deleter_process_object,
                     "md_auth_object": self.md_auth_object,
@@ -1431,9 +1447,9 @@ class BotProcess:
             if index % 10 == 0:
                 self.md_auth_object.login()
 
-        time.sleep(RATELIMIT_TIME)
-        self._check_all_chapters_uploaded()
-        setup_logs()
+        if self.posted_md_updates or self.clean_db:
+            time.sleep(RATELIMIT_TIME)
+            self._check_all_chapters_uploaded()
 
 
 class MPlusAPI:
@@ -1604,7 +1620,8 @@ class MPlusAPI:
                     chapter
                     for chapter in updated_chapters
                     if chapter.chapter_id not in self.posted_chapters_ids
-                    and datetime.fromtimestamp(chapter.chapter_expire) >= datetime.now()
+                    and datetime.fromtimestamp(chapter.chapter_expire, timezone.utc)
+                    >= datetime.now(timezone.utc)
                 ]
             )
 
@@ -1797,11 +1814,9 @@ class MPlusAPI:
                 if not all_chapters:
                     # Chapter id is not in database or chapter expiry isn't
                     # before atm
-                    if (
-                        chapter.chapter_id in posted_chapters
-                        or datetime.fromtimestamp(chapter.chapter_expire)
-                        <= datetime.now()
-                    ):
+                    if chapter.chapter_id in posted_chapters or datetime.fromtimestamp(
+                        chapter.chapter_expire, timezone.utc
+                    ) <= datetime.now(timezone.utc):
                         continue
 
                 chapter_number_split = self._normalise_chapter_number(chapters, chapter)
@@ -2096,6 +2111,8 @@ def main(db_connection: Optional[sqlite3.Connection] = None, clean_db=False):
                     manga_id_map,
                     database_connection,
                     title_regexes.get("same", {}),
+                    clean_db,
+                    posted_chapters_data,
                 ).upload_chapters()
             except (requests.RequestException, sqlite3.OperationalError):
                 continue
@@ -2127,96 +2144,6 @@ def main(db_connection: Optional[sqlite3.Connection] = None, clean_db=False):
     logging.info("Saved and closed database.")
 
 
-def move_chapters():
-    setup_logs()
-    database_connection, _ = open_database(database_path)
-
-    db_files = [
-        file
-        for file in components_path.iterdir()
-        if file != database_path and file.suffix == ".db"
-    ]
-    for file in db_files:
-        logging.info(f"Opened {file.name} to move the data to the current database.")
-        other_database_connection, _ = open_database(file)
-        other_chapters = [
-            c
-            for c in other_database_connection.execute(
-                "SELECT * FROM chapters"
-            ).fetchall()
-        ]
-
-        database_connection.executemany(
-            """INSERT OR IGNORE INTO chapters VALUES
-                (:chapter_id, :chapter_timestamp, :chapter_expire, :chapter_language, :chapter_title, :chapter_number, :manga_id, :md_chapter_id)""",
-            other_chapters,
-        )
-
-        logging.debug(f"Moved all chapters data.")
-        other_deletions = [
-            c
-            for c in other_database_connection.execute(
-                "SELECT * FROM deleted_chapters"
-            ).fetchall()
-        ]
-
-        database_connection.executemany(
-            """INSERT OR IGNORE INTO deleted_chapters VALUES
-                (:chapter_id, :chapter_timestamp, :chapter_expire, :chapter_language, :chapter_title, :chapter_number, :manga_id, :md_chapter_id)""",
-            other_deletions,
-        )
-
-        logging.debug(f"Moved all deleted chapters data.")
-        other_posted_mplus_ids = [
-            c
-            for c in other_database_connection.execute(
-                "SELECT * FROM posted_mplus_ids"
-            ).fetchall()
-        ]
-
-        database_connection.executemany(
-            "INSERT OR IGNORE INTO posted_mplus_ids VALUES (?)", other_posted_mplus_ids
-        )
-
-        logging.debug(f"Moved all the posted ids.")
-        logging.info(f"Moved {file.name}'s data to to the current database.")
-        database_connection.commit()
-        other_database_connection.commit()
-        other_database_connection.close()
-        file.unlink()
-        logging.info(f"Deleted {file}.")
-
-    main(database_connection)
-
-
-def clean_db():
-    # setup_logs()
-    # version = 1
-    # found = False
-
-    # database_connection, _ = open_database(database_path)
-    # while True:
-    #     version += 1
-    #     new_database_path = components_path.joinpath(
-    #         f"{database_name.rsplit('.', 1)[0]}-{version}"
-    #     ).with_suffix(".db")
-    #     if not os.path.exists(new_database_path):
-    #         found = True
-    #         break
-
-    # if found:
-    #     database_connection.commit()
-    #     db_con, _ = open_database(new_database_path)
-    #     database_connection.backup(db_con)
-    #     db_con.close()
-    #     database_connection.execute("DELETE FROM chapters")
-    #     database_connection.execute("DELETE FROM deleted_chapters")
-    #     database_connection.execute("DELETE FROM posted_mplus_ids")
-    #     database_connection.commit()
-
-    main(clean_db=True)
-
-
 if __name__ == "__main__":
 
     multiprocessing_manager = multiprocessing.Manager()
@@ -2230,21 +2157,11 @@ if __name__ == "__main__":
         nargs="?",
         help="Clean the database.",
     )
-    parser.add_argument(
-        "--move",
-        "-m",
-        default=False,
-        const=True,
-        nargs="?",
-        help="Move data from other databases into the main database.",
-    )
 
     vargs = vars(parser.parse_args())
 
     if vargs["clean"]:
-        clean_db()
-    elif vargs["move"]:
-        move_chapters()
+        main(clean_db=True)
     else:
         main()
 

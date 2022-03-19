@@ -1,11 +1,12 @@
-import datetime
-from json import JSONDecodeError
-import logging
-from discord_webhook import DiscordWebhook, DiscordEmbed
 import configparser
+import datetime
+import logging
 from datetime import date
+from json import JSONDecodeError
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Union
+
+from discord_webhook import DiscordEmbed, DiscordWebhook
 
 if TYPE_CHECKING:
     from mangaplus import Chapter
