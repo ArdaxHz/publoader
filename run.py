@@ -36,12 +36,6 @@ def main(clean_db=False, move_chapters=False):
     subprocess.call([RUNNER, "mangaplus.py"])
 
 
-def move_chapters():
-    """Call the move_chapters function of the mangaplus bot."""
-    print("Running the move chapters function.")
-    subprocess.call([RUNNER, "mangaplus.py", "-m"])
-
-
 def clean_db():
     """Call the clean_db function of the mangaplus bot."""
     print("Running the clean database function.")

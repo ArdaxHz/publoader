@@ -28,7 +28,7 @@ from webhook import webhook as WEBHOOK
 
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
-__version__ = "1.5.9"
+__version__ = "1.6.0"
 
 mplus_language_map = {
     "0": "en",
@@ -598,10 +598,13 @@ class AuthMD:
             logging.info("Already logged in, not checking for login.")
             return
 
-        logging.info("Trying to login through the .mdauth file.")
+        if self.first_login:
+            logging.info("Trying to login through the .mdauth file.")
 
         if self.session_token is not None:
-            logging.info("Reading the session expiry from the token.")
+            if self.first_login:
+                logging.info("Reading the session expiry from the token.")
+
             if self.decoded_session_token is None:
                 logging.debug("Decoding the token into a json object.")
                 self.decoded_session_token = self._decode_token(self.session_token)
@@ -1304,9 +1307,18 @@ class BotProcess:
             )
 
             # Call the api and get the json data
-            chapters_response = self.session.get(
-                f"{mangadex_api_url}/chapter", params=parameters, verify=False
-            )
+            try:
+                chapters_response = self.session.get(
+                    f"{mangadex_api_url}/chapter", params=parameters, verify=False
+                )
+            except requests.RequestException as e:
+                logging.error(e)
+                limit = limit
+                offset = offset
+                created_at_since_time = created_at_since_time
+                parameters = parameters
+                continue
+
             if chapters_response.status_code != 200:
                 manga_response_message = f"Couldn't get the chapters of the group."
                 print_error(chapters_response, log_error=True)
@@ -1433,25 +1445,38 @@ class BotProcess:
             )
 
         uploaded_chapter_ids = list(set(uploaded_chapter_ids))
-        logging.debug(f"Uploaded chapters mangadex ids: {uploaded_chapter_ids}")
-        chapters_on_md = self._get_chapters(
-            params={
-                "ids[]": uploaded_chapter_ids,
-                "order[createdAt]": "desc",
-                "includes[]": ["manga"],
-            }
-        )
+        if uploaded_chapter_ids:
+            logging.info(f"Uploaded chapters mangadex ids: {uploaded_chapter_ids}")
+            chapters_on_md = []
 
-        chapters_not_on_md = [
-            chapter["id"]
-            for chapter in chapters_on_md
-            if chapter["id"] not in uploaded_chapter_ids
-        ]
+            uploaded_chapter_ids_split = [
+                uploaded_chapter_ids[l : l + 100]
+                for l in range(0, len(uploaded_chapter_ids), 100)
+            ]
 
-        if chapters_not_on_md:
-            logging.info(f"Chapters not indexed: {chapters_not_on_md}")
-            MPlusBotNotIndexedWebhook(chapters_not_on_md).main()
-            setup_logs()
+            for uploaded_ids in uploaded_chapter_ids_split:
+                chapters_on_md.extend(
+                    self._get_chapters(
+                        params={
+                            "ids[]": uploaded_ids,
+                            "order[createdAt]": "desc",
+                            "includes[]": ["manga"],
+                        }
+                    )
+                )
+
+            chapters_not_on_md = [
+                chapter["id"]
+                for chapter in chapters_on_md
+                if chapter["id"] not in uploaded_chapter_ids
+            ]
+
+            if chapters_not_on_md:
+                logging.info(f"Chapters not indexed: {chapters_not_on_md}")
+                MPlusBotNotIndexedWebhook(chapters_not_on_md).main()
+                setup_logs()
+        else:
+            logging.info("No uploaded chapter mangadex ids.")
 
     def upload_chapters(self):
         """Go through each new chapter and upload it to mangadex."""
@@ -2152,7 +2177,8 @@ def main(db_connection: Optional[sqlite3.Connection] = None, clean_db=False):
                     clean_db,
                     posted_chapters_data,
                 ).upload_chapters()
-            except (requests.RequestException, sqlite3.OperationalError):
+            except (requests.RequestException, sqlite3.OperationalError) as e:
+                logging.error(e)
                 continue
             else:
                 break
