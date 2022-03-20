@@ -1,4 +1,5 @@
 import argparse
+import base64
 import configparser
 import json
 import logging
@@ -443,24 +444,28 @@ class AuthMD:
     def __init__(self, session: requests.Session, config: configparser.RawConfigParser):
         self.session = session
         self.config = config
-        self.first_login = True
-        self.successful_login = False
-        self.refresh_token = None
         self.token_file = components_path.joinpath(config["Paths"]["mdauth_path"])
         self.md_auth_api_url = f"{mangadex_api_url}/auth"
+        self.file_token = self._open_auth_file()
 
-    def _open_auth_file(self) -> Optional[str]:
+        self.first_login = True
+        self.successful_login = False
+        self.session_token = self.file_token.get("session", None)
+        self.refresh_token = self.file_token.get("refresh", None)
+        self.decoded_session_token = None
+        self.decoded_refresh_token = None
+
+    def _open_auth_file(self) -> dict:
+        """Open auth file and read saved tokens."""
         try:
             with open(self.token_file, "r") as login_file:
                 token = json.load(login_file)
-
-            refresh_token = token["refresh"]
-            return refresh_token
+            return token
         except (FileNotFoundError, json.JSONDecodeError):
             logging.error(
                 "Couldn't find the file, trying to login using your account details."
             )
-            return None
+            return {}
 
     def _save_session(self, token: dict):
         """Save the session and refresh tokens."""
@@ -472,8 +477,26 @@ class AuthMD:
         """Update the session headers to include the auth token."""
         self.session.headers = {"Authorization": f"Bearer {session_token}"}
 
+    def _update_token_details(self, token: dict):
+        """Update the instance session and refresh tokens, update the header and save the file."""
+        self.session_token = token["session"]
+        self.refresh_token = token["refresh"]
+        self.decoded_session_token = self._decode_token(self.session_token)
+        self.decoded_refresh_token = self._decode_token(self.refresh_token)
+
+        self._update_headers(token["session"])
+        self._save_session(token)
+
     def _refresh_token(self) -> bool:
         """Use the refresh token to get a new session token."""
+        refreshed = False
+
+        if self.refresh_token is None:
+            logging.error(
+                f"Refresh token doesn't exist, logging in through account details."
+            )
+            return self._login_using_details()
+
         refresh_response = self.session.post(
             f"{self.md_auth_api_url}/refresh",
             json={"token": self.refresh_token},
@@ -485,10 +508,9 @@ class AuthMD:
             if refresh_response_json is not None:
                 refresh_data = refresh_response_json["token"]
 
-                self._update_headers(refresh_data["session"])
-                self._save_session(refresh_data)
-                return True
-            return False
+                self._update_token_details(refresh_data)
+                refreshed = True
+            refreshed = False
         elif refresh_response.status_code in (401, 403):
             error = print_error(refresh_response)
             logging.warning(
@@ -498,7 +520,8 @@ class AuthMD:
         else:
             error = print_error(refresh_response)
             logging.error(f"Couldn't refresh token. Error: {error}")
-            return False
+
+        return refreshed
 
     def _check_login(self) -> bool:
         """Try login using saved session token."""
@@ -514,9 +537,7 @@ class AuthMD:
                     return True
 
         if self.refresh_token is None:
-            self.refresh_token = self._open_auth_file()
-            if self.refresh_token is None:
-                return self._login_using_details()
+            return self._login_using_details()
         return self._refresh_token()
 
     def _login_using_details(self) -> bool:
@@ -539,8 +560,7 @@ class AuthMD:
             login_response_json = convert_json(login_response)
             if login_response_json is not None:
                 login_token = login_response_json["token"]
-                self._update_headers(login_token["session"])
-                self._save_session(login_token)
+                self._update_token_details(login_token)
                 return True
 
         error = print_error(login_response)
@@ -549,23 +569,52 @@ class AuthMD:
         )
         return False
 
+    def _decode_token(self, token: str) -> dict:
+        """Read the payload stored in the json web token."""
+        payload = token.split(".")[1]
+        padding = len(payload) % 4
+        payload += "=" * padding
+        try:
+            parsed_payload: dict = json.loads(base64.b64decode(payload))
+        except (json.JSONDecodeError,):
+            parsed_payload = {}
+        return parsed_payload
+
+    def _check_token_expiry(self, token: dict) -> bool:
+        """Check if the token is expired or will expire in the next two minutes."""
+        expiry = datetime.fromtimestamp(
+            token.get("exp", 946684799),
+            timezone.utc,
+        )
+        datetime_now = datetime.now(timezone.utc) + timedelta(minutes=2)
+
+        if expiry > datetime_now:
+            return False
+        return True
+
     def login(self, check_login=True):
         """Login to MD account using details or saved token."""
-
         if not check_login and self.successful_login:
             logging.info("Already logged in, not checking for login.")
             return
 
         logging.info("Trying to login through the .mdauth file.")
 
-        if self.first_login:
-            self.refresh_token = self._open_auth_file()
-            if self.refresh_token is None:
-                logged_in = self._login_using_details()
-            else:
+        if self.session_token is not None:
+            logging.info("Reading the session expiry from the token.")
+            if self.decoded_session_token is None:
+                logging.debug("Decoding the token into a json object.")
+                self.decoded_session_token = self._decode_token(self.session_token)
+
+            expired_session_token = self._check_token_expiry(self.decoded_session_token)
+            if expired_session_token:
+                logging.warning("Session expired, refreshing using token.")
                 logged_in = self._refresh_token()
+            else:
+                self._update_headers(self.session_token)
+                logged_in = True
         else:
-            logged_in = self._check_login()
+            logged_in = self._refresh_token()
 
         if logged_in:
             self.successful_login = True
@@ -658,7 +707,6 @@ class ChapterDeleterProcess:
                         print(unauthorised_message)
 
                         self.md_auth_object.login()
-                        time.sleep(RATELIMIT_TIME)
                         continue
 
                 if delete_reponse.status_code == 200:
@@ -680,16 +728,10 @@ class ChapterDeleterProcess:
             print("Deleting expired chapters.")
 
         for count, chapter_to_delete in enumerate(self.chapters_to_delete, start=1):
-            if count % 3 == 0:
-                self.md_auth_object.login()
-                time.sleep(RATELIMIT_TIME)
-
+            self.md_auth_object.login()
             self._remove_old_chapter(chapter_to_delete)
 
-            if (
-                self.chapters_to_delete.index(chapter_to_delete)
-                == len(self.chapters_to_delete) - 1
-            ):
+            if count == len(self.chapters_to_delete):
                 looped_all = True
 
         if looped_all:
@@ -801,6 +843,7 @@ class ChapterUploaderProcess:
                 print_error(existing_session, log_error=True)
                 logging.warning("Not logged in, logging in and retrying.")
                 self.md_auth_object.login()
+                continue
             else:
                 logging.warning(
                     f"Couldn't delete the exising upload session, retrying."
@@ -852,6 +895,7 @@ class ChapterUploaderProcess:
             elif upload_session_response.status_code == 401:
                 print_error(upload_session_response, log_error=True)
                 self.md_auth_object.login()
+                continue
             else:
                 print_error(upload_session_response, log_error=True)
                 logging.error(
@@ -921,6 +965,7 @@ class ChapterUploaderProcess:
             elif chapter_commit_response.status_code == 401:
                 print_error(chapter_commit_response, log_error=True)
                 self.md_auth_object.login()
+                continue
             else:
                 succesful_upload = False
                 logging.warning(f"Failed to commit {self.upload_session_id}, retrying.")
@@ -1100,10 +1145,7 @@ class MangaUploaderProcess:
         for count, chapter in enumerate(self.chapters, start=1):
             chapter: Chapter = chapter
             chapter.md_manga_id = self.mangadex_manga_id
-
-            if not self.skipped_chapter and count % 5 == 0:
-                self.md_auth_object.login()
-                time.sleep(RATELIMIT_TIME)
+            self.md_auth_object.login()
 
             chapter_to_upload_process = ChapterUploaderProcess(
                 **{
@@ -1417,10 +1459,9 @@ class BotProcess:
         updated_manga_chapters = self._sort_chapters_by_manga(self.updates)
         all_manga_chapters = self._sort_chapters_by_manga(self.all_mplus_chapters)
         self._delete_extra_chapters()
-        self.md_auth_object.login()
 
         for index, mangadex_manga_id in enumerate(updated_manga_chapters, start=1):
-            # Get each manga's uploaded chapters on mangadex
+            self.md_auth_object.login()
             manga_uploader = MangaUploaderProcess(
                 **{
                     "database_connection": self.database_connection,
@@ -1443,9 +1484,6 @@ class BotProcess:
             manga_uploader.start_manga_uploading_process(
                 index == len(updated_manga_chapters)
             )
-
-            if index % 10 == 0:
-                self.md_auth_object.login()
 
         if self.posted_md_updates or self.clean_db:
             time.sleep(RATELIMIT_TIME)
