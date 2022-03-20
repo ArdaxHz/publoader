@@ -510,7 +510,8 @@ class AuthMD:
 
                 self._update_token_details(refresh_data)
                 refreshed = True
-            refreshed = False
+            else:
+                refreshed = False
         elif refresh_response.status_code in (401, 403):
             error = print_error(refresh_response)
             logging.warning(
