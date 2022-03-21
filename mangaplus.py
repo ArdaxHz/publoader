@@ -28,7 +28,7 @@ from webhook import webhook as WEBHOOK
 
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
-__version__ = "1.6.0"
+__version__ = "1.6.1"
 
 mplus_language_map = {
     "0": "en",
@@ -583,11 +583,8 @@ class AuthMD:
 
     def _check_token_expiry(self, token: dict) -> bool:
         """Check if the token is expired or will expire in the next two minutes."""
-        expiry = datetime.fromtimestamp(
-            token.get("exp", 946684799),
-            timezone.utc,
-        )
-        datetime_now = datetime.now(timezone.utc) + timedelta(minutes=2)
+        expiry = datetime.fromtimestamp(token.get("exp", 946684799))
+        datetime_now = datetime.now() + timedelta(minutes=2)
 
         if expiry > datetime_now:
             return False
@@ -658,8 +655,7 @@ class ChapterDeleterProcess:
         return [
             dict(x)
             for x in self.posted_chapters
-            if datetime.fromtimestamp(x["chapter_expire"], timezone.utc)
-            <= datetime.now(timezone.utc)
+            if datetime.fromtimestamp(x["chapter_expire"]) <= datetime.now()
         ]
 
     def _delete_from_database(self, chapter: dict):
@@ -923,25 +919,28 @@ class ChapterUploaderProcess:
     def _commit_chapter(self) -> bool:
         """Try commit the chapter to mangadex."""
         succesful_upload = False
+
+        payload = {
+            "chapterDraft": {
+                "volume": None,
+                "chapter": self.chapter.chapter_number,
+                "title": self.chapter.chapter_title,
+                "translatedLanguage": self.chapter.chapter_language,
+                "externalUrl": self.mplus_chapter_url.format(self.chapter.chapter_id),
+                "publishAt": datetime.fromtimestamp(
+                    self.chapter.chapter_expire
+                ).strftime("%Y-%m-%dT%H:%M:%S%z"),
+            },
+            "pageOrder": [],
+        }
+
+        logging.info(f"Commit payload: {payload}")
+
         for commit_retries in range(self.upload_retry_total):
             try:
                 chapter_commit_response = self.session.post(
                     f"{md_upload_api_url}/{self.upload_session_id}/commit",
-                    json={
-                        "chapterDraft": {
-                            "volume": None,
-                            "chapter": self.chapter.chapter_number,
-                            "title": self.chapter.chapter_title,
-                            "translatedLanguage": self.chapter.chapter_language,
-                            "externalUrl": self.mplus_chapter_url.format(
-                                self.chapter.chapter_id
-                            ),
-                            "publishAt": datetime.fromtimestamp(
-                                self.chapter.chapter_expire, timezone.utc
-                            ).strftime("%Y-%m-%dT%H:%M:%S%z"),
-                        },
-                        "pageOrder": [],
-                    },
+                    json=payload,
                     verify=False,
                 )
             except requests.RequestException as e:
@@ -1152,15 +1151,13 @@ class MangaUploaderProcess:
             self.md_auth_object.login()
 
             chapter_to_upload_process = ChapterUploaderProcess(
-                **{
-                    "database_connection": self.database_connection,
-                    "session": self.session,
-                    "mangadex_manga_id": self.mangadex_manga_id,
-                    "chapter": chapter,
-                    "md_auth_object": self.md_auth_object,
-                    "posted_md_updates": self.posted_md_updates,
-                    "same_chapter_dict": self.same_chapter_dict,
-                }
+                database_connection=self.database_connection,
+                session=self.session,
+                mangadex_manga_id=self.mangadex_manga_id,
+                chapter=chapter,
+                md_auth_object=self.md_auth_object,
+                posted_md_updates=self.posted_md_updates,
+                same_chapter_dict=self.same_chapter_dict,
             )
 
             uploaded = chapter_to_upload_process.start_upload(self.manga_chapters)
@@ -1427,6 +1424,8 @@ class BotProcess:
             "Checking if all currently uploaded chapters are available on MangaDex."
         )
         print("Checking which chapters weren't indexed.")
+        chapters_on_md = []
+        chapters_not_on_md = []
 
         uploaded_chapter_ids = [
             chapter.md_chapter_id
@@ -1439,8 +1438,8 @@ class BotProcess:
                 [
                     chapter["md_chapter_id"]
                     for chapter in self.posted_chapters_data
-                    if datetime.fromtimestamp(chapter["chapter_expire"], timezone.utc)
-                    >= datetime.now(timezone.utc)
+                    if datetime.fromtimestamp(chapter["chapter_expire"])
+                    >= datetime.now()
                     and chapter["md_chapter_id"] is not None
                 ]
             )
@@ -1448,8 +1447,6 @@ class BotProcess:
         uploaded_chapter_ids = list(set(uploaded_chapter_ids))
         if uploaded_chapter_ids:
             logging.info(f"Uploaded chapters mangadex ids: {uploaded_chapter_ids}")
-            chapters_on_md = []
-
             uploaded_chapter_ids_split = [
                 uploaded_chapter_ids[l : l + 100]
                 for l in range(0, len(uploaded_chapter_ids), 100)
@@ -1472,10 +1469,9 @@ class BotProcess:
                 if chapter["id"] not in uploaded_chapter_ids
             ]
 
-            if chapters_not_on_md:
-                logging.info(f"Chapters not indexed: {chapters_not_on_md}")
-                MPlusBotNotIndexedWebhook(chapters_not_on_md).main()
-                setup_logs()
+            logging.info(f"Chapters not indexed: {chapters_not_on_md}")
+            MPlusBotNotIndexedWebhook(chapters_not_on_md).main()
+            setup_logs()
         else:
             logging.info("No uploaded chapter mangadex ids.")
 
@@ -1489,23 +1485,19 @@ class BotProcess:
         for index, mangadex_manga_id in enumerate(updated_manga_chapters, start=1):
             self.md_auth_object.login()
             manga_uploader = MangaUploaderProcess(
-                **{
-                    "database_connection": self.database_connection,
-                    "session": self.session,
-                    "updated_manga_chapters": updated_manga_chapters[mangadex_manga_id],
-                    "all_manga_chapters": all_manga_chapters[mangadex_manga_id],
-                    "mangadex_manga_id": mangadex_manga_id,
-                    "deleter_process_object": self.deleter_process_object,
-                    "md_auth_object": self.md_auth_object,
-                    "mplus_group_chapters": self.mplus_group_chapters.get(
-                        mangadex_manga_id, []
-                    ),
-                    "posted_md_updates": self.posted_md_updates,
-                    "same_chapter_dict": self.same_chapter_dict,
-                    "mangadex_manga_data": self.md_manga_objs.get(
-                        mangadex_manga_id, {}
-                    ),
-                }
+                database_connection=self.database_connection,
+                session=self.session,
+                updated_manga_chapters=updated_manga_chapters[mangadex_manga_id],
+                all_manga_chapters=all_manga_chapters[mangadex_manga_id],
+                mangadex_manga_id=mangadex_manga_id,
+                deleter_process_object=self.deleter_process_object,
+                md_auth_object=self.md_auth_object,
+                mplus_group_chapters=self.mplus_group_chapters.get(
+                    mangadex_manga_id, []
+                ),
+                posted_md_updates=self.posted_md_updates,
+                same_chapter_dict=self.same_chapter_dict,
+                mangadex_manga_data=self.md_manga_objs.get(mangadex_manga_id, {}),
             )
             manga_uploader.start_manga_uploading_process(
                 index == len(updated_manga_chapters)
@@ -1684,8 +1676,7 @@ class MPlusAPI:
                     chapter
                     for chapter in updated_chapters
                     if chapter.chapter_id not in self.posted_chapters_ids
-                    and datetime.fromtimestamp(chapter.chapter_expire, timezone.utc)
-                    >= datetime.now(timezone.utc)
+                    and datetime.fromtimestamp(chapter.chapter_expire) >= datetime.now()
                 ]
             )
 
@@ -1877,10 +1868,12 @@ class MPlusAPI:
             for chapter in chapters:
                 if not all_chapters:
                     # Chapter id is not in database or chapter expiry isn't
-                    # before atm
-                    if chapter.chapter_id in posted_chapters or datetime.fromtimestamp(
-                        chapter.chapter_expire, timezone.utc
-                    ) <= datetime.now(timezone.utc):
+                    # before now
+                    if (
+                        chapter.chapter_id in posted_chapters
+                        or datetime.fromtimestamp(chapter.chapter_expire)
+                        <= datetime.now()
+                    ):
                         continue
 
                 chapter_number_split = self._normalise_chapter_number(chapters, chapter)

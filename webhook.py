@@ -173,8 +173,8 @@ class WebhookBase(WebhookHelper):
             embed_data = self.normalised_manga
 
         embed = DiscordEmbed(**embed_data)
-        embed.set_title(embed_data["title"])
-        embed.set_description(embed_data["description"])
+        embed.set_title(embed_data.get("title", None))
+        embed.set_description(embed_data.get("description", None))
         logging.debug(f"Made embed: {embed.title}, {embed.description}")
         return embed
 
@@ -259,6 +259,12 @@ class MPlusBotUpdatesWebhook(WebhookBase):
             embed = self.make_embed(self.normalised_manga)
             webhook.add_embed(embed)
 
+        if last_manga:
+            embed = self.make_embed(
+                {"title": "Finished Getting all chapter updates.", "color": self.colour}
+            )
+            webhook.add_embed(embed)
+
         if self.uploaded > 0 or self.failed > 0:
             self.send_webhook()
         else:
@@ -276,20 +282,21 @@ class MPlusBotDupesWebhook(WebhookBase):
 
     def init_manga(self, manga: dict):
         super().__init__(manga)
+        self.colour = "C8AA69"
         self.normalised_manga = self.normalise_manga()
 
     def normalise_manga(self) -> Dict[str, str]:
         return {
-            "title": f"{self.manga_title}",
+            "title": f"Dupes in: {self.manga_title}",
             "description": f"""MangaDex manga link: [here]({self.mangadex_manga_url})""",
             "timestamp": datetime.datetime.now().isoformat(),
-            "color": "C8AA69",
+            "color": self.colour,
         }
 
     def add_chapters(self, main_chapter: dict, chapters: List[dict]):
         self.chapters.append(
             {
-                "name": f"Chapter ID: {main_chapter['id']}\n"
+                "name": f"Dupes of chapter: {main_chapter['id']}\n"
                 f"Chapter Number: {main_chapter['attributes']['chapter']}\n"
                 f"Chapter Language: {main_chapter['attributes']['translatedLanguage']}",
                 "value": self.normalise_chapters(chapters),
@@ -304,15 +311,15 @@ class MPlusBotDupesWebhook(WebhookBase):
         embed = self.make_embed(self.normalised_manga)
         self.add_fields_to_embed(embed, self.chapters)
 
-        if len(embed.fields) > 0:
-            webhook.add_embed(embed)
-            self.send_webhook()
+        webhook.add_embed(embed)
+        self.send_webhook()
 
 
 class MPlusBotDeleterWebhook(WebhookHelper):
     def __init__(self, chapter: dict) -> None:
         super().__init__()
 
+        self.colour = "C43542"
         self.chapter = chapter
         self.webhook = make_webhook()
         self.normalised_chapter = self.normalise_chapter(
@@ -324,7 +331,7 @@ class MPlusBotDeleterWebhook(WebhookHelper):
             title=f"Deleted chapter {self.chapter['md_chapter_id']}",
             description=f"{self.normalised_chapter['name']}\n{self.normalised_chapter['value']}",
             **{
-                "color": "C43542",
+                "color": self.colour,
                 "timestamp": datetime.datetime.now().isoformat(),
             },
         )
@@ -342,15 +349,14 @@ class MPlusBotNotIndexedWebhook(WebhookHelper):
     def __init__(self, chapter_ids: List[str]) -> None:
         super().__init__()
         self.chapter_ids = chapter_ids
+        self.colour = "45539B"
 
-    def make_embed(self):
+    def make_embed(self, **embed_data):
         embed = DiscordEmbed(
-            title=f"Chapter ids not indexed",
-            description="\n".join(
-                [f"`{chapter_id}`" for chapter_id in self.chapter_ids]
-            ),
+            title=embed_data["title"],
+            description=embed_data["description"],
             **{
-                "color": "45539B",
+                "color": self.colour,
                 "timestamp": datetime.datetime.now().isoformat(),
             },
         )
@@ -359,7 +365,16 @@ class MPlusBotNotIndexedWebhook(WebhookHelper):
         return embed
 
     def main(self):
-        embed = self.make_embed()
+        title = (
+            f"Chapter ids not indexed:" if self.chapter_ids else f"All chapters indexed"
+        )
+        description = (
+            "\n".join([f"`{chapter_id}`" for chapter_id in self.chapter_ids])
+            if self.chapter_ids
+            else None
+        )
+
+        embed = self.make_embed(title=title, description=description)
         webhook.add_embed(embed)
         self.send_webhook()
 
