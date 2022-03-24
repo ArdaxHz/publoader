@@ -28,7 +28,7 @@ from webhook import webhook as WEBHOOK
 
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
-__version__ = "1.6.1"
+__version__ = "1.6.2"
 
 mplus_language_map = {
     "0": "en",
@@ -1464,9 +1464,9 @@ class BotProcess:
                 )
 
             chapters_not_on_md = [
-                chapter["id"]
-                for chapter in chapters_on_md
-                if chapter["id"] not in uploaded_chapter_ids
+                chapter_id
+                for chapter_id in uploaded_chapter_ids
+                if chapter_id not in [chapter["id"] for chapter in chapters_on_md]
             ]
 
             logging.info(f"Chapters not indexed: {chapters_not_on_md}")
@@ -2184,8 +2184,8 @@ def main(db_connection: Optional[sqlite3.Connection] = None, clean_db=False):
                 session, manga_id_map, first_process_object
             )
             dupes_deleter.delete_dupes()
-        except (UnboundLocalError, TypeError, IndexError, KeyError, ValueError):
-            pass
+        except (UnboundLocalError, TypeError, IndexError, KeyError, ValueError) as e:
+            logging.error(e)
 
     if first_process is not None:
         first_process.join()
