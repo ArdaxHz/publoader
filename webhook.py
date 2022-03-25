@@ -2,6 +2,7 @@ import configparser
 import datetime
 import logging
 from datetime import date
+from enum import Enum
 from json import JSONDecodeError
 from pathlib import Path
 from typing import TYPE_CHECKING, Dict, List, Optional, Union
@@ -28,7 +29,7 @@ def setup_logs():
     )
     fileh.setFormatter(formatter)
 
-    log = logging.getLogger()  # root logger
+    log = logging.getLogger(__name__)  # root logger
     for hdlr in log.handlers[:]:  # remove all old handlers
         if isinstance(hdlr, logging.FileHandler):
             log.removeHandler(hdlr)
@@ -37,11 +38,12 @@ def setup_logs():
 
 
 setup_logs()
+LOGGER = logging.getLogger(__name__)
 
 
 def load_config_info(config: configparser.RawConfigParser):
     if config["Paths"].get("webhook_url", "") == "":
-        logging.critical("Webhook url is empty, exiting.")
+        LOGGER.critical("Webhook url is empty, exiting.")
         raise FileNotFoundError("Webhook url is empty.")
 
 
@@ -51,7 +53,7 @@ def open_config_file() -> configparser.RawConfigParser:
         config = configparser.RawConfigParser()
         config.read(config_file_path)
     else:
-        logging.critical("Config file not found, exiting.")
+        LOGGER.critical("Config file not found, exiting.")
         raise FileNotFoundError("Config file not found.")
 
     load_config_info(config)
@@ -68,46 +70,43 @@ def make_webhook():
 webhook = make_webhook()
 
 
+class LinkToFormatType(Enum):
+    MANGADEX_MANGA = "MangaDex manga"
+    MANGADEX_CHAPTER = "MangaDex chapter"
+    MANGAPLUS_MANGA = "MangaPlus manga"
+    MANGAPLUS_CHAPTER = "MangaPlus chapter"
+
+
 class WebhookHelper:
     def __init__(self) -> None:
-        setup_logs()
         self.colour = "B86F8C"
         self.mangadex_chapter_url = "https://mangadex.org/chapter/{}"
         self.mangaplus_manga_url = "https://mangaplus.shueisha.co.jp/titles/{}"
         self.mangaplus_chapter_url = "https://mangaplus.shueisha.co.jp/viewer/{}"
         self.mangadex_manga_url = "https://mangadex.org/manga/{}"
 
-    def _mangadex_manga_null_message(
-        self, manga_id: Optional[int], deleted_chapter: bool = False
+    def _format_link(
+        self,
+        type: LinkToFormatType,
+        id_to_use: Optional[str],
+        skip_chapter_id: bool = False,
     ):
-        return (
-            f"MangaDex manga link: [here]({self.mangadex_manga_url.format(manga_id)})\n"
-            if not deleted_chapter or manga_id is not None
-            else ""
-        )
+        url = ""
+        name = type.value
 
-    def _mangaplus_manga_null_message(self, manga_id: Optional[int]):
-        return (
-            f"MangaPlus manga link: [here]({self.mangaplus_manga_url.format(manga_id)})\n"
-            if manga_id is not None
-            else ""
-        )
+        if skip_chapter_id or id_to_use is None:
+            return ""
 
-    def _mangaplus_chapter_null_message(self, chapter_id: Optional[int]):
-        return (
-            f"MangaPlus chapter link: [here]({self.mangaplus_chapter_url.format(chapter_id)})\n"
-            if chapter_id is not None
-            else ""
-        )
+        if type == LinkToFormatType.MANGADEX_MANGA:
+            url = self.mangadex_manga_url.format(id_to_use)
+        elif type == LinkToFormatType.MANGADEX_CHAPTER:
+            url = self.mangadex_chapter_url.format(id_to_use)
+        elif type == LinkToFormatType.MANGAPLUS_MANGA:
+            url = self.mangaplus_manga_url.format(id_to_use)
+        else:
+            url = self.mangaplus_chapter_url.format(id_to_use)
 
-    def _failed_upload_message(
-        self, md_chapter_id: Optional[str], failed_upload: bool = False
-    ):
-        return (
-            f"MangaDex chapter link: [here]({self.mangadex_chapter_url.format(md_chapter_id)})\n"
-            if not failed_upload or md_chapter_id is not None
-            else ""
-        )
+        return f"{name} link: [here]({url})\n"
 
     def normalise_chapter(
         self, chapter: Union["Chapter", dict], failed_upload: bool = False
@@ -116,14 +115,14 @@ class WebhookHelper:
         if not isinstance(chapter, dict):
             chapter = vars(chapter)
 
-        name = f"Chapter: {chapter['chapter_number']}\nLanguage: {chapter['chapter_language']}"
+        name = f"Chapter: {chapter.get('chapter_number')}\nLanguage: {chapter.get('chapter_language')}"
         value = (
-            f"{self._mangaplus_chapter_null_message(chapter['chapter_id'])}"
-            f"{self._failed_upload_message(chapter['md_chapter_id'], failed_upload)}"
-            f"Chapter title: `{chapter['chapter_title']}`\n"
-            f"Chapter expiry: `{datetime.datetime.fromtimestamp(chapter['chapter_expire']).isoformat()}`\n"
-            f"{self._mangaplus_manga_null_message(chapter['manga_id'])}"
-            f"{self._mangadex_manga_null_message(chapter['md_manga_id'], failed_upload)}"
+            f"{self._format_link(LinkToFormatType.MANGADEX_CHAPTER, chapter.get('md_chapter_id'), failed_upload)}"
+            f"{self._format_link(LinkToFormatType.MANGAPLUS_CHAPTER, chapter.get('chapter_id'))}"
+            f"Chapter title: `{chapter.get('chapter_title')}`\n"
+            f"Chapter expiry: `{datetime.datetime.fromtimestamp(chapter.get('chapter_expire', 946684799)).isoformat()}`\n"
+            f"{self._format_link(LinkToFormatType.MANGADEX_MANGA, chapter.get('md_manga_id'), failed_upload)}"
+            f"{self._format_link(LinkToFormatType.MANGAPLUS_MANGA, chapter.get('manga_id'))}"
         )
 
         return {"name": name, "value": value}
@@ -134,13 +133,13 @@ class WebhookHelper:
             if isinstance(response, list):
                 status_codes = [r.status_code for r in response]
                 messages = [r.json() for r in response]
-                logging.info(f"Discord API returned: {status_codes}, {messages}")
+                LOGGER.info(f"Discord API returned: {status_codes}, {messages}")
             else:
-                logging.info(
+                LOGGER.info(
                     f"Discord API returned: {response.status_code}, {response.json()}"
                 )
-        except (JSONDecodeError, AttributeError, KeyError):
-            pass
+        except (JSONDecodeError, AttributeError, KeyError) as e:
+            LOGGER.error(e)
 
 
 class WebhookBase(WebhookHelper):
@@ -169,19 +168,19 @@ class WebhookBase(WebhookHelper):
         return manga_title
 
     def make_embed(self, embed_data: Optional[dict] = None) -> DiscordEmbed:
-        if embed_data is None:
-            embed_data = self.normalised_manga
+        # if embed_data is None:
+        #     embed_data = self.normalised_manga
 
         embed = DiscordEmbed(**embed_data)
         embed.set_title(embed_data.get("title", None))
         embed.set_description(embed_data.get("description", None))
-        logging.debug(f"Made embed: {embed.title}, {embed.description}")
+        LOGGER.debug(f"Made embed: {embed.title}, {embed.description}")
         return embed
 
     def add_fields_to_embed(
         self, embed: "DiscordEmbed", normalised_chapters: List[dict]
     ):
-        logging.debug(f"Adding chapters to embed {embed.title}: {normalised_chapters}")
+        LOGGER.debug(f"Adding chapters to embed {embed.title}: {normalised_chapters}")
         for c in normalised_chapters:
             embed.add_embed_field(**c)
 
@@ -245,8 +244,6 @@ class MPlusBotUpdatesWebhook(WebhookBase):
                 self.send_webhook()
 
     def main(self, last_manga: bool = True):
-        setup_logs()
-
         if self.uploaded > 0 or self.failed > 0:
             self.send_webhook()
 
@@ -275,15 +272,17 @@ class MPlusBotUpdatesWebhook(WebhookBase):
 class MPlusBotDupesWebhook(WebhookBase):
     def __init__(self, manga: Optional[dict] = None) -> None:
         self.normalised_manga = None
+        self.manga = manga
         if manga is not None:
             self.init_manga(manga)
 
         self.chapters = []
 
-    def init_manga(self, manga: dict):
-        super().__init__(manga)
-        self.colour = "C8AA69"
-        self.normalised_manga = self.normalise_manga()
+    def init_manga(self, manga: Optional[dict]):
+        if manga is not None:
+            super().__init__(manga)
+            self.colour = "C8AA69"
+            self.normalised_manga = self.normalise_manga()
 
     def normalise_manga(self) -> Dict[str, str]:
         return {
@@ -307,12 +306,15 @@ class MPlusBotDupesWebhook(WebhookBase):
         return "\n".join([f'`{chapter["id"]}`' for chapter in chapters])
 
     def main(self):
-        setup_logs()
-        embed = self.make_embed(self.normalised_manga)
-        self.add_fields_to_embed(embed, self.chapters)
+        if self.normalised_manga is not None:
+            LOGGER.info(self.normalised_manga)
+            embed = self.make_embed(self.normalised_manga)
+            self.add_fields_to_embed(embed, self.chapters)
+            LOGGER.info(self.chapters)
 
-        webhook.add_embed(embed)
-        self.send_webhook()
+            if self.chapters:
+                webhook.add_embed(embed)
+                self.send_webhook()
 
 
 class MPlusBotDeleterWebhook(WebhookHelper):
@@ -336,7 +338,7 @@ class MPlusBotDeleterWebhook(WebhookHelper):
             },
         )
 
-        logging.debug(f"Made embed: {embed.title}, {embed.description}")
+        LOGGER.debug(f"Made embed: {embed.title}, {embed.description}")
         return embed
 
     def main(self):
@@ -361,7 +363,7 @@ class MPlusBotNotIndexedWebhook(WebhookHelper):
             },
         )
 
-        logging.debug(f"Made embed: {embed.title}, {embed.description}")
+        LOGGER.debug(f"Made embed: {embed.title}, {embed.description}")
         return embed
 
     def main(self):
@@ -376,6 +378,26 @@ class MPlusBotNotIndexedWebhook(WebhookHelper):
 
         embed = self.make_embed(title=title, description=description)
         webhook.add_embed(embed)
+        self.send_webhook()
+
+
+class MPlusBotWebhook(WebhookHelper):
+    def __init__(self, **kwargs) -> None:
+        super().__init__()
+        self.embed_title = kwargs.get("title")
+        self.embed_description = kwargs.get("description")
+        self.embed_colour = kwargs.get("colour")
+
+    def main(self, **kwargs):
+        self.embed = DiscordEmbed(
+            title=self.embed_title,
+            description=self.embed_description,
+            timestamp=datetime.datetime.now().isoformat(),
+            color=self.embed_colour or self.colour,
+        )
+        webhook.add_embed(self.embed)
+
+    def send(self, **kwargs):
         self.send_webhook()
 
 

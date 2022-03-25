@@ -8,6 +8,7 @@ import multiprocessing
 import re
 import sqlite3
 import string
+import sys
 import time
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta, timezone
@@ -23,12 +24,13 @@ from webhook import (
     MPlusBotDupesWebhook,
     MPlusBotNotIndexedWebhook,
     MPlusBotUpdatesWebhook,
+    MPlusBotWebhook,
 )
 from webhook import webhook as WEBHOOK
 
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
-__version__ = "1.6.2"
+__version__ = "1.6.3"
 
 mplus_language_map = {
     "0": "en",
@@ -63,7 +65,7 @@ def setup_logs():
     )
     fileh.setFormatter(formatter)
 
-    log = logging.getLogger()  # root logger
+    log = logging.getLogger(__name__)  # root logger
     for hdlr in log.handlers[:]:  # remove all old handlers
         if isinstance(hdlr, logging.FileHandler):
             log.removeHandler(hdlr)
@@ -72,31 +74,32 @@ def setup_logs():
 
 
 setup_logs()
+LOGGER = logging.getLogger(__name__)
 
 
 def load_config_info(config: configparser.RawConfigParser):
     if config["Paths"].get("database_path", "") == "":
-        logging.warning("Database path empty, using default.")
+        LOGGER.warning("Database path empty, using default.")
         config["Paths"]["database_path"] = "chapters.db"
 
     if config["Paths"].get("mangadex_api_url", "") == "":
-        logging.warning("Mangadex api path empty, using default.")
+        LOGGER.warning("Mangadex api path empty, using default.")
         config["Paths"]["mangadex_api_url"] = "https://api.mangadex.org"
 
     if config["Paths"].get("manga_id_map_path", "") == "":
-        logging.info("Manga id map path empty, using default.")
+        LOGGER.info("Manga id map path empty, using default.")
         config["Paths"]["manga_id_map_path"] = "manga.json"
 
     if config["Paths"].get("title_regex_path", "") == "":
-        logging.info("Title regex map path empty, using default.")
+        LOGGER.info("Title regex map path empty, using default.")
         config["Paths"]["title_regex_path"] = "title_regex.json"
 
     if config["Paths"].get("mdauth_path", "") == "":
-        logging.info("mdauth path empty, using default.")
+        LOGGER.info("mdauth path empty, using default.")
         config["Paths"]["mdauth_path"] = ".mdauth"
 
     if config["Paths"].get("components_path", "") == "":
-        logging.info("components path empty, using default.")
+        LOGGER.info("components path empty, using default.")
         config["Paths"]["components_path"] = "components_path"
 
 
@@ -105,9 +108,9 @@ def open_config_file() -> configparser.RawConfigParser:
     if config_file_path.exists():
         config = configparser.RawConfigParser()
         config.read(config_file_path)
-        logging.info("Loaded config file.")
+        LOGGER.info("Loaded config file.")
     else:
-        logging.critical("Config file not found, exiting.")
+        LOGGER.critical("Config file not found, exiting.")
         raise FileNotFoundError("Config file not found.")
 
     load_config_info(config)
@@ -136,7 +139,7 @@ except (ValueError, KeyError):
 
 def make_tables(database_connection: sqlite3.Connection):
     """Make the database table."""
-    logging.info("Creating new tables for database.")
+    LOGGER.info("Creating new tables for database.")
     database_connection.execute(
         """CREATE TABLE IF NOT EXISTS chapters
         (chapter_id         INTEGER,
@@ -177,7 +180,7 @@ def check_table_exists(database_connection: sqlite3.Connection) -> bool:
     fill_backlog = False
     # Table doesn't exist, fill backlog without posting to mangadex
     if not table_exist.fetchall():
-        logging.error("Database tables don't exist, making new ones.")
+        LOGGER.error("Database tables don't exist, making new ones.")
         print("Tables don't exist, making new ones.")
         make_tables(database_connection)
         fill_backlog = True
@@ -191,7 +194,7 @@ database_path = components_path.joinpath(database_name)
 def open_database(db_path: Path) -> tuple[sqlite3.Connection, bool]:
     database_connection = sqlite3.connect(db_path)
     database_connection.row_factory = sqlite3.Row
-    logging.info("Opened database.")
+    LOGGER.info("Opened database.")
 
     fill_backlog = check_table_exists(database_connection)
     return database_connection, fill_backlog
@@ -245,28 +248,26 @@ def convert_json(response_to_convert: requests.Response) -> Optional[dict]:
         "Couldn't convert mangadex api response into a json."
     )
 
-    logging.debug(
-        f"Request id: {response_to_convert.headers.get('x-request-id', None)}"
-    )
+    LOGGER.debug(f"Request id: {response_to_convert.headers.get('x-request-id', None)}")
 
     try:
         converted_response = response_to_convert.json()
     except json.JSONDecodeError:
-        logging.critical(critical_decode_error_message)
+        LOGGER.critical(critical_decode_error_message)
         print(critical_decode_error_message)
         return
     except AttributeError:
-        logging.critical(
+        LOGGER.critical(
             f"Api response doesn't have load as json method, trying to load as json manually."
         )
         try:
             converted_response = json.loads(response_to_convert.content)
         except json.JSONDecodeError:
-            logging.critical(critical_decode_error_message)
+            LOGGER.critical(critical_decode_error_message)
             print(critical_decode_error_message)
             return
 
-    logging.debug("Convert api response into json.")
+    LOGGER.debug("Convert api response into json.")
     return converted_response
 
 
@@ -289,7 +290,7 @@ def print_error(
     if status_code == 429:
         error_message = f"429: {http_error_codes.get(str(status_code))}"
         if log_error:
-            logging.error(error_message)
+            LOGGER.error(error_message)
         if show_error:
             print(error_message)
         time.sleep(RATELIMIT_TIME * 4)
@@ -299,17 +300,17 @@ def print_error(
     try:
         error_json = error_response.json()
     except json.JSONDecodeError as e:
-        logging.error(error_converting_json_log_message.format(e))
+        LOGGER.error(error_converting_json_log_message.format(e))
         print(error_converting_json_print_message)
         return error_converting_json_print_message
     # Maybe already a json object
     except AttributeError:
-        logging.error(f"Error response is already a json.")
+        LOGGER.error(f"Error response is already a json.")
         # Try load as a json object
         try:
             error_json = json.loads(error_response.content)
         except json.JSONDecodeError as e:
-            logging.error(error_converting_json_log_message.format(e))
+            LOGGER.error(error_converting_json_log_message.format(e))
             print(error_converting_json_print_message)
             return error_converting_json_print_message
 
@@ -326,13 +327,13 @@ def print_error(
 
         error_message = f"Error: {errors}"
         if log_error:
-            logging.warning(error_message)
+            LOGGER.warning(error_message)
         if show_error:
             print(error_message)
     except KeyError:
         error_message = f"KeyError {status_code}: {error_json}."
         if log_error:
-            logging.warning(error_message)
+            LOGGER.warning(error_message)
         if show_error:
             print(error_message)
 
@@ -370,7 +371,7 @@ def update_database(
             and chapter.chapter_id is not None
         ):
             print("Updating database with new mangadex and mangaplus chapter ids.")
-            logging.info(f"Updating existing record in the database: {chapter}.")
+            LOGGER.info(f"Updating existing record in the database: {chapter}.")
             database_connection.execute(
                 "UPDATE chapters SET chapter_id=:mplus_id, md_manga_id=:md_manga_id WHERE md_chapter_id=:md_id",
                 {
@@ -380,7 +381,7 @@ def update_database(
                 },
             )
     else:
-        logging.info(f"Adding new chapter to database: {chapter}.")
+        LOGGER.info(f"Adding new chapter to database: {chapter}.")
         database_connection.execute(
             """INSERT INTO chapters (chapter_id, chapter_timestamp, chapter_expire, chapter_language, chapter_title, chapter_number, manga_id, md_chapter_id, md_manga_id) VALUES
                                                             (:chapter_id, :chapter_timestamp, :chapter_expire, :chapter_language, :chapter_title, :chapter_number, :manga_id, :md_chapter_id, :md_manga_id)""",
@@ -402,7 +403,7 @@ def update_database(
     )
 
     if chapter_id_exists_dict is None:
-        logging.debug(f"Added to database: {succesful_upload_id} - {chapter}")
+        LOGGER.debug(f"Added to database: {succesful_upload_id} - {chapter}")
     database_connection.commit()
 
 
@@ -411,14 +412,14 @@ def open_manga_id_map(manga_map_path: Path) -> Dict[str, List[int]]:
     try:
         with open(manga_map_path, "r") as manga_map_fp:
             manga_map = json.load(manga_map_fp)
-        logging.info("Opened manga id map file.")
+        LOGGER.info("Opened manga id map file.")
     except json.JSONDecodeError as e:
-        logging.critical("Manga map file is corrupted.")
+        LOGGER.critical("Manga map file is corrupted.")
         raise json.JSONDecodeError(
             msg="Manga map file is corrupted.", doc=e.doc, pos=e.pos
         )
     except FileNotFoundError:
-        logging.critical("Manga map file is missing.")
+        LOGGER.critical("Manga map file is missing.")
         raise FileNotFoundError("Couldn't file manga map file.")
     return manga_map
 
@@ -428,14 +429,14 @@ def open_title_regex(title_regex_path: Path) -> dict:
     try:
         with open(title_regex_path, "r") as title_regex_fp:
             title_regexes = json.load(title_regex_fp)
-        logging.info("Opened title regex file.")
+        LOGGER.info("Opened title regex file.")
     except json.JSONDecodeError as e:
-        logging.critical("Title regex file is corrupted.")
+        LOGGER.critical("Title regex file is corrupted.")
         raise json.JSONDecodeError(
             msg="Title regex file is corrupted.", doc=e.doc, pos=e.pos
         )
     except FileNotFoundError:
-        logging.critical("Title regex file is missing.")
+        LOGGER.critical("Title regex file is missing.")
         raise FileNotFoundError("Couldn't file title regex file.")
     return title_regexes
 
@@ -462,7 +463,7 @@ class AuthMD:
                 token = json.load(login_file)
             return token
         except (FileNotFoundError, json.JSONDecodeError):
-            logging.error(
+            LOGGER.error(
                 "Couldn't find the file, trying to login using your account details."
             )
             return {}
@@ -471,7 +472,7 @@ class AuthMD:
         """Save the session and refresh tokens."""
         with open(self.token_file, "w") as login_file:
             login_file.write(json.dumps(token, indent=4))
-        logging.debug("Saved mdauth file.")
+        LOGGER.debug("Saved mdauth file.")
 
     def _update_headers(self, session_token: str):
         """Update the session headers to include the auth token."""
@@ -492,7 +493,7 @@ class AuthMD:
         refreshed = False
 
         if self.refresh_token is None:
-            logging.error(
+            LOGGER.error(
                 f"Refresh token doesn't exist, logging in through account details."
             )
             return self._login_using_details()
@@ -514,13 +515,13 @@ class AuthMD:
                 refreshed = False
         elif refresh_response.status_code in (401, 403):
             error = print_error(refresh_response)
-            logging.warning(
+            LOGGER.warning(
                 f"Couldn't login using refresh token, logging in using your account. Error: {error}"
             )
             return self._login_using_details()
         else:
             error = print_error(refresh_response)
-            logging.error(f"Couldn't refresh token. Error: {error}")
+            LOGGER.error(f"Couldn't refresh token. Error: {error}")
 
         return refreshed
 
@@ -534,7 +535,7 @@ class AuthMD:
             auth_data = convert_json(auth_check_response)
             if auth_data is not None:
                 if auth_data["isAuthenticated"]:
-                    logging.info("Already logged in.")
+                    LOGGER.info("Already logged in.")
                     return True
 
         if self.refresh_token is None:
@@ -548,7 +549,7 @@ class AuthMD:
 
         if username == "" or password == "":
             critical_message = "Login details missing."
-            logging.critical(critical_message)
+            LOGGER.critical(critical_message)
             raise Exception(critical_message)
 
         login_response = self.session.post(
@@ -565,7 +566,7 @@ class AuthMD:
                 return True
 
         error = print_error(login_response)
-        logging.error(
+        LOGGER.error(
             f"Couldn't login to mangadex using the details provided. Error: {error}."
         )
         return False
@@ -593,23 +594,23 @@ class AuthMD:
     def login(self, check_login=True):
         """Login to MD account using details or saved token."""
         if not check_login and self.successful_login:
-            logging.info("Already logged in, not checking for login.")
+            LOGGER.info("Already logged in, not checking for login.")
             return
 
         if self.first_login:
-            logging.info("Trying to login through the .mdauth file.")
+            LOGGER.info("Trying to login through the .mdauth file.")
 
         if self.session_token is not None:
             if self.first_login:
-                logging.info("Reading the session expiry from the token.")
+                LOGGER.info("Reading the session expiry from the token.")
 
             if self.decoded_session_token is None:
-                logging.debug("Decoding the token into a json object.")
+                LOGGER.debug("Decoding the token into a json object.")
                 self.decoded_session_token = self._decode_token(self.session_token)
 
             expired_session_token = self._check_token_expiry(self.decoded_session_token)
             if expired_session_token:
-                logging.warning("Session expired, refreshing using token.")
+                LOGGER.warning("Session expired, refreshing using token.")
                 logged_in = self._refresh_token()
             else:
                 self._update_headers(self.session_token)
@@ -620,11 +621,11 @@ class AuthMD:
         if logged_in:
             self.successful_login = True
             if self.first_login:
-                logging.info(f"Logged into mangadex.")
+                LOGGER.info(f"Logged into mangadex.")
                 print("Logged in.")
                 self.first_login = False
         else:
-            logging.critical("Couldn't login.")
+            LOGGER.critical("Couldn't login.")
             raise Exception("Couldn't login.")
 
 
@@ -645,7 +646,7 @@ class ChapterDeleterProcess:
         self.chapter_delete_ratelimit = 8
         self.chapter_delete_process = None
 
-        logging.info(f"Chapters to delete: {self.chapters_to_delete}")
+        LOGGER.info(f"Chapters to delete: {self.chapters_to_delete}")
 
     def _open_database() -> sqlite3.Connection:
         database_connection, _ = open_database(database_path)
@@ -679,7 +680,7 @@ class ChapterDeleterProcess:
         """Check if the chapters expired and remove off mangadex if they are."""
         # If the expiry date of the chapter is less than the current time and
         # the md chapter id is available, try delete
-        logging.info(f"Moving {chapter} from chapters table to deleted_chapters table.")
+        LOGGER.info(f"Moving {chapter} from chapters table to deleted_chapters table.")
         md_chapter_id = chapter.get("md_chapter_id", to_delete_id)
         manga_id = chapter.get("manga_id", None)
         if manga_id is None:
@@ -696,24 +697,23 @@ class ChapterDeleterProcess:
                     continue
 
                 if delete_reponse.status_code != 200:
-                    logging.error(f"Couldn't delete expired chapter {deleted_message}")
+                    LOGGER.error(f"Couldn't delete expired chapter {deleted_message}")
                     print_error(delete_reponse, log_error=True)
 
                     if delete_reponse.status_code == 401:
                         unauthorised_message = (
                             f"You're not logged in to delete this chapter {chapter}."
                         )
-                        logging.error(unauthorised_message)
+                        LOGGER.error(unauthorised_message)
                         print(unauthorised_message)
 
                         self.md_auth_object.login()
                         continue
 
                 if delete_reponse.status_code == 200:
-                    logging.info(f"Deleted {chapter}.")
+                    LOGGER.info(f"Deleted {chapter}.")
                     print(f"----Deleted {deleted_message}")
                     MPlusBotDeleterWebhook(chapter).main()
-                    setup_logs()
                     break
 
         if self.on_db and chapter:
@@ -724,12 +724,14 @@ class ChapterDeleterProcess:
         """Delete expired chapters from mangadex."""
         looped_all = False
         if self.chapters_to_delete:
-            logging.info(f"Started deleting expired chapters process.")
+            LOGGER.info(f"Started deleting expired chapters process.")
             print("Deleting expired chapters.")
 
         for count, chapter_to_delete in enumerate(self.chapters_to_delete, start=1):
             self.md_auth_object.login()
             self._remove_old_chapter(chapter_to_delete)
+
+            # print(self.chapters_to_delete)
 
             if count == len(self.chapters_to_delete):
                 looped_all = True
@@ -805,7 +807,7 @@ class ChapterUploaderProcess:
             session_id = self.upload_session_id
 
         self.session.delete(f"{md_upload_api_url}/{session_id}", verify=False)
-        logging.info(f"Sent {session_id} to be deleted.")
+        LOGGER.info(f"Sent {session_id} to be deleted.")
 
     def _delete_exising_upload_session(
         self, chapter_upload_session_retry: int, json_error=False
@@ -814,7 +816,7 @@ class ChapterUploaderProcess:
         if chapter_upload_session_retry > 0 and not json_error:
             return
 
-        logging.debug(
+        LOGGER.debug(
             f"Checking for upload sessions for manga {self.mangadex_manga_id}, chapter {self.chapter}."
         )
         for removal_retry in range(self.upload_retry_total):
@@ -823,35 +825,33 @@ class ChapterUploaderProcess:
                     f"{md_upload_api_url}", verify=False
                 )
             except requests.RequestException as e:
-                logging.error(e)
+                LOGGER.error(e)
                 continue
 
             if existing_session.status_code == 200:
                 existing_session_json = convert_json(existing_session)
 
                 if existing_session_json is None:
-                    logging.warning(
+                    LOGGER.warning(
                         f"Couldn't convert exising upload session response into a json, retrying."
                     )
                 else:
                     self.remove_upload_session(existing_session_json["data"]["id"])
                     return
             elif existing_session.status_code == 404:
-                logging.info("No existing upload session found.")
+                LOGGER.info("No existing upload session found.")
                 return
             elif existing_session.status_code == 401:
                 print_error(existing_session, log_error=True)
-                logging.warning("Not logged in, logging in and retrying.")
+                LOGGER.warning("Not logged in, logging in and retrying.")
                 self.md_auth_object.login()
                 continue
             else:
-                logging.warning(
-                    f"Couldn't delete the exising upload session, retrying."
-                )
+                LOGGER.warning(f"Couldn't delete the exising upload session, retrying.")
 
             time.sleep(RATELIMIT_TIME)
 
-        logging.error("Exising upload session not deleted.")
+        LOGGER.error("Exising upload session not deleted.")
         raise Exception(f"Couldn't delete existing upload session.")
 
     def _create_upload_session(self) -> Optional[dict]:
@@ -877,7 +877,7 @@ class ChapterUploaderProcess:
                     verify=False,
                 )
             except requests.RequestException as e:
-                logging.error(e)
+                LOGGER.error(e)
                 continue
             json_error = False
 
@@ -889,7 +889,7 @@ class ChapterUploaderProcess:
                     break
                 else:
                     upload_session_response_json_message = f"Couldn't convert successful upload session creation into a json, retrying. {self.manga_generic_error_message}."
-                    logging.error(upload_session_response_json_message)
+                    LOGGER.error(upload_session_response_json_message)
                     print(upload_session_response_json_message)
                     json_error = True
             elif upload_session_response.status_code == 401:
@@ -898,7 +898,7 @@ class ChapterUploaderProcess:
                 continue
             else:
                 print_error(upload_session_response, log_error=True)
-                logging.error(
+                LOGGER.error(
                     f"Couldn't create an upload session for {self.mangadex_manga_id}, chapter {self.chapter.chapter_number}."
                 )
                 print("Couldn't create an upload session.")
@@ -908,7 +908,7 @@ class ChapterUploaderProcess:
         # Couldn't create an upload session, skip the chapter
         if not chapter_upload_session_successful:
             upload_session_response_json_message = f"Couldn't create an upload session for {self.manga_generic_error_message}."
-            logging.error(upload_session_response_json_message)
+            LOGGER.error(upload_session_response_json_message)
             print(upload_session_response_json_message)
             time.sleep(RATELIMIT_TIME)
             return
@@ -934,7 +934,7 @@ class ChapterUploaderProcess:
             "pageOrder": [],
         }
 
-        logging.info(f"Commit payload: {payload}")
+        LOGGER.info(f"Commit payload: {payload}")
 
         for commit_retries in range(self.upload_retry_total):
             try:
@@ -944,7 +944,7 @@ class ChapterUploaderProcess:
                     verify=False,
                 )
             except requests.RequestException as e:
-                logging.error(e)
+                LOGGER.error(e)
                 continue
 
             if chapter_commit_response.status_code == 200:
@@ -955,14 +955,14 @@ class ChapterUploaderProcess:
                     succesful_upload_id = chapter_commit_response_json["data"]["id"]
                     succesful_upload_message = f"Committed {succesful_upload_id} - {self.chapter.chapter_id} for {self.manga_generic_error_message}."
                     self.chapter.md_chapter_id = succesful_upload_id
-                    logging.info(succesful_upload_message)
+                    LOGGER.info(succesful_upload_message)
                     print(succesful_upload_message)
                     update_database(
                         self.database_connection, self.chapter, succesful_upload_id
                     )
                 else:
                     chapter_commit_response_json_message = f"Couldn't convert successful chapter commit api response into a json"
-                    logging.error(chapter_commit_response_json_message)
+                    LOGGER.error(chapter_commit_response_json_message)
                     print(chapter_commit_response_json_message)
                 return True
             elif chapter_commit_response.status_code == 401:
@@ -971,14 +971,14 @@ class ChapterUploaderProcess:
                 continue
             else:
                 succesful_upload = False
-                logging.warning(f"Failed to commit {self.upload_session_id}, retrying.")
+                LOGGER.warning(f"Failed to commit {self.upload_session_id}, retrying.")
                 print_error(chapter_commit_response, log_error=True)
 
             time.sleep(RATELIMIT_TIME * 2)
 
         if not succesful_upload:
             error_message = f"Couldn't commit {self.upload_session_id}, manga {self.mangadex_manga_id} - {self.chapter.manga_id} chapter {self.chapter.chapter_number} language {self.chapter.chapter_language}."
-            logging.error(error_message)
+            LOGGER.error(error_message)
             print(error_message)
             self.remove_upload_session()
             return False
@@ -995,7 +995,7 @@ class ChapterUploaderProcess:
                 and md_chapter["attributes"]["externalUrl"] is not None
             ):
                 dupe_chapter_message = f"{self.manga_generic_error_message} already exists on mangadex, skipping."
-                logging.info(dupe_chapter_message)
+                LOGGER.info(dupe_chapter_message)
                 print(dupe_chapter_message)
                 # Add duplicate chapter to database to avoid checking it again
                 # in the future
@@ -1056,7 +1056,7 @@ class ChapterUploaderProcess:
             return 2
 
         self.upload_session_id = upload_session_response_json["data"]["id"]
-        logging.info(
+        LOGGER.info(
             f"Created upload session: {self.upload_session_id} - {self.chapter}"
         )
         chapter_committed = self._commit_chapter()
@@ -1174,7 +1174,7 @@ class MangaUploaderProcess:
 
         if self.skipped != 0:
             skipped_chapters_message = f"Skipped {self.skipped} chapters out of {len(self.chapters)} for manga {chapter.manga.manga_name}: {self.mangadex_manga_id} - {chapter.manga_id}."
-            logging.info(skipped_chapters_message)
+            LOGGER.info(skipped_chapters_message)
             print(skipped_chapters_message)
 
         MPlusBotUpdatesWebhook(
@@ -1183,8 +1183,6 @@ class MangaUploaderProcess:
             self.failed_uploads,
             self.skipped,
         ).main(last_manga)
-
-        setup_logs()
 
         if self.second_process_object is not None:
             del self.second_process_object
@@ -1225,7 +1223,7 @@ class BotProcess:
             if m not in list(self.manga_id_map.keys())
         ]
 
-        logging.info(f"Manga not tracked but on mangadex: {self.manga_untracked}")
+        LOGGER.info(f"Manga not tracked but on mangadex: {self.manga_untracked}")
 
     def _remove_chapters_not_mplus(self) -> List[dict]:
         """Find chapters on MangaDex not on MangaPlus."""
@@ -1310,7 +1308,7 @@ class BotProcess:
                     f"{mangadex_api_url}/chapter", params=parameters, verify=False
                 )
             except requests.RequestException as e:
-                logging.error(e)
+                LOGGER.error(e)
                 limit = limit
                 offset = offset
                 created_at_since_time = created_at_since_time
@@ -1320,12 +1318,12 @@ class BotProcess:
             if chapters_response.status_code != 200:
                 manga_response_message = f"Couldn't get the chapters of the group."
                 print_error(chapters_response, log_error=True)
-                logging.error(manga_response_message)
+                LOGGER.error(manga_response_message)
                 continue
 
             chapters_response_data = convert_json(chapters_response)
             if chapters_response_data is None:
-                logging.warning(f"Couldn't convert chapters data into json, retrying.")
+                LOGGER.warning(f"Couldn't convert chapters data into json, retrying.")
                 continue
 
             chapters.extend(chapters_response_data["data"])
@@ -1341,7 +1339,7 @@ class BotProcess:
                 if chapters_count > limit:
                     pages = math.ceil(chapters_count / limit)
 
-                logging.debug(f"{pages} page(s) for group chapters.")
+                LOGGER.debug(f"{pages} page(s) for group chapters.")
 
             # Wait every 5 pages
             if iteration % 5 == 0 and pages != 5:
@@ -1356,7 +1354,7 @@ class BotProcess:
                 or not chapters_response_data["data"]
             ):
                 if chapters_count >= 10000 and offset == 10000:
-                    logging.debug("Reached 10k chapters, looping over next 10k.")
+                    LOGGER.debug("Reached 10k chapters, looping over next 10k.")
                     created_at_since_time = chapters[-1]["attributes"][
                         "createdAt"
                     ].split("+")[0]
@@ -1373,7 +1371,7 @@ class BotProcess:
         return chapters
 
     def _get_mplus_chapters(self) -> Dict[str, List[dict]]:
-        logging.debug("Getting all m+'s uploaded chapters.")
+        LOGGER.debug("Getting all m+'s uploaded chapters.")
         print("Getting the mangaplus chapters on mangadex.")
         chapters_unsorted = self._get_chapters(
             params={
@@ -1383,7 +1381,7 @@ class BotProcess:
             }
         )
 
-        logging.debug("Sorting the uploaded chapters by MD ID.")
+        LOGGER.debug("Sorting the uploaded chapters by MD ID.")
         chapters_sorted = {}
         for chapter in chapters_unsorted:
             manga = [g for g in chapter["relationships"] if g["type"] == "manga"][0]
@@ -1407,9 +1405,7 @@ class BotProcess:
         for chapter in updates:
             md_id = get_md_id(self.manga_id_map, chapter.manga_id)
             if md_id is None:
-                logging.warning(
-                    f"No mangadex id found for mplus id {chapter.manga_id}."
-                )
+                LOGGER.warning(f"No mangadex id found for mplus id {chapter.manga_id}.")
                 continue
 
             try:
@@ -1420,7 +1416,7 @@ class BotProcess:
 
     def _check_all_chapters_uploaded(self):
         """Check if all the chapters uploaded to MangaDex were indexed correctly."""
-        logging.info(
+        LOGGER.info(
             "Checking if all currently uploaded chapters are available on MangaDex."
         )
         print("Checking which chapters weren't indexed.")
@@ -1433,20 +1429,20 @@ class BotProcess:
             if chapter.md_chapter_id is not None
         ]
 
-        if self.clean_db:
-            uploaded_chapter_ids.extend(
-                [
-                    chapter["md_chapter_id"]
-                    for chapter in self.posted_chapters_data
-                    if datetime.fromtimestamp(chapter["chapter_expire"])
-                    >= datetime.now()
-                    and chapter["md_chapter_id"] is not None
-                ]
-            )
+        # if self.clean_db:
+        #     uploaded_chapter_ids.extend(
+        #         [
+        #             chapter["md_chapter_id"]
+        #             for chapter in self.posted_chapters_data
+        #             if datetime.fromtimestamp(chapter["chapter_expire"])
+        #             >= datetime.now()
+        #             and chapter["md_chapter_id"] is not None
+        #         ]
+        #     )
 
         uploaded_chapter_ids = list(set(uploaded_chapter_ids))
         if uploaded_chapter_ids:
-            logging.info(f"Uploaded chapters mangadex ids: {uploaded_chapter_ids}")
+            LOGGER.info(f"Uploaded chapters mangadex ids: {uploaded_chapter_ids}")
             uploaded_chapter_ids_split = [
                 uploaded_chapter_ids[l : l + 100]
                 for l in range(0, len(uploaded_chapter_ids), 100)
@@ -1469,11 +1465,10 @@ class BotProcess:
                 if chapter_id not in [chapter["id"] for chapter in chapters_on_md]
             ]
 
-            logging.info(f"Chapters not indexed: {chapters_not_on_md}")
+            LOGGER.info(f"Chapters not indexed: {chapters_not_on_md}")
             MPlusBotNotIndexedWebhook(chapters_not_on_md).main()
-            setup_logs()
         else:
-            logging.info("No uploaded chapter mangadex ids.")
+            LOGGER.info("No uploaded chapter mangadex ids.")
 
     def upload_chapters(self):
         """Go through each new chapter and upload it to mangadex."""
@@ -1550,7 +1545,7 @@ class MPlusAPI:
                     self.mplus_base_api_url + "/api/title_list/updated", stream=True
                 )
         except Exception as e:
-            logging.error(f"{e}: Couldn't get details from the mangaplus api.")
+            LOGGER.error(f"{e}: Couldn't get details from the mangaplus api.")
             print("Request API Error", e)
             return
 
@@ -1559,7 +1554,7 @@ class MPlusAPI:
 
     def get_mplus_updated_manga(self):
         """Find new untracked mangaplus series."""
-        logging.info("Looking for new untracked manga.")
+        LOGGER.info("Looking for new untracked manga.")
         print("Getting new manga.")
         updated_manga_response = self._request_from_api(updated=True)
         if updated_manga_response is not None:
@@ -1580,12 +1575,24 @@ class MPlusAPI:
                             manga_language=language,
                         )
                     )
-                    logging.info(f"Found untracked manga {manga_id}: {manga_name}.")
+                    LOGGER.info(f"Found untracked manga {manga_id}: {manga_name}.")
                     print(f"Found untracked manga {manga_id}: {manga_name}.")
+
+            if self.untracked_manga:
+                untracked_manga_webhook = MPlusBotWebhook(
+                    title="Untracked Manga",
+                    description="\n".join(
+                        [
+                            f"{manga.manga_id}: {manga.manga_name}"
+                            for manga in self.untracked_manga
+                        ]
+                    ),
+                )
+                untracked_manga_webhook.send()
 
     def get_mplus_updates(self):
         """Get latest chapter updates."""
-        logging.info("Looking for tracked manga new chapters.")
+        LOGGER.info("Looking for tracked manga new chapters.")
         print("Getting new chapters.")
         processes = []
 
@@ -1662,7 +1669,7 @@ class MPlusAPI:
             updated_chapters = self.get_latest_chapters(
                 manga_chapters_lists, self.posted_chapters_ids
             )
-            logging.info(f"MangaPlus newly updated chapters: {updated_chapters}")
+            LOGGER.info(f"MangaPlus newly updated chapters: {updated_chapters}")
 
             if updated_chapters:
                 print(f"Manga {manga_object.manga_name}: {manga_object.manga_id}.")
@@ -1910,7 +1917,7 @@ class DeleteDuplicatesMD:
         self.to_delete = []
 
     def get_aggregate(self, manga_id: str, language: str) -> Optional[dict]:
-        logging.info(
+        LOGGER.info(
             f"Getting aggregate info for manga {manga_id} in language {language}."
         )
 
@@ -1925,7 +1932,7 @@ class DeleteDuplicatesMD:
                     verify=False,
                 )
             except requests.RequestException as e:
-                logging.error(e)
+                LOGGER.error(e)
                 continue
 
             if aggregate_response.status_code in range(200, 300):
@@ -1934,7 +1941,7 @@ class DeleteDuplicatesMD:
                     return aggregate_response_json["volumes"]
 
         error = print_error(aggregate_response)
-        logging.error(
+        LOGGER.error(
             f"Error returned from aggregate response for manga {manga_id}: {error}"
         )
 
@@ -1960,7 +1967,7 @@ class DeleteDuplicatesMD:
         return to_check
 
     def get_chapters(self, chapters: List[str]) -> Optional[List[dict]]:
-        logging.debug(f"Getting chapter data for chapter ids: {chapters}")
+        LOGGER.debug(f"Getting chapter data for chapter ids: {chapters}")
         for i in range(UPLOAD_RETRY):
             try:
                 chapters_response = self.session.get(
@@ -1969,7 +1976,7 @@ class DeleteDuplicatesMD:
                     verify=False,
                 )
             except requests.RequestException as e:
-                logging.error(e)
+                LOGGER.error(e)
                 continue
 
             if chapters_response.status_code in range(200, 300):
@@ -1978,6 +1985,7 @@ class DeleteDuplicatesMD:
                     return chapters_response_json["data"]
 
             error = print_error(chapters_response, log_error=True)
+        return None
 
     def sort_manga_data(self, chapters: list):
         manga_data = {}
@@ -1986,7 +1994,7 @@ class DeleteDuplicatesMD:
             manga_id = manga["id"]
 
             if manga_id not in manga_data:
-                manga_data({manga_id: manga})
+                manga_data.update({manga_id: manga})
         return manga_data
 
     def filter_group(self, chapter: dict) -> List[str]:
@@ -1997,7 +2005,6 @@ class DeleteDuplicatesMD:
     def check_chapters(
         self, chapters: List[dict], dupes_webhook: "MPlusBotDupesWebhook"
     ) -> List[dict]:
-        to_return_ids = []
         to_check = []
 
         for chapter in chapters[1:]:
@@ -2035,14 +2042,21 @@ class DeleteDuplicatesMD:
                     oldest = chapter
 
             oldest_id = oldest["id"]
-            to_return_ids = [c["id"] for c in to_check]
-            to_return_ids.remove(oldest_id)
-            to_check.remove(oldest)
+            try:
+                to_check.remove(oldest)
+            except ValueError:
+                pass
 
-            if to_return_ids:
+            if to_check:
                 dupes_webhook.add_chapters(oldest, to_check)
+
+                to_return_ids = list(set([c["id"] for c in to_check]))
+                try:
+                    to_return_ids.remove(oldest_id)
+                except ValueError:
+                    pass
                 print(f"Found dupes of {oldest_id} to delete: {to_return_ids}")
-                logging.info(f"Found dupes of {oldest_id} to delete: {to_return_ids}")
+                LOGGER.info(f"Found dupes of {oldest_id} to delete: {to_return_ids}")
         return to_check
 
     def delete_dupes(self):
@@ -2057,7 +2071,7 @@ class DeleteDuplicatesMD:
                     continue
 
                 aggregate_chapters = self.check_count(aggregate_chapters_unchecked)
-                logging.debug(
+                LOGGER.debug(
                     f"Aggregate chapters with more than one count: {aggregate_chapters}"
                 )
                 for chapter in aggregate_chapters:
@@ -2069,9 +2083,9 @@ class DeleteDuplicatesMD:
                     if chapters_md is None:
                         continue
 
-                    if bool(dupes_webhook.manga):
+                    if not bool(dupes_webhook.manga):
                         manga_data = self.sort_manga_data(chapters_md)
-                        dupes_webhook.init_manga(manga_data)
+                        dupes_webhook.init_manga(manga_data.get(manga_id))
 
                     chapters_to_delete = self.check_chapters(chapters_md, dupes_webhook)
                     chapters_to_delete_dict: Dict[str, str] = [
@@ -2091,7 +2105,6 @@ class DeleteDuplicatesMD:
                     time.sleep(RATELIMIT_TIME)
 
             dupes_webhook.main()
-            setup_logs()
 
             if mang_index % 4 == 0:
                 time.sleep(RATELIMIT_TIME)
@@ -2127,7 +2140,7 @@ def main(db_connection: Optional[sqlite3.Connection] = None, clean_db=False):
     manga_map_mplus_ids = [
         mplus_id for md_id in manga_id_map for mplus_id in manga_id_map[md_id]
     ]
-    logging.info(
+    LOGGER.info(
         "Retrieved posted chapters from database and got mangaplus ids from manga id map file."
     )
 
@@ -2152,10 +2165,10 @@ def main(db_connection: Optional[sqlite3.Connection] = None, clean_db=False):
     all_mplus_chapters = mplus_api.all_mplus_chapters
 
     if not updates:
-        logging.info("No new updates found.")
+        LOGGER.info("No new updates found.")
         print("No new updates found.")
     else:
-        logging.info(f"Found {len(updates)} update(s).")
+        LOGGER.info(f"Found {len(updates)} update(s).")
         print(f"Found {len(updates)} update(s).")
         while True:
             try:
@@ -2172,7 +2185,7 @@ def main(db_connection: Optional[sqlite3.Connection] = None, clean_db=False):
                     posted_chapters_data,
                 ).upload_chapters()
             except (requests.RequestException, sqlite3.OperationalError) as e:
-                logging.error(e)
+                LOGGER.error(e)
                 continue
             else:
                 break
@@ -2185,7 +2198,12 @@ def main(db_connection: Optional[sqlite3.Connection] = None, clean_db=False):
             )
             dupes_deleter.delete_dupes()
         except (UnboundLocalError, TypeError, IndexError, KeyError, ValueError) as e:
-            logging.error(e)
+            print(
+                "Error on line {}".format(sys.exc_info()[-1].tb_lineno),
+                type(e).__name__,
+                e,
+            )
+            LOGGER.error(e)
 
     if first_process is not None:
         first_process.join()
@@ -2199,7 +2217,7 @@ def main(db_connection: Optional[sqlite3.Connection] = None, clean_db=False):
     database_connection.backup(backup_database_connection)
     backup_database_connection.close()
     database_connection.close()
-    logging.info("Saved and closed database.")
+    LOGGER.info("Saved and closed database.")
 
 
 if __name__ == "__main__":
