@@ -30,7 +30,7 @@ from webhook import webhook as WEBHOOK
 
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
-__version__ = "1.6.3"
+__version__ = "1.6.4"
 
 mplus_language_map = {
     "0": "en",
@@ -354,11 +354,18 @@ def get_md_id(manga_id_map: Dict[str, List[int]], mangaplus_id: int) -> Optional
 
 def update_database(
     database_connection: sqlite3.Connection,
-    chapter: Chapter,
+    chapter: Union[Chapter, dict],
     succesful_upload_id: Optional[str] = None,
 ):
     """Update the database with the new chapter."""
-    mplus_chapter_id = chapter.chapter_id
+
+    if isinstance(chapter, Chapter):
+        chapter = vars(chapter)
+
+    if succesful_upload_id is None:
+        succesful_upload_id = chapter.get("md_chapter_id")
+
+    mplus_chapter_id = chapter.get("chapter_id")
 
     chapter_id_exists = database_connection.execute(
         "SELECT * FROM chapters WHERE EXISTS(SELECT 1 FROM chapters WHERE md_chapter_id=(?))",
@@ -368,16 +375,17 @@ def update_database(
     if chapter_id_exists_dict is not None:
         if (
             dict(chapter_id_exists_dict).get("chapter_id", None) is None
-            and chapter.chapter_id is not None
+            and chapter.get("chapter_id") is not None
         ):
             print("Updating database with new mangadex and mangaplus chapter ids.")
             LOGGER.info(f"Updating existing record in the database: {chapter}.")
             database_connection.execute(
-                "UPDATE chapters SET chapter_id=:mplus_id, md_manga_id=:md_manga_id WHERE md_chapter_id=:md_id",
+                "UPDATE chapters SET chapter_id=:mplus_id, md_manga_id=:md_manga_id, chapter_expire=:chapter_expire WHERE md_chapter_id=:md_id",
                 {
                     "md_id": succesful_upload_id,
                     "mplus_id": mplus_chapter_id,
-                    "md_manga_id": chapter.md_manga_id,
+                    "md_manga_id": chapter.get("md_manga_id"),
+                    "chapter_expire": chapter.get("chapter_expire"),
                 },
             )
     else:
@@ -387,14 +395,14 @@ def update_database(
                                                             (:chapter_id, :chapter_timestamp, :chapter_expire, :chapter_language, :chapter_title, :chapter_number, :manga_id, :md_chapter_id, :md_manga_id)""",
             {
                 "chapter_id": mplus_chapter_id,
-                "chapter_timestamp": chapter.chapter_timestamp,
-                "chapter_expire": chapter.chapter_expire,
-                "chapter_language": chapter.chapter_language,
-                "chapter_title": chapter.chapter_title,
-                "chapter_number": chapter.chapter_number,
-                "manga_id": chapter.manga_id,
+                "chapter_timestamp": chapter.get("chapter_timestamp"),
+                "chapter_expire": chapter.get("chapter_expire"),
+                "chapter_language": chapter.get("chapter_language"),
+                "chapter_title": chapter.get("chapter_title"),
+                "chapter_number": chapter.get("chapter_number"),
+                "manga_id": chapter.get("manga_id"),
                 "md_chapter_id": succesful_upload_id,
-                "md_manga_id": chapter.md_manga_id,
+                "md_manga_id": chapter.get("md_manga_id"),
             },
         )
     database_connection.execute(
@@ -1908,10 +1916,12 @@ class DeleteDuplicatesMD:
         session: requests.Session,
         manga_id_map: Dict[str, List[int]],
         first_process_object: "ChapterDeleterProcess",
+        database_connection: sqlite3.Connection,
     ) -> None:
         self.session = session
         self.manga_id_map = manga_id_map
         self.first_process_object = first_process_object
+        self.database_connection = database_connection
         self.tracked_mangadex_ids = list(manga_id_map.keys())
         self.languages = list(set(mplus_language_map.values()))
         self.to_delete = []
@@ -2088,7 +2098,7 @@ class DeleteDuplicatesMD:
                         dupes_webhook.init_manga(manga_data.get(manga_id))
 
                     chapters_to_delete = self.check_chapters(chapters_md, dupes_webhook)
-                    chapters_to_delete_dict: Dict[str, str] = [
+                    chapters_to_delete_list: List[Dict[str, str]] = [
                         {
                             "md_chapter_id": c["id"],
                             "md_manga_id": manga_id,
@@ -2099,8 +2109,9 @@ class DeleteDuplicatesMD:
                         }
                         for c in chapters_to_delete
                     ]
-
-                    self.first_process_object.add_more_chapters(chapters_to_delete_dict)
+                    self.first_process_object.add_more_chapters(chapters_to_delete_list)
+                    for to_delete in chapters_to_delete_list:
+                        update_database(self.database_connection, to_delete)
                 if lang_index % 4 == 0:
                     time.sleep(RATELIMIT_TIME)
 
@@ -2194,7 +2205,7 @@ def main(db_connection: Optional[sqlite3.Connection] = None, clean_db=False):
     if clean_db:
         try:
             dupes_deleter = DeleteDuplicatesMD(
-                session, manga_id_map, first_process_object
+                session, manga_id_map, first_process_object, database_connection
             )
             dupes_deleter.delete_dupes()
         except (UnboundLocalError, TypeError, IndexError, KeyError, ValueError) as e:
