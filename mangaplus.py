@@ -31,7 +31,7 @@ from webhook import webhook as WEBHOOK
 
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
-__version__ = "1.6.5"
+__version__ = "1.6.6"
 
 mplus_language_map = {
     "0": "en",
@@ -646,7 +646,7 @@ class ChapterDeleterProcess:
         self,
         *,
         session: requests.Session,
-        posted_chapters: List[dict],
+        posted_chapters: List[dict] = [],
         md_auth_object: AuthMD,
         on_db: bool = True,
     ):
@@ -664,10 +664,23 @@ class ChapterDeleterProcess:
         database_connection, _ = open_database(database_path)
         return database_connection
 
+    def _get_all_chapters(self) -> List[dict]:
+        """Get all the chapters from the database."""
+        return [
+            dict(k)
+            for k in database_connection.execute("SELECT * FROM chapters").fetchall()
+        ]
+
     def get_chapter_to_delete(self) -> List[dict]:
+        """Get only the expired chapters from the total chapters list."""
+        if self.posted_chapters:
+            posted_chapters = self.posted_chapters
+        else:
+            posted_chapters = self._get_all_chapters()
+
         return [
             dict(x)
-            for x in self.posted_chapters
+            for x in posted_chapters
             if datetime.fromtimestamp(x["chapter_expire"]) <= datetime.now()
         ]
 
@@ -739,14 +752,15 @@ class ChapterDeleterProcess:
             LOGGER.info(f"Started deleting expired chapters process.")
             print("Deleting expired chapters.")
 
-        for count, chapter_to_delete in enumerate(self.chapters_to_delete, start=1):
+        for count, chapter_to_delete in enumerate(self.chapters_to_delete[:], start=1):
             self.md_auth_object.login()
             self._remove_old_chapter(chapter_to_delete)
+            looped_all = count == len(self.chapters_to_delete)
 
-            # print(self.chapters_to_delete)
-
-            if count == len(self.chapters_to_delete):
-                looped_all = True
+            try:
+                self.chapters_to_delete.remove(chapter_to_delete)
+            except ValueError:
+                pass
 
         if looped_all:
             self.chapters_to_delete = []
@@ -2121,6 +2135,9 @@ class DeleteDuplicatesMD:
             if mang_index % 4 == 0:
                 time.sleep(RATELIMIT_TIME)
 
+        # self.first_process_object.chapters_to_delete = (
+        #     self.first_process_object.get_chapter_to_delete()
+        # )
         print("Finished looking for chapter dupes.")
 
 
@@ -2163,7 +2180,6 @@ def main(db_connection: Optional[sqlite3.Connection] = None, clean_db=False):
     # Start deleting expired chapters
     first_process_object = ChapterDeleterProcess(
         session=session,
-        posted_chapters=[dict(k) for k in posted_chapters_data],
         md_auth_object=md_auth_object,
     )
     first_process = first_process_object.delete_async()
