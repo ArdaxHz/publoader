@@ -7,13 +7,14 @@ import math
 import multiprocessing
 import re
 import sqlite3
+from ssl import SSLError
 import string
 import sys
 import time
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Dict, List, Literal, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 
 import requests
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
@@ -30,7 +31,7 @@ from webhook import webhook as WEBHOOK
 
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
-__version__ = "1.6.4"
+__version__ = "1.6.5"
 
 mplus_language_map = {
     "0": "en",
@@ -358,12 +359,15 @@ def update_database(
     succesful_upload_id: Optional[str] = None,
 ):
     """Update the database with the new chapter."""
-
     if isinstance(chapter, Chapter):
         chapter = vars(chapter)
 
     if succesful_upload_id is None:
         succesful_upload_id = chapter.get("md_chapter_id")
+
+    if succesful_upload_id is None:
+        logging.error(f"md_chapter_id to update the database with is null: {chapter}")
+        return
 
     mplus_chapter_id = chapter.get("chapter_id")
 
@@ -1962,13 +1966,10 @@ class DeleteDuplicatesMD:
                 volume_itter = aggregate_chapters[volume]["chapters"]
             elif isinstance(aggregate_chapters, list):
                 volume_itter = volume["chapters"]
-                for chapter in volume["chapters"]:
-                    if chapter["count"] > 1:
-                        to_check.append(chapter)
 
             for chapter in volume_itter:
                 if isinstance(chapter, str):
-                    chapter_itter = aggregate_chapters[volume]["chapters"][chapter]
+                    chapter_itter = volume_itter[chapter]
                 elif isinstance(chapter, (list, dict)):
                     chapter_itter = chapter
 
@@ -2098,7 +2099,7 @@ class DeleteDuplicatesMD:
                         dupes_webhook.init_manga(manga_data.get(manga_id))
 
                     chapters_to_delete = self.check_chapters(chapters_md, dupes_webhook)
-                    chapters_to_delete_list: List[Dict[str, str]] = [
+                    chapters_to_delete_list: List[dict] = [
                         {
                             "md_chapter_id": c["id"],
                             "md_manga_id": manga_id,
