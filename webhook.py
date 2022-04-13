@@ -398,6 +398,7 @@ class MPlusBotWebhook(WebhookHelper):
         webhook.add_embed(self.embed)
 
     def send(self, **kwargs):
+        self.main()
         self.send_webhook()
 
 

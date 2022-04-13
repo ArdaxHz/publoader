@@ -31,7 +31,7 @@ from webhook import webhook as WEBHOOK
 
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
-__version__ = "1.6.6"
+__version__ = "1.6.7"
 
 mplus_language_map = {
     "0": "en",
@@ -654,7 +654,8 @@ class ChapterDeleterProcess:
         self.on_db = on_db
         self.posted_chapters = posted_chapters
         self.md_auth_object = md_auth_object
-        self.chapters_to_delete = self.get_chapter_to_delete()
+        self.chapters_to_delete = multiprocessing_manager.list()
+        self.chapters_to_delete.extend(self.get_chapter_to_delete())
         self.chapter_delete_ratelimit = 8
         self.chapter_delete_process = None
 
@@ -752,10 +753,11 @@ class ChapterDeleterProcess:
             LOGGER.info(f"Started deleting expired chapters process.")
             print("Deleting expired chapters.")
 
-        for count, chapter_to_delete in enumerate(self.chapters_to_delete[:], start=1):
+        _local_list = list(self.chapters_to_delete)
+        for count, chapter_to_delete in enumerate(_local_list, start=1):
             self.md_auth_object.login()
             self._remove_old_chapter(chapter_to_delete)
-            looped_all = count == len(self.chapters_to_delete)
+            looped_all = count == len(_local_list)
 
             try:
                 self.chapters_to_delete.remove(chapter_to_delete)
@@ -1609,7 +1611,7 @@ class MPlusAPI:
                     title="Untracked Manga",
                     description="\n".join(
                         [
-                            f"{manga.manga_id}: {manga.manga_name}"
+                            f"`{manga.manga_id}`: `{manga.manga_name}`"
                             for manga in self.untracked_manga
                         ]
                     ),
