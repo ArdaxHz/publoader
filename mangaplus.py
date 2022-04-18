@@ -31,7 +31,7 @@ from webhook import webhook as WEBHOOK
 
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
-__version__ = "1.6.7"
+__version__ = "1.6.8"
 
 mplus_language_map = {
     "0": "en",
@@ -1828,6 +1828,10 @@ class MPlusAPI:
                 chapter_number = f"{chapter_number}.{chapter_decimal}"
         elif chapter_number.lower() in ("one-shot", "one.shot"):
             chapter_number = None
+        elif chapter_number.lower().startswith(("spin-off", "spin.off")):
+            chapter_number = re.sub(
+                r"(?:spin\-off|spin\.off)\s?", "", chapter_number.lower(), re.I
+            ).strip()
 
         if chapter_number is None:
             chapter_number_split = [chapter_number]
