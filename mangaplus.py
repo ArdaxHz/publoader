@@ -7,14 +7,13 @@ import math
 import multiprocessing
 import re
 import sqlite3
-from ssl import SSLError
 import string
 import sys
 import time
 from dataclasses import dataclass, field, replace
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Dict, List, Literal, Optional, Union
 
 import requests
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
@@ -31,7 +30,7 @@ from webhook import webhook as WEBHOOK
 
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
-__version__ = "1.6.8"
+__version__ = "1.6.9"
 
 mplus_language_map = {
     "0": "en",
@@ -746,26 +745,26 @@ class ChapterDeleterProcess:
             self._delete_from_database(chapter)
         time.sleep(self.chapter_delete_ratelimit)
 
-    def _delete_expired_chapters(self):
+    def _delete_expired_chapters(self, chapters_to_delete):
         """Delete expired chapters from mangadex."""
         looped_all = False
-        if self.chapters_to_delete:
+        if chapters_to_delete:
             LOGGER.info(f"Started deleting expired chapters process.")
             print("Deleting expired chapters.")
 
-        _local_list = list(self.chapters_to_delete)
+        _local_list = [dict(t) for t in {tuple(d.items()) for d in chapters_to_delete}]
         for count, chapter_to_delete in enumerate(_local_list, start=1):
             self.md_auth_object.login()
             self._remove_old_chapter(chapter_to_delete)
             looped_all = count == len(_local_list)
 
             try:
-                self.chapters_to_delete.remove(chapter_to_delete)
+                chapters_to_delete.remove(chapter_to_delete)
             except ValueError:
                 pass
 
         if looped_all:
-            self.chapters_to_delete = []
+            chapters_to_delete = multiprocessing_manager.list()
 
     def add_more_chapters(
         self, chapters_to_add: List[dict], on_db: bool = True
@@ -793,7 +792,7 @@ class ChapterDeleterProcess:
         """Delete chapters non-concurrently."""
         if self.chapters_to_delete:
             self.md_auth_object.login()
-            self._delete_expired_chapters()
+            self._delete_expired_chapters(self.chapters_to_delete)
 
     def delete_async(self) -> multiprocessing.Process:
         """Delete chapters concurrently."""
@@ -801,7 +800,7 @@ class ChapterDeleterProcess:
             self.md_auth_object.login()
 
         self.chapter_delete_process = multiprocessing.Process(
-            target=self._delete_expired_chapters
+            target=self._delete_expired_chapters, args=(self.chapters_to_delete,)
         )
         self.chapter_delete_process.start()
         return self.chapter_delete_process
@@ -1631,7 +1630,8 @@ class MPlusAPI:
         self.all_mplus_chapters = multiprocessing_manager.list()
         for mangas in spliced_manga:
             process = multiprocessing.Process(
-                target=self._chapter_updates, args=(mangas,)
+                target=self._chapter_updates,
+                args=(mangas, self.updated_chapters, self.all_mplus_chapters),
             )
             process.start()
             processes.append(process)
@@ -1659,7 +1659,9 @@ class MPlusAPI:
             for chapter in chapter_list
         ]
 
-    def _chapter_updates(self, mangas: list):
+    def _chapter_updates(
+        self, mangas: list, updated_chapters_list, all_mplus_chapters_list
+    ):
         """Get the updated chapters from each manga."""
         for manga in mangas:
             manga_response = self._request_from_api(manga_id=manga)
@@ -1692,7 +1694,7 @@ class MPlusAPI:
             all_chapters = self.get_latest_chapters(
                 manga_chapters_lists, self.posted_chapters_ids, True
             )
-            self.all_mplus_chapters.extend(all_chapters)
+            all_mplus_chapters_list.extend(all_chapters)
 
             updated_chapters = self.get_latest_chapters(
                 manga_chapters_lists, self.posted_chapters_ids
@@ -1706,7 +1708,7 @@ class MPlusAPI:
                         f"--Found {update.chapter_id}, chapter: {update.chapter_number}, language: {update.chapter_language}, title: {update.chapter_title}."
                     )
 
-            self.updated_chapters.extend(
+            updated_chapters_list.extend(
                 [
                     chapter
                     for chapter in updated_chapters

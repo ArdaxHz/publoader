@@ -128,18 +128,19 @@ class WebhookHelper:
         return {"name": name, "value": value}
 
     def send_webhook(self, local_webhook: DiscordWebhook = webhook):
-        response = local_webhook.execute(remove_embeds=True)
-        try:
-            if isinstance(response, list):
-                status_codes = [r.status_code for r in response]
-                messages = [r.json() for r in response]
-                LOGGER.info(f"Discord API returned: {status_codes}, {messages}")
-            else:
-                LOGGER.info(
-                    f"Discord API returned: {response.status_code}, {response.json()}"
-                )
-        except (JSONDecodeError, AttributeError, KeyError) as e:
-            LOGGER.error(e)
+        if local_webhook.embeds:
+            response = local_webhook.execute(remove_embeds=True)
+            try:
+                if isinstance(response, list):
+                    status_codes = [r.status_code for r in response]
+                    messages = [r.json() for r in response]
+                    LOGGER.info(f"Discord API returned: {status_codes}, {messages}")
+                else:
+                    LOGGER.info(
+                        f"Discord API returned: {response.status_code}, {response.json()}"
+                    )
+            except (JSONDecodeError, AttributeError, KeyError) as e:
+                LOGGER.error(e)
 
 
 class WebhookBase(WebhookHelper):
