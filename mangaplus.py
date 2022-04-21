@@ -30,7 +30,7 @@ from webhook import webhook as WEBHOOK
 
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
-__version__ = "1.6.9"
+__version__ = "1.7.0"
 
 mplus_language_map = {
     "0": "en",
@@ -66,9 +66,9 @@ def setup_logs():
     fileh.setFormatter(formatter)
 
     log = logging.getLogger(__name__)  # root logger
-    for hdlr in log.handlers[:]:  # remove all old handlers
-        if isinstance(hdlr, logging.FileHandler):
-            log.removeHandler(hdlr)
+    # for hdlr in log.handlers[:]:  # remove all old handlers
+    #     if isinstance(hdlr, logging.FileHandler):
+    #         log.removeHandler(hdlr)
     log.addHandler(fileh)
     log.setLevel(logging.DEBUG)
 
@@ -101,6 +101,10 @@ def load_config_info(config: configparser.RawConfigParser):
     if config["Paths"].get("components_path", "") == "":
         LOGGER.info("components path empty, using default.")
         config["Paths"]["components_path"] = "components_path"
+
+    if config["Paths"].get("manga_data_path", "") == "":
+        LOGGER.info("Manga data path empty, using default.")
+        config["Paths"]["manga_data_path"] = "manga_data.json"
 
 
 def open_config_file() -> configparser.RawConfigParser:
@@ -452,6 +456,20 @@ def open_title_regex(title_regex_path: Path) -> dict:
     return title_regexes
 
 
+def open_manga_data(manga_data_path: Path) -> Dict[str, dict]:
+    """Open mangaplus id to mangadex id map."""
+    manga_data = {}
+    try:
+        with open(manga_data_path, "r") as manga_data_fp:
+            manga_data = json.load(manga_data_fp)
+        LOGGER.info("Opened manga data file.")
+    except json.JSONDecodeError as e:
+        LOGGER.error("Manga data file is corrupted.")
+    except FileNotFoundError:
+        LOGGER.error("Manga data file is missing.")
+    return manga_data
+
+
 class AuthMD:
     def __init__(self, session: requests.Session, config: configparser.RawConfigParser):
         self.session = session
@@ -764,11 +782,12 @@ class ChapterDeleterProcess:
                 pass
 
         if looped_all:
-            chapters_to_delete = multiprocessing_manager.list()
+            del chapters_to_delete[:]
 
     def add_more_chapters(
         self, chapters_to_add: List[dict], on_db: bool = True
     ) -> Optional["ChapterDeleterProcess"]:
+        """Extend the list of chapters to delete with another list."""
         self.on_db = on_db
 
         if self.chapter_delete_process is None:
@@ -1219,6 +1238,7 @@ class MangaUploaderProcess:
 class BotProcess:
     def __init__(
         self,
+        config: configparser.RawConfigParser,
         session: requests.Session,
         updates: List[Chapter],
         all_mplus_chapters: List[Chapter],
@@ -1229,7 +1249,9 @@ class BotProcess:
         same_chapter_dict: Dict[str, List[int]],
         clean_db: bool,
         posted_chapters_data: List[dict],
+        manga_data_local: Dict[str, dict],
     ):
+        self.config = config
         self.session = session
         self.updates = updates
         self.all_mplus_chapters = all_mplus_chapters
@@ -1242,13 +1264,15 @@ class BotProcess:
         self.posted_chapters_data = posted_chapters_data
         self.processes: List[multiprocessing.Process] = []
         self.posted_md_updates: List[Chapter] = []
-        self.md_manga_objs = {}
+        self.md_manga_objs = manga_data_local
         self.mplus_group_chapters = self._get_mplus_chapters()
         self.manga_untracked = [
             m
             for m in list(self.mplus_group_chapters.keys())
             if m not in list(self.manga_id_map.keys())
         ]
+
+        self._get_manga_data_md()
 
         LOGGER.info(f"Manga not tracked but on mangadex: {self.manga_untracked}")
 
@@ -1307,8 +1331,8 @@ class BotProcess:
                         chapters_to_delete
                     )
 
-    def _get_chapters(self, params: dict) -> List[dict]:
-        """Go through each page in the api to get all the chapters."""
+    def _get_md_api(self, route: str, params: dict) -> List[dict]:
+        """Go through each page in the api to get all the chapters/manga."""
         chapters = []
         limit = 100
         offset = 0
@@ -1332,7 +1356,7 @@ class BotProcess:
             # Call the api and get the json data
             try:
                 chapters_response = self.session.get(
-                    f"{mangadex_api_url}/chapter", params=parameters, verify=False
+                    f"{mangadex_api_url}/{route}", params=parameters, verify=False
                 )
             except requests.RequestException as e:
                 LOGGER.error(e)
@@ -1343,14 +1367,14 @@ class BotProcess:
                 continue
 
             if chapters_response.status_code != 200:
-                manga_response_message = f"Couldn't get the chapters of the group."
+                manga_response_message = f"Couldn't get the {route}s of the group."
                 print_error(chapters_response, log_error=True)
                 LOGGER.error(manga_response_message)
                 continue
 
             chapters_response_data = convert_json(chapters_response)
             if chapters_response_data is None:
-                LOGGER.warning(f"Couldn't convert chapters data into json, retrying.")
+                LOGGER.warning(f"Couldn't convert {route}s data into json, retrying.")
                 continue
 
             chapters.extend(chapters_response_data["data"])
@@ -1366,7 +1390,7 @@ class BotProcess:
                 if chapters_count > limit:
                     pages = math.ceil(chapters_count / limit)
 
-                LOGGER.debug(f"{pages} page(s) for group chapters.")
+                LOGGER.debug(f"{pages} page(s) for group {route}s.")
 
             # Wait every 5 pages
             if iteration % 5 == 0 and pages != 5:
@@ -1381,7 +1405,7 @@ class BotProcess:
                 or not chapters_response_data["data"]
             ):
                 if chapters_count >= 10000 and offset == 10000:
-                    LOGGER.debug("Reached 10k chapters, looping over next 10k.")
+                    LOGGER.debug(f"Reached 10k {route}s, looping over next 10k.")
                     created_at_since_time = chapters[-1]["attributes"][
                         "createdAt"
                     ].split("+")[0]
@@ -1400,12 +1424,13 @@ class BotProcess:
     def _get_mplus_chapters(self) -> Dict[str, List[dict]]:
         LOGGER.debug("Getting all m+'s uploaded chapters.")
         print("Getting the mangaplus chapters on mangadex.")
-        chapters_unsorted = self._get_chapters(
+        chapters_unsorted = self._get_md_api(
+            "chapter",
             params={
                 "groups[]": [MPLUS_GROUP_ID],
                 "order[createdAt]": "desc",
                 "includes[]": ["manga"],
-            }
+            },
         )
 
         LOGGER.debug("Sorting the uploaded chapters by MD ID.")
@@ -1418,10 +1443,46 @@ class BotProcess:
                 chapters_sorted[manga_id].append(chapter)
             except (KeyError, ValueError, AttributeError):
                 chapters_sorted[manga_id] = [chapter]
-
-            if manga_id not in self.md_manga_objs:
-                self.md_manga_objs.update({manga_id: manga})
         return chapters_sorted
+
+    def _get_manga_data_md(self) -> Dict[str, dict]:
+        """Get the manga data from mangadex if needed and sort by manga id."""
+        get_manga_data = []
+
+        tracked_manga = self.manga_id_map.keys()
+        for tracked in tracked_manga:
+            if tracked not in self.md_manga_objs.keys():
+                get_manga_data.append(tracked)
+
+        if get_manga_data:
+            tracked_manga_splice = [
+                get_manga_data[l : l + 100] for l in range(0, len(get_manga_data), 100)
+            ]
+
+            tracked_manga_data = []
+
+            for manga_splice in tracked_manga_splice:
+                tracked_manga_data.extend(
+                    self._get_md_api(
+                        "manga",
+                        params={
+                            "ids[]": manga_splice,
+                            "order[createdAt]": "desc",
+                        },
+                    )
+                )
+
+            for manga in tracked_manga_data:
+                manga_id = manga["id"]
+                if manga_id not in self.md_manga_objs:
+                    self.md_manga_objs.update({manga_id: manga})
+
+            with open(
+                components_path.joinpath(self.config["Paths"]["manga_data_path"]), "w"
+            ) as json_file:
+                json.dump(self.md_manga_objs, json_file, indent=2)
+
+        return self.md_manga_objs
 
     def _sort_chapters_by_manga(
         self, updates: List[Chapter]
@@ -1477,12 +1538,13 @@ class BotProcess:
 
             for uploaded_ids in uploaded_chapter_ids_split:
                 chapters_on_md.extend(
-                    self._get_chapters(
+                    self._get_md_api(
+                        "chapter",
                         params={
                             "ids[]": uploaded_ids,
                             "order[createdAt]": "desc",
                             "includes[]": ["manga"],
-                        }
+                        },
                     )
                 )
 
@@ -2158,6 +2220,9 @@ def main(db_connection: Optional[sqlite3.Connection] = None, clean_db=False):
     title_regexes = open_title_regex(
         components_path.joinpath(config["Paths"]["title_regex_path"])
     )
+    manga_data_local = open_manga_data(
+        components_path.joinpath(config["Paths"]["manga_data_path"])
+    )
 
     if db_connection is not None:
         database_connection = db_connection
@@ -2209,6 +2274,7 @@ def main(db_connection: Optional[sqlite3.Connection] = None, clean_db=False):
         while True:
             try:
                 BotProcess(
+                    config,
                     session,
                     updates,
                     all_mplus_chapters,
@@ -2219,6 +2285,7 @@ def main(db_connection: Optional[sqlite3.Connection] = None, clean_db=False):
                     title_regexes.get("same", {}),
                     clean_db,
                     posted_chapters_data,
+                    manga_data_local,
                 ).upload_chapters()
             except (requests.RequestException, sqlite3.OperationalError) as e:
                 LOGGER.error(e)
@@ -2228,18 +2295,18 @@ def main(db_connection: Optional[sqlite3.Connection] = None, clean_db=False):
         print("Uploaded all update(s).")
 
     if clean_db:
-        try:
-            dupes_deleter = DeleteDuplicatesMD(
-                session, manga_id_map, first_process_object, database_connection
-            )
-            dupes_deleter.delete_dupes()
-        except (UnboundLocalError, TypeError, IndexError, KeyError, ValueError) as e:
-            print(
-                "Error on line {}".format(sys.exc_info()[-1].tb_lineno),
-                type(e).__name__,
-                e,
-            )
-            LOGGER.error(e)
+        # try:
+        dupes_deleter = DeleteDuplicatesMD(
+            session, manga_id_map, first_process_object, database_connection
+        )
+        dupes_deleter.delete_dupes()
+        # except (UnboundLocalError, TypeError, IndexError, KeyError, ValueError) as e:
+        #     print(
+        #         "Error on line {}".format(sys.exc_info()[-1].tb_lineno),
+        #         type(e).__name__,
+        #         e,
+        #     )
+        #     LOGGER.error(e)
 
     if first_process is not None:
         first_process.join()

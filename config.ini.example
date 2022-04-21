@@ -9,6 +9,7 @@ UPLOAD_RETRY=3
 BOT_RUN_TIME_DAILY=15:10
 BOT_RUN_TIME_CHECKS=00:00
 
+# All file paths are joined under the components path
 [Paths]
 MANGADEX_API_URL=https://api.mangadex.org
 COMPONENTS_PATH=components
@@ -17,3 +18,4 @@ MANGA_ID_MAP_PATH=manga.json
 TITLE_REGEX_PATH=title_regex.json
 MDAUTH_PATH=.mdauth
 WEBHOOK_URL=
+MANGA_DATA_PATH=manga_data.json

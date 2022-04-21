@@ -30,9 +30,9 @@ def setup_logs():
     fileh.setFormatter(formatter)
 
     log = logging.getLogger(__name__)  # root logger
-    for hdlr in log.handlers[:]:  # remove all old handlers
-        if isinstance(hdlr, logging.FileHandler):
-            log.removeHandler(hdlr)
+    # for hdlr in log.handlers[:]:  # remove all old handlers
+    #     if isinstance(hdlr, logging.FileHandler):
+    #         log.removeHandler(hdlr)
     log.addHandler(fileh)
     log.setLevel(logging.DEBUG)
 
@@ -241,7 +241,7 @@ class MPlusBotUpdatesWebhook(WebhookBase):
             if list:
                 webhook.add_embed(embed)
 
-            if len(webhook.embeds) == 10:
+            if len(webhook.embeds) == 10 or len(embed.fields) >= 5:
                 self.send_webhook()
 
     def main(self, last_manga: bool = True):
@@ -321,13 +321,10 @@ class MPlusBotDupesWebhook(WebhookBase):
 class MPlusBotDeleterWebhook(WebhookHelper):
     def __init__(self, chapter: dict) -> None:
         super().__init__()
-
         self.colour = "C43542"
         self.chapter = chapter
         self.webhook = make_webhook()
-        self.normalised_chapter = self.normalise_chapter(
-            self.chapter, failed_upload=True
-        )
+        self.normalised_chapter = self.normalise_chapter(self.chapter)
 
     def make_embed(self):
         embed = DiscordEmbed(
