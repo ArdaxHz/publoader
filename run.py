@@ -6,7 +6,7 @@ from datetime import time as dtTime
 from datetime import timezone
 from pathlib import Path
 
-from scheduler import Scheduler
+from scheduler import Scheduler, trigger
 
 root_path = Path(".")
 config_file_path = root_path.joinpath("config").with_suffix(".ini")
@@ -61,6 +61,17 @@ if __name__ == "__main__":
     main()
     print("End of initial run, starting scheduler.")
     schedule = Scheduler(tzinfo=timezone.utc)
+    schedule.weekly(
+        trigger.Wednesday(
+            dtTime(
+                hour=daily_run_time_checks_hour,
+                minute=daily_run_time_checks_minute,
+                tzinfo=timezone.utc,
+            ),
+        ),
+        clean_db,
+        weight=8,
+    )
     schedule.daily(
         dtTime(
             hour=daily_run_time_daily_hour,
@@ -68,6 +79,7 @@ if __name__ == "__main__":
             tzinfo=timezone.utc,
         ),
         main,
+        weight=9,
     )
     schedule.daily(
         dtTime(
@@ -75,7 +87,8 @@ if __name__ == "__main__":
             minute=daily_run_time_checks_minute,
             tzinfo=timezone.utc,
         ),
-        clean_db,
+        main,
+        weight=1,
     )
 
     while True:

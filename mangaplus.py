@@ -30,7 +30,7 @@ from webhook import webhook as WEBHOOK
 
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
-__version__ = "1.7.0"
+__version__ = "1.7.1"
 
 mplus_language_map = {
     "0": "en",
@@ -671,8 +671,10 @@ class ChapterDeleterProcess:
         self.on_db = on_db
         self.posted_chapters = posted_chapters
         self.md_auth_object = md_auth_object
-        self.chapters_to_delete = multiprocessing_manager.list()
-        self.chapters_to_delete.extend(self.get_chapter_to_delete())
+        self.chapters_to_delete = chapters_to_delete
+        self.chapters_to_delete.extend(
+            self.get_chapter_to_delete(posted_chapters == [])
+        )
         self.chapter_delete_ratelimit = 8
         self.chapter_delete_process = None
 
@@ -689,9 +691,9 @@ class ChapterDeleterProcess:
             for k in database_connection.execute("SELECT * FROM chapters").fetchall()
         ]
 
-    def get_chapter_to_delete(self) -> List[dict]:
+    def get_chapter_to_delete(self, database=False) -> List[dict]:
         """Get only the expired chapters from the total chapters list."""
-        if self.posted_chapters:
+        if database:
             posted_chapters = self.posted_chapters
         else:
             posted_chapters = self._get_all_chapters()
@@ -763,26 +765,26 @@ class ChapterDeleterProcess:
             self._delete_from_database(chapter)
         time.sleep(self.chapter_delete_ratelimit)
 
-    def _delete_expired_chapters(self, chapters_to_delete):
+    def _delete_expired_chapters(self):
         """Delete expired chapters from mangadex."""
         looped_all = False
-        if chapters_to_delete:
+        if self.chapters_to_delete:
             LOGGER.info(f"Started deleting expired chapters process.")
             print("Deleting expired chapters.")
 
-        _local_list = [dict(t) for t in {tuple(d.items()) for d in chapters_to_delete}]
+        _local_list = self.chapters_to_delete[:]
         for count, chapter_to_delete in enumerate(_local_list, start=1):
             self.md_auth_object.login()
             self._remove_old_chapter(chapter_to_delete)
             looped_all = count == len(_local_list)
 
             try:
-                chapters_to_delete.remove(chapter_to_delete)
+                self.chapters_to_delete.remove(chapter_to_delete)
             except ValueError:
                 pass
 
         if looped_all:
-            del chapters_to_delete[:]
+            del self.chapters_to_delete[:]
 
     def add_more_chapters(
         self, chapters_to_add: List[dict], on_db: bool = True
@@ -798,20 +800,15 @@ class ChapterDeleterProcess:
             )
             return second_process_object
         else:
+            self.chapters_to_delete.extend(chapters_to_add)
             if not self.chapter_delete_process.is_alive():
-                if not self.chapters_to_delete:
-                    self.chapters_to_delete = chapters_to_add
-                else:
-                    self.chapters_to_delete.extend(chapters_to_add)
                 self.delete_async()
-            else:
-                self.chapters_to_delete.extend(chapters_to_add)
 
     def delete(self):
         """Delete chapters non-concurrently."""
         if self.chapters_to_delete:
             self.md_auth_object.login()
-            self._delete_expired_chapters(self.chapters_to_delete)
+            self._delete_expired_chapters()
 
     def delete_async(self) -> multiprocessing.Process:
         """Delete chapters concurrently."""
@@ -819,7 +816,7 @@ class ChapterDeleterProcess:
             self.md_auth_object.login()
 
         self.chapter_delete_process = multiprocessing.Process(
-            target=self._delete_expired_chapters, args=(self.chapters_to_delete,)
+            target=self._delete_expired_chapters
         )
         self.chapter_delete_process.start()
         return self.chapter_delete_process
@@ -1315,21 +1312,10 @@ class BotProcess:
                     md_auth_object=self.md_auth_object,
                 )
                 self.second_process_object.delete()
-            else:
-                if not self.deleter_process_object.chapter_delete_process.is_alive():
-                    if not self.deleter_process_object.chapters_to_delete:
-                        self.deleter_process_object.chapters_to_delete = (
-                            chapters_to_delete
-                        )
-                    else:
-                        self.deleter_process_object.chapters_to_delete.extend(
-                            chapters_to_delete
-                        )
-                    self.deleter_process_object.delete_async()
-                else:
-                    self.deleter_process_object.chapters_to_delete.extend(
-                        chapters_to_delete
-                    )
+        else:
+            self.deleter_process_object.chapters_to_delete.extend(chapters_to_delete)
+            if not self.deleter_process_object.chapter_delete_process.is_alive():
+                self.deleter_process_object.delete_async()
 
     def _get_md_api(self, route: str, params: dict) -> List[dict]:
         """Go through each page in the api to get all the chapters/manga."""
@@ -2003,12 +1989,12 @@ class DeleteDuplicatesMD:
         self,
         session: requests.Session,
         manga_id_map: Dict[str, List[int]],
-        first_process_object: "ChapterDeleterProcess",
+        deleter_process_object: "ChapterDeleterProcess",
         database_connection: sqlite3.Connection,
     ) -> None:
         self.session = session
         self.manga_id_map = manga_id_map
-        self.first_process_object = first_process_object
+        self.deleter_process_object = deleter_process_object
         self.database_connection = database_connection
         self.tracked_mangadex_ids = list(manga_id_map.keys())
         self.languages = list(set(mplus_language_map.values()))
@@ -2054,7 +2040,7 @@ class DeleteDuplicatesMD:
             for chapter in volume_itter:
                 if isinstance(chapter, str):
                     chapter_itter = volume_itter[chapter]
-                elif isinstance(chapter, (list, dict)):
+                elif isinstance(chapter, dict):
                     chapter_itter = chapter
 
                 if chapter_itter["count"] > 1:
@@ -2194,7 +2180,7 @@ class DeleteDuplicatesMD:
                         }
                         for c in chapters_to_delete
                     ]
-                    self.first_process_object.add_more_chapters(chapters_to_delete_list)
+                    # self.deleter_process_object.add_more_chapters(chapters_to_delete_list)
                     for to_delete in chapters_to_delete_list:
                         update_database(self.database_connection, to_delete)
                 if lang_index % 4 == 0:
@@ -2205,9 +2191,11 @@ class DeleteDuplicatesMD:
             if mang_index % 4 == 0:
                 time.sleep(RATELIMIT_TIME)
 
-        # self.first_process_object.chapters_to_delete = (
-        #     self.first_process_object.get_chapter_to_delete()
-        # )
+        self.deleter_process_object.chapters_to_delete.extend(
+            self.deleter_process_object.get_chapter_to_delete(True)
+        )
+        if not self.deleter_process_object.chapter_delete_process.is_alive():
+            self.deleter_process_object.delete_async()
         print("Finished looking for chapter dupes.")
 
 
@@ -2326,6 +2314,7 @@ def main(db_connection: Optional[sqlite3.Connection] = None, clean_db=False):
 if __name__ == "__main__":
 
     multiprocessing_manager = multiprocessing.Manager()
+    chapters_to_delete = multiprocessing_manager.list()
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
