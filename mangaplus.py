@@ -1800,7 +1800,7 @@ class MPlusAPI:
 
     def _strip_chapter_number(self, number: Union[str, int]) -> str:
         """Returns the chapter number without the un-needed # or 0."""
-        stripped = str(number).strip("#")
+        stripped = str(number).strip().strip("#")
 
         parts = re.split(r"\.|\-", stripped)
         parts[0] = "0" if len(parts[0].lstrip("0")) == 0 else parts[0].lstrip("0")
