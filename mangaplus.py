@@ -1604,6 +1604,11 @@ class MPlusAPI:
         response.ParseFromString(response_proto)
         return response
 
+    def _get_language(self, manga_id: int, language: str):
+        if str(manga_id) in self.title_regexes.get("custom_language", {}):
+            return self.title_regexes["custom_language"][str(manga_id)]
+        return language
+
     def _request_from_api(
         self, manga_id: Optional[int] = None, updated: Optional[bool] = False
     ) -> Optional[bytes]:
@@ -1642,7 +1647,9 @@ class MPlusAPI:
                 if manga.updated_manga.manga_id not in self.tracked_manga:
                     manga_id = manga.updated_manga.manga_id
                     manga_name = manga.updated_manga.manga_name
-                    language = manga.updated_manga.language
+                    language = self._get_language(
+                        manga_id, manga.updated_manga.language
+                    )
                     self.untracked_manga.append(
                         Manga(
                             manga_id=manga_id,
@@ -1699,7 +1706,9 @@ class MPlusAPI:
                 chapter_title=chapter.chapter_name,
                 chapter_expire=chapter.end_timestamp,
                 chapter_number=chapter.chapter_number,
-                chapter_language=manga_object.manga_language,
+                chapter_language=self._get_language(
+                    manga_object.manga_id, manga_object.manga_language
+                ),
                 manga_id=manga_object.manga_id,
                 md_manga_id=get_md_id(self.manga_id_map, manga_object.manga_id),
                 manga=manga_object,
@@ -1722,7 +1731,9 @@ class MPlusAPI:
             manga_object = Manga(
                 manga_id=manga_chapters.manga.manga_id,
                 manga_name=manga_chapters.manga.manga_name,
-                manga_language=manga_chapters.manga.language,
+                manga_language=self._get_language(
+                    manga_chapters.manga.manga_id, manga_chapters.manga.language
+                ),
             )
 
             manga_chapters_lists = []
