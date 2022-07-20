@@ -30,7 +30,7 @@ from webhook import webhook as WEBHOOK
 
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
-__version__ = "1.7.1"
+__version__ = "1.7.2"
 
 mplus_language_map = {
     "0": "en",
@@ -66,9 +66,9 @@ def setup_logs():
     fileh.setFormatter(formatter)
 
     log = logging.getLogger(__name__)  # root logger
-    # for hdlr in log.handlers[:]:  # remove all old handlers
-    #     if isinstance(hdlr, logging.FileHandler):
-    #         log.removeHandler(hdlr)
+    for hdlr in log.handlers[:]:  # remove all old handlers
+        if isinstance(hdlr, logging.FileHandler):
+            log.removeHandler(hdlr)
     log.addHandler(fileh)
     log.setLevel(logging.DEBUG)
 

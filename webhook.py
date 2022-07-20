@@ -30,9 +30,9 @@ def setup_logs():
     fileh.setFormatter(formatter)
 
     log = logging.getLogger(__name__)  # root logger
-    # for hdlr in log.handlers[:]:  # remove all old handlers
-    #     if isinstance(hdlr, logging.FileHandler):
-    #         log.removeHandler(hdlr)
+    for hdlr in log.handlers[:]:  # remove all old handlers
+        if isinstance(hdlr, logging.FileHandler):
+            log.removeHandler(hdlr)
     log.addHandler(fileh)
     log.setLevel(logging.DEBUG)
 
@@ -150,6 +150,7 @@ class WebhookBase(WebhookHelper):
     ) -> None:
         super().__init__()
         self.manga = manga
+        LOGGER.debug(f"Making embed for manga {self.manga}")
         self.manga_id = manga["id"]
         self.manga_title = self.format_title()
 
