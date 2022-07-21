@@ -30,7 +30,7 @@ from webhook import webhook as WEBHOOK
 
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
-__version__ = "1.7.2"
+__version__ = "1.7.3"
 
 mplus_language_map = {
     "0": "en",
@@ -369,7 +369,7 @@ def update_database(
         succesful_upload_id = chapter.get("md_chapter_id")
 
     if succesful_upload_id is None:
-        logging.error(f"md_chapter_id to update the database with is null: {chapter}")
+        LOGGER.error(f"md_chapter_id to update the database with is null: {chapter}")
         return
 
     mplus_chapter_id = chapter.get("chapter_id")
@@ -1130,6 +1130,8 @@ class MangaUploaderProcess:
         self.mangadex_manga_data: dict = kwargs["mangadex_manga_data"]
         self.posted_chapters: List[Chapter] = []
         self.failed_uploads: List[Chapter] = []
+        self.custom_series_language: Dict[str, str] = kwargs["custom_series_language"]
+        self.database_chapters: List[dict] = kwargs["posted_chapters_data"]
 
         self.second_process = None
         self.second_process_object = None
@@ -1139,13 +1141,38 @@ class MangaUploaderProcess:
 
     def _remove_chapters_not_mplus(self) -> List[dict]:
         """Find chapters on MangaDex not on MangaPlus."""
-        md_chapters_not_mplus = [
-            c
-            for c in self.manga_chapters
-            if c["attributes"]["chapter"]
-            not in [x.chapter_number for x in self.chapters_all]
-            or c["attributes"]["translatedLanguage"] not in mplus_language_map.values()
-        ]
+        md_chapters_not_mplus = []
+        none_ids = []
+        for chap in self.chapters_all:
+            for cha in self.manga_chapters:
+                if chap.chapter_id is not None:
+                    if str(chap.chapter_id) not in cha["attributes"]["externalUrl"]:
+                        md_chapters_not_mplus.append(cha)
+                        break
+                else:
+                    none_ids.append(cha)
+                    break
+
+        md_chapters_not_mplus.extend(
+            [
+                c
+                for c in none_ids
+                if c["attributes"]["chapter"]
+                not in [x.chapter_number for x in self.chapters_all]
+                or c["attributes"]["translatedLanguage"]
+                not in list(
+                    set(
+                        mplus_language_map.values()
+                        + self.custom_series_language.values()
+                    )
+                )
+            ]
+        )
+
+        LOGGER.info(
+            f"{self.__class__.__name__} deleter finder found: {md_chapters_not_mplus}"
+        )
+
         chapters_to_delete = []
         for expired in md_chapters_not_mplus:
             md_chapter_id = expired["id"]
@@ -1243,7 +1270,7 @@ class BotProcess:
         md_auth_object: AuthMD,
         manga_id_map: Dict[str, List[int]],
         database_connection: sqlite3.Connection,
-        same_chapter_dict: Dict[str, List[int]],
+        title_regexes: Dict[str, List[int]],
         clean_db: bool,
         posted_chapters_data: List[dict],
         manga_data_local: Dict[str, dict],
@@ -1256,7 +1283,10 @@ class BotProcess:
         self.md_auth_object = md_auth_object
         self.manga_id_map = manga_id_map
         self.database_connection = database_connection
-        self.same_chapter_dict = same_chapter_dict
+        self.title_regexes = title_regexes
+        self.same_chapter_dict: Dict[str, List[int]] = self.title_regexes.get(
+            "same", {}
+        )
         self.clean_db = clean_db
         self.posted_chapters_data = posted_chapters_data
         self.processes: List[multiprocessing.Process] = []
@@ -1301,6 +1331,9 @@ class BotProcess:
 
     def _delete_extra_chapters(self):
         chapters_to_delete = self._remove_chapters_not_mplus()
+        LOGGER.info(
+            f"{self.__class__.__name__} deleter finder found: {chapters_to_delete}"
+        )
         if chapters_to_delete:
             if (
                 self.deleter_process_object is None
@@ -1568,6 +1601,8 @@ class BotProcess:
                 posted_md_updates=self.posted_md_updates,
                 same_chapter_dict=self.same_chapter_dict,
                 mangadex_manga_data=self.md_manga_objs.get(mangadex_manga_id, {}),
+                custom_series_language=self.title_regexes.get("custom_language", {}),
+                posted_chapters_data=self.posted_chapters_data,
             )
             manga_uploader.start_manga_uploading_process(
                 index == len(updated_manga_chapters)
@@ -2281,7 +2316,7 @@ def main(db_connection: Optional[sqlite3.Connection] = None, clean_db=False):
                     md_auth_object,
                     manga_id_map,
                     database_connection,
-                    title_regexes.get("same", {}),
+                    title_regexes,
                     clean_db,
                     posted_chapters_data,
                     manga_data_local,
