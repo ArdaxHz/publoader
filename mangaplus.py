@@ -1141,33 +1141,34 @@ class MangaUploaderProcess:
 
     def _remove_chapters_not_mplus(self) -> List[dict]:
         """Find chapters on MangaDex not on MangaPlus."""
-        md_chapters_not_mplus = []
-        none_ids = []
-        for chap in self.chapters_all:
-            for cha in self.manga_chapters:
-                if chap.chapter_id is not None:
-                    if str(chap.chapter_id) not in cha["attributes"]["externalUrl"]:
-                        md_chapters_not_mplus.append(cha)
-                        break
-                else:
-                    none_ids.append(cha)
-                    break
+        # md_chapters_not_mplus = []
+        # none_ids = []
+        # for chap in self.chapters_all:
+        #     found = False
+        #     to_add = None
+        #     for cha in self.manga_chapters:
+        #         if chap.chapter_id is not None:
+        #             if str(chap.chapter_id) in cha["attributes"]["externalUrl"]:
+        #                 found = True
+        #                 break
+        #         else:
+        #             none_ids.append(cha)
+        #             break
+        #         to_add = cha
 
-        md_chapters_not_mplus.extend(
-            [
-                c
-                for c in none_ids
-                if c["attributes"]["chapter"]
-                not in [x.chapter_number for x in self.chapters_all]
-                or c["attributes"]["translatedLanguage"]
-                not in list(
-                    set(
-                        mplus_language_map.values()
-                        + self.custom_series_language.values()
-                    )
-                )
-            ]
-        )
+        #     if not found and to_add is not None:
+        #         none_ids.append(to_add)
+
+        md_chapters_not_mplus = [
+            c
+            for c in self.manga_chapters
+            if c["attributes"]["chapter"]
+            not in [x.chapter_number for x in self.chapters_all]
+            or c["attributes"]["translatedLanguage"]
+            not in list(
+                set(mplus_language_map.values() + self.custom_series_language.values())
+            )
+        ]
 
         LOGGER.info(
             f"{self.__class__.__name__} deleter finder found: {md_chapters_not_mplus}"
