@@ -1166,7 +1166,10 @@ class MangaUploaderProcess:
             not in [x.chapter_number for x in self.chapters_all]
             or c["attributes"]["translatedLanguage"]
             not in list(
-                set(mplus_language_map.values() + self.custom_series_language.values())
+                set(
+                    list(mplus_language_map.values())
+                    + list(self.custom_series_language.values())
+                )
             )
         ]
 
