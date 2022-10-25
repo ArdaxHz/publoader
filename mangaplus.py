@@ -30,7 +30,7 @@ from webhook import webhook as WEBHOOK
 
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
-__version__ = "1.7.3"
+__version__ = "1.7.4"
 
 mplus_language_map = {
     "0": "en",
@@ -1948,49 +1948,55 @@ class MPlusAPI:
         self, chapter: Chapter, chapter_number: List[Optional[str]]
     ) -> Optional[str]:
         """Strip away the title prefix."""
-        colon_regex = re.compile(r"^.+:\s?", re.I)
+        colon_regex = re.compile(r"^.+?:\s?", re.I)
         no_title_regex = re.compile(r"^\S+\s?\d+(?:(?:\,|\-)\d{0,2})?$", re.I)
         hashtag_regex = re.compile(r"^(?:\S+\s?)?#\d+(?:(?:\,|\-)\d{0,2})?\s?", re.I)
-        period_regex = re.compile(
-            r"^(?:\S+\s?)?\d+(?:(?:\,|\-)\d{0,2})?\s?[\.\/\-]\s?", re.I
+        period_colon_dash_regex = re.compile(
+            r"^(?:\S+\s?)?\d+(?:(?:\,|\-)\d{0,2})?\s?[\.\:\/\-]\s?", re.I
         )
         spaces_regex = re.compile(r"^(?:\S+\s?)?\d+(?:(?:\,|\-)\d{0,2})?\s?", re.I)
 
-        title = str(chapter.chapter_title).strip()
-        normalised_title = title
+        original_title = str(chapter.chapter_title).strip()
+        normalised_title = original_title
         pattern_to_use: Optional[re.Pattern[str]] = None
         replace_string = ""
+        custom_regex = None
 
         if (
             chapter.manga_id in self.title_regexes.get("empty", [])
             and None not in chapter_number
-            or title.lower() in ("final chapter",)
+            or original_title.lower() in ("final chapter",)
         ):
             normalised_title = None
+            custom_regex = "Empty Title"
         elif chapter.manga_id in self.title_regexes.get("noformat", []):
-            normalised_title = title
+            normalised_title = original_title
+            custom_regex = "Original Title"
         elif str(chapter.manga_id) in self.title_regexes.get("custom", {}):
             pattern_to_use = re.compile(
                 self.title_regexes["custom"][str(chapter.manga_id)], re.I
             )
-        elif ":" in title:
-            pattern_to_use = colon_regex
-        elif no_title_regex.match(title):
+            custom_regex = "Custom Pattern"
+        elif period_colon_dash_regex.match(original_title):
+            pattern_to_use = period_colon_dash_regex
+        elif no_title_regex.match(original_title):
             pattern_to_use = no_title_regex
-        elif period_regex.match(title):
-            pattern_to_use = period_regex
-        elif hashtag_regex.match(title):
+        elif hashtag_regex.match(original_title):
             pattern_to_use = hashtag_regex
-        elif spaces_regex.match(title):
+        elif spaces_regex.match(original_title):
             pattern_to_use = spaces_regex
 
         if pattern_to_use is not None:
             normalised_title = pattern_to_use.sub(
-                repl=replace_string, string=title, count=1
+                repl=replace_string, string=original_title, count=1
             ).strip()
 
         if normalised_title == "":
             normalised_title = None
+
+        LOGGER.info(
+            f"Chapter title normaliser, {custom_regex=}, regex used: {pattern_to_use!r}, {original_title=}, {normalised_title=}"
+        )
         return normalised_title
 
     def get_latest_chapters(
