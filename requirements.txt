@@ -2,3 +2,4 @@ requests
 protobuf
 scheduler
 discord-webhook
+aiohttp
