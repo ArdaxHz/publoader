@@ -448,7 +448,6 @@ class MPlusAPI:
                         continue
 
                 chapter_number_split = self._normalise_chapter_number(chapters, chapter)
-
                 chapter_title = self._normalise_chapter_title(
                     chapter, chapter_number_split
                 )
