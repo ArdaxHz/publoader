@@ -8,7 +8,7 @@ from .utils import config, components_path
 
 
 logger = logging.getLogger("mangaplus")
-logger_debug = logging.getLogger("mangaplus")
+logger_debug = logging.getLogger("debug")
 
 
 def make_tables(database_connection: sqlite3.Connection):

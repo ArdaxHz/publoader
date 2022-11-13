@@ -1,5 +1,5 @@
 # MangaPlus MD Uploader
-## Run the bot from Finland, due region blocking. Some chapters will show up as unavailable in other regions.
+## Run the bot from Finland, due to region blocking. Some chapters will show up as unavailable in other regions.
 
 ```bash
 virtualenv venv

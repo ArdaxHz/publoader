@@ -12,15 +12,14 @@ from mangaplus.utils import utils
 from mangaplus import open_database, components_path
 from mangaplus.utils.database import database_name, database_path
 
-from mangaplus.webhook import webhook as WEBHOOK
+from mangaplus.webhook import webhook
 from mangaplus.chapter_deleter import ChapterDeleterProcess
 from mangaplus.auth_md import AuthMD
 from mangaplus.mplus_api import MPlusAPI
 from mangaplus.dupes_checker import DeleteDuplicatesMD
 from mangaplus.bot_process import BotProcess
 
-
-__version__ = "2.0.0"
+__version__ = "2.0.1"
 
 logger = logging.getLogger("mangaplus")
 
@@ -62,7 +61,7 @@ def main(db_connection: Optional[sqlite3.Connection] = None, clean_db=False):
     )
 
     session = requests.Session()
-    session.headers.update({"User-Agent": f"MP_MD_bot/{__version__}"})
+    session.headers.update({"User-Agent": f"MP-MD_bot/{__version__}"})
     md_auth_object = AuthMD(session, config)
 
     # Start deleting expired chapters
@@ -110,7 +109,6 @@ def main(db_connection: Optional[sqlite3.Connection] = None, clean_db=False):
         print("Uploaded all update(s).")
 
     if clean_db:
-        # try:
         dupes_deleter = DeleteDuplicatesMD(
             session,
             manga_id_map,
@@ -119,13 +117,6 @@ def main(db_connection: Optional[sqlite3.Connection] = None, clean_db=False):
             manga_data_local,
         )
         dupes_deleter.delete_dupes()
-        # except (UnboundLocalError, TypeError, IndexError, KeyError, ValueError) as e:
-        #     print(
-        #         "Error on line {}".format(sys.exc_info()[-1].tb_lineno),
-        #         type(e).__name__,
-        #         e,
-        #     )
-        #     logger.error(e)
 
     first_process = deleter_process_object.delete()
     print("Finished deleting expired chapters.")
@@ -161,5 +152,5 @@ if __name__ == "__main__":
     else:
         main(database_connection)
 
-    if WEBHOOK.embeds:
-        WEBHOOK.execute(remove_embeds=True)
+    if webhook.embeds:
+        webhook.execute(remove_embeds=True)

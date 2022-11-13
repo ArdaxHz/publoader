@@ -67,7 +67,7 @@ def setup_logs(
 setup_logs()
 logger = logging.getLogger("mangaplus")
 setup_logs("debug")
-logger_debug = logging.getLogger("mangaplus")
+logger_debug = logging.getLogger("debug")
 setup_logs(
     logger_name="webhook", path=webhook_log_folder_path, logger_filename="webhook"
 )

@@ -152,6 +152,8 @@ class ChapterDeleterProcess:
         if looped_all:
             del self.chapters_to_delete[:]
 
+        self.deleter_discord_bot.post()
+
     def add_more_chapters(self, chapters_to_add: List[dict], on_db: bool = True):
         """Extend the list of chapters to delete with another list."""
         self.on_db = on_db

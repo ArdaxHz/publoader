@@ -1,7 +1,6 @@
 import configparser
 import json
 import logging
-import math
 import multiprocessing
 import sqlite3
 import time
@@ -9,13 +8,11 @@ from typing import TYPE_CHECKING, Dict, List
 
 import requests
 
+from .utils.helpter_functions import get_md_api
 from .utils.utils import format_title
 from .webhook import MPlusBotNotIndexedWebhook
 from .manga_uploader import MangaUploaderProcess
 from . import (
-    convert_json,
-    print_error,
-    mangadex_api_url,
     ratelimit_time,
     mplus_group_id,
     Chapter,
@@ -109,102 +106,13 @@ class BotProcess:
         if chapters_to_delete:
             self.deleter_process_object.add_more_chapters(chapters_to_delete)
 
-    def _get_md_api(self, route: str, params: dict) -> List[dict]:
-        """Go through each page in the api to get all the chapters/manga."""
-        chapters = []
-        limit = 100
-        offset = 0
-        pages = 1
-        iteration = 1
-        created_at_since_time = "2000-01-01T00:00:00"
-
-        parameters = {}
-        parameters.update(params)
-
-        while True:
-            # Update the parameters with the new offset
-            parameters.update(
-                {
-                    "limit": limit,
-                    "offset": offset,
-                    "createdAtSince": created_at_since_time,
-                }
-            )
-
-            # Call the api and get the json data
-            try:
-                chapters_response = self.session.get(
-                    f"{mangadex_api_url}/{route}", params=parameters, verify=False
-                )
-            except requests.RequestException as e:
-                logger.error(e)
-                limit = limit
-                offset = offset
-                created_at_since_time = created_at_since_time
-                parameters = parameters
-                continue
-
-            if chapters_response.status_code != 200:
-                manga_response_message = f"Couldn't get the {route}s of the group."
-                print_error(chapters_response, log_error=True)
-                logger.error(manga_response_message)
-                continue
-
-            chapters_response_data = convert_json(chapters_response)
-            if chapters_response_data is None:
-                logger.warning(f"Couldn't convert {route}s data into json, retrying.")
-                continue
-
-            chapters.extend(chapters_response_data["data"])
-            offset += limit
-
-            # Finds how many pages needed to be called
-            if pages == 1:
-                chapters_count = chapters_response_data.get("total", 0)
-
-                if not chapters_response_data["data"]:
-                    chapters_count = 0
-
-                if chapters_count > limit:
-                    pages = math.ceil(chapters_count / limit)
-
-                logger.debug(f"{pages} page(s) for group {route}s.")
-
-            # Wait every 5 pages
-            if iteration % 5 == 0 and pages != 5:
-                time.sleep(ratelimit_time)
-
-            # End the loop when all the pages have been gone through
-            # Offset 10000 is the highest you can go, reset offset and get next
-            # 10k batch using the last available chapter's created at date
-            if (
-                iteration == pages
-                or offset >= 10000
-                or not chapters_response_data["data"]
-            ):
-                if chapters_count >= 10000 and offset == 10000:
-                    logger.debug(f"Reached 10k {route}s, looping over next 10k.")
-                    created_at_since_time = chapters[-1]["attributes"][
-                        "createdAt"
-                    ].split("+")[0]
-                    offset = 0
-                    pages = 1
-                    iteration = 1
-                    time.sleep(5)
-                    continue
-                break
-
-            iteration += 1
-
-        time.sleep(ratelimit_time)
-        return chapters
-
     def _get_mplus_chapters(self) -> Dict[str, List[dict]]:
         logger.debug("Getting all m+'s uploaded chapters.")
         print("Getting the mangaplus chapters on mangadex.")
-        chapters_unsorted = self._get_md_api(
+        chapters_unsorted = get_md_api(
+            self.session,
             "chapter",
-            params={
+            **{
                 "groups[]": [mplus_group_id],
                 "order[createdAt]": "desc",
                 "includes[]": ["manga"],
@@ -241,9 +149,10 @@ class BotProcess:
 
             for manga_splice in tracked_manga_splice:
                 tracked_manga_data.extend(
-                    self._get_md_api(
+                    get_md_api(
+                        self.session,
                         "manga",
-                        params={
+                        **{
                             "ids[]": manga_splice,
                             "order[createdAt]": "desc",
                         },
@@ -320,9 +229,10 @@ class BotProcess:
 
             for uploaded_ids in uploaded_chapter_ids_split:
                 chapters_on_md.extend(
-                    self._get_md_api(
+                    get_md_api(
+                        self.session,
                         "chapter",
-                        params={
+                        **{
                             "ids[]": uploaded_ids,
                             "order[createdAt]": "desc",
                             "includes[]": ["manga"],

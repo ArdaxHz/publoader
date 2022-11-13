@@ -14,6 +14,7 @@ from . import (
     upload_retry,
     mplus_language_map,
 )
+from .utils.helpter_functions import get_md_api
 from .webhook import MPlusBotDupesWebhook
 from .utils.utils import format_title
 
@@ -41,17 +42,15 @@ class DeleteDuplicatesMD:
         self.languages = list(set(mplus_language_map.values()))
         self.to_delete = []
 
-    def fetch_aggregate(self, manga_id: str, language: str) -> Optional[dict]:
-        logger.info(
-            f"Getting aggregate info for manga {manga_id} in language {language}."
-        )
+    def fetch_aggregate(self, manga_id: str) -> Optional[dict]:
+        logger.info(f"Getting aggregate info for manga {manga_id} in languages {self.languages}.")
 
         for i in range(upload_retry):
             try:
                 aggregate_response = self.session.get(
                     f"{mangadex_api_url}/manga/{manga_id}/aggregate",
                     params={
-                        "translatedLanguage[]": [language],
+                        "translatedLanguage[]": self.languages,
                         "groups[]": [mplus_group_id],
                     },
                     verify=False,
@@ -66,26 +65,24 @@ class DeleteDuplicatesMD:
                     return aggregate_response_json["volumes"]
 
         error = print_error(aggregate_response)
-        logger.error(
-            f"Error returned from aggregate response for manga {manga_id}: {error}"
-        )
+        logger.error(f"Error returned from aggregate response for manga {manga_id}: {error}")
 
     def check_count(self, aggregate_chapters: dict) -> List[dict]:
         to_check = []
         for volume in aggregate_chapters:
             if isinstance(aggregate_chapters, dict):
-                volume_itter = aggregate_chapters[volume]["chapters"]
+                volume_iter = aggregate_chapters[volume]["chapters"]
             elif isinstance(aggregate_chapters, list):
-                volume_itter = volume["chapters"]
+                volume_iter = volume["chapters"]
 
-            for chapter in volume_itter:
+            for chapter in volume_iter:
                 if isinstance(chapter, str):
-                    chapter_itter = volume_itter[chapter]
+                    chapter_iter = volume_iter[chapter]
                 elif isinstance(chapter, dict):
-                    chapter_itter = chapter
+                    chapter_iter = chapter
 
-                if chapter_itter["count"] > 1:
-                    to_check.append(chapter_itter)
+                if chapter_iter["count"] > 1:
+                    to_check.append(chapter_iter)
         return to_check
 
     def fetch_chapters(self, chapters: List[str]) -> Optional[List[dict]]:
@@ -110,20 +107,16 @@ class DeleteDuplicatesMD:
         return None
 
     def sort_manga_data(self, chapters: list):
-        manga_data = {}
-        for chapter in chapters:
-            manga = [m for m in chapter["relationships"] if m["type"] == "manga"][0]
-            manga_id = manga["id"]
-            manga_title = format_title(manga)
+        chapter = chapters[0]
 
-            if manga_id not in manga_data:
-                manga_data.update({manga_id: {"id": manga_id, "title": manga_title}})
-        return manga_data
+        manga = [m for m in chapter["relationships"] if m["type"] == "manga"][0]
+        manga_id = manga["id"]
+        manga_title = format_title(manga)
+
+        return {manga_id: {"id": manga_id, "title": manga_title}}
 
     def filter_group(self, chapter: dict) -> List[str]:
-        return [
-            g["id"] for g in chapter["relationships"] if g["type"] == "scanlation_group"
-        ]
+        return [g["id"] for g in chapter["relationships"] if g["type"] == "scanlation_group"]
 
     def check_chapters(
         self, chapters: List[dict], dupes_webhook: "MPlusBotDupesWebhook"
@@ -145,8 +138,7 @@ class DeleteDuplicatesMD:
                     current_attributes["translatedLanguage"]
                     == previous_attributes["translatedLanguage"]
                     and current_attributes["chapter"] == previous_attributes["chapter"]
-                    and current_attributes["externalUrl"]
-                    == previous_attributes["externalUrl"]
+                    and current_attributes["externalUrl"] == previous_attributes["externalUrl"]
                 ):
                     if chapter not in to_check:
                         to_check.append(chapter)
@@ -159,9 +151,7 @@ class DeleteDuplicatesMD:
             for chapter in to_check:
                 if datetime.strptime(
                     chapter["attributes"]["createdAt"], "%Y-%m-%dT%H:%M:%S%z"
-                ) < datetime.strptime(
-                    oldest["attributes"]["createdAt"], "%Y-%m-%dT%H:%M:%S%z"
-                ):
+                ) < datetime.strptime(oldest["attributes"]["createdAt"], "%Y-%m-%dT%H:%M:%S%z"):
                     oldest = chapter
 
             oldest_id = oldest["id"]
@@ -182,6 +172,16 @@ class DeleteDuplicatesMD:
                 logger.info(f"Found dupes of {oldest_id} to delete: {to_return_ids}")
         return to_check
 
+    def sort_chapters(self, chapters: list):
+        sorted_chapters = {}
+        for chapter in chapters:
+            chapter_language = chapter["attributes"]["translatedLanguage"]
+            if chapter_language not in sorted_chapters:
+                sorted_chapters[chapter_language] = [chapter]
+            else:
+                sorted_chapters[chapter_language].append(chapter)
+        return sorted_chapters
+
     def delete_dupes(self):
         print("Looking for chapter dupes.")
 
@@ -190,50 +190,65 @@ class DeleteDuplicatesMD:
             dupes_webhook = MPlusBotDupesWebhook(manga_data)
             dupes_found = False
 
-            for lang_index, language in enumerate(self.languages, start=1):
-                aggregate_chapters_unchecked = self.fetch_aggregate(manga_id, language)
-                if aggregate_chapters_unchecked is None:
-                    continue
+            aggregate_chapters_all_langs_unchecked = self.fetch_aggregate(manga_id)
+            if aggregate_chapters_all_langs_unchecked is None:
+                continue
 
-                aggregate_chapters = self.check_count(aggregate_chapters_unchecked)
-                logger.debug(
-                    f"Aggregate chapters with more than one count: {aggregate_chapters}"
+            aggregate_chapters_all_langs_checked = self.check_count(
+                aggregate_chapters_all_langs_unchecked
+            )
+
+            main_chapters = [chapter["id"] for chapter in aggregate_chapters_all_langs_checked]
+            other_chapters = []
+            for chapter in aggregate_chapters_all_langs_checked:
+                other_chapters.extend(chapter["others"])
+
+            all_chapter_ids_unsorted = [*main_chapters, *other_chapters]
+            all_chapter_ids_unsorted_split = [
+                all_chapter_ids_unsorted[l : l + 100]
+                for l in range(0, len(all_chapter_ids_unsorted), 100)
+            ]
+
+            chapters_md_unsorted = []
+            for chapter_chunk in all_chapter_ids_unsorted_split:
+                chapters_md_unsorted.extend(
+                    get_md_api(
+                        self.session,
+                        "chapter",
+                        **{"ids[]": chapter_chunk, "includes[]": ["manga"]},
+                    )
                 )
 
-                for chapter in aggregate_chapters:
-                    chapters_ids = []
-                    chapters_ids.append(chapter["id"])
-                    chapters_ids.extend(chapter["others"])
+            chapters_md_sorted = self.sort_chapters(chapters_md_unsorted)
 
-                    chapters_md = self.fetch_chapters(chapters_ids)
-                    if chapters_md is None:
-                        continue
+            if not bool(dupes_webhook.manga):
+                manga_data = self.sort_manga_data(chapters_md_unsorted)
+                dupes_webhook.init_manga(manga_data)
 
-                    if not bool(dupes_webhook.manga):
-                        manga_data = self.sort_manga_data(chapters_md)
-                        dupes_webhook.init_manga(manga_data.get(manga_id))
+            for language in chapters_md_sorted:
+                chapters_to_delete = self.check_chapters(
+                    chapters_md_sorted[language], dupes_webhook
+                )
+                dupes_found = bool(chapters_to_delete)
 
-                    chapters_to_delete = self.check_chapters(chapters_md, dupes_webhook)
-                    dupes_found = bool(chapters_to_delete)
+                if not dupes_found:
+                    continue
 
-                    chapters_to_delete_list: List[dict] = [
-                        {
-                            "md_chapter_id": c["id"],
-                            "md_manga_id": manga_id,
-                            "chapter_language": c["attributes"]["translatedLanguage"],
-                            "chapter_number": c["attributes"]["chapter"],
-                            "chapter_timestamp": 946684799,
-                            "chapter_expire": 946684799,
-                        }
-                        for c in chapters_to_delete
-                    ]
+                logger.debug(f"Found dupes in manga {manga_id} for language {language}")
 
-                    self.deleter_process_object.add_more_chapters(
-                        chapters_to_delete_list
-                    )
+                chapters_to_delete_list: List[dict] = [
+                    {
+                        "md_chapter_id": c["id"],
+                        "md_manga_id": manga_id,
+                        "chapter_language": c["attributes"]["translatedLanguage"],
+                        "chapter_number": c["attributes"]["chapter"],
+                        "chapter_timestamp": 946684799,
+                        "chapter_expire": 946684799,
+                    }
+                    for c in chapters_to_delete
+                ]
 
-                if lang_index % 4 == 0:
-                    time.sleep(ratelimit_time)
+                self.deleter_process_object.add_more_chapters(chapters_to_delete_list)
 
             if not dupes_found:
                 print(f"Didn't find any dupes in manga: {manga_id}")

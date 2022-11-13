@@ -9,7 +9,7 @@ from .utils import http_error_codes, ratelimit_time
 
 
 logger = logging.getLogger("mangaplus")
-logger_debug = logging.getLogger("mangaplus")
+logger_debug = logging.getLogger("debug")
 
 
 def convert_json(response_to_convert: requests.Response) -> Optional[dict]:
@@ -56,6 +56,8 @@ def print_error(
         f"{status_code}: Couldn't convert api response into json."
     )
     error_message = ""
+
+    logger.error(f"Error response: {error_response.raw}")
 
     if status_code == 429:
         error_message = f"429: {http_error_codes.get(str(status_code))}"
