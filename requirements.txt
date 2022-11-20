@@ -3,3 +3,4 @@ protobuf
 scheduler
 discord-webhook
 aiohttp
+GitPython

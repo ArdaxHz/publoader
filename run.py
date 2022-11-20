@@ -8,6 +8,8 @@ from pathlib import Path
 
 from scheduler import Scheduler, trigger
 
+from updater import check_for_update
+
 root_path = Path(".")
 config_file_path = root_path.joinpath("config").with_suffix(".ini")
 
@@ -31,8 +33,14 @@ def open_config_file() -> configparser.RawConfigParser:
 config = open_config_file()
 
 
-def main(clean_db=False, move_chapters=False):
+def main():
     """Call the main function of the mangaplus bot."""
+    subprocess.call([RUNNER, "mangaplus.py"])
+
+
+def daily_check():
+    """Check for any updates and then run the bot."""
+    check_for_update(root_path)
     subprocess.call([RUNNER, "mangaplus.py"])
 
 
@@ -87,7 +95,7 @@ if __name__ == "__main__":
             minute=daily_run_time_checks_minute,
             tzinfo=timezone.utc,
         ),
-        main,
+        daily_check,
         weight=1,
     )
     # schedule.daily(

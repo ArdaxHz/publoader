@@ -4,6 +4,7 @@ on:
   - push
   - delete
 
+
 jobs:
   sync:
     runs-on: ubuntu-latest
