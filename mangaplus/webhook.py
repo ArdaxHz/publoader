@@ -343,91 +343,30 @@ class MPlusBotDupesWebhook(WebhookBase):
 
 
 class MPlusBotDeleterWebhook(WebhookHelper):
-    def __init__(self) -> None:
+    def __init__(self, chapter: dict) -> None:
         super().__init__()
         self.colour = "C43542"
-        self.unformatted_chapters: Dict[str, List[dict]] = {}
+        self.chapter = chapter
+        self.webhook = make_webhook()
+        self.normalised_chapter = self.normalise_chapter(self.chapter)
 
-    def make_embed(self, title: str, description: str, **kwargs) -> DiscordEmbed:
+    def make_embed(self):
         embed = DiscordEmbed(
-            title=title,
-            description=description,
-            **kwargs,
+            title=f"Deleted chapter {self.chapter['md_chapter_id']}",
+            description=f"{self.normalised_chapter['name']}\n{self.normalised_chapter['value']}",
+            **{
+                "color": self.colour,
+                "timestamp": datetime.datetime.now().isoformat(),
+            },
         )
 
         logger.debug(f"Made embed: {embed.title}, {embed.description}")
         return embed
 
-    def normalise_manga(self, manga_id: str, **kwargs):
-        if manga_id.lower() == "none":
-            manga_id = None
-
-        if manga_id is None:
-            description = ""
-        else:
-            description = f"MangaDex manga link: [here]({self.mangadex_manga_url.format(manga_id)})"
-
-        kwargs.update(
-            {"timestamp": datetime.datetime.now().isoformat(), "color": self.colour}
-        )
-
-        return self.make_embed(
-            title=f"Deleted from manga {manga_id}", description=description, **kwargs
-        )
-
-    def check_chapter_list_length(self, last_manga: bool = True):
-        chunk_size = 3
-        for manga_id, manga_chapters in self.unformatted_chapters.items():
-            split_manga_chapters = [
-                manga_chapters[i : i + chunk_size]
-                for i in range(0, len(manga_chapters), chunk_size)
-            ]
-            chapters_not_sent = []
-            chapters_sent = []
-            for chunk_manga_chapters in split_manga_chapters:
-                if len(chunk_manga_chapters) >= chunk_size:
-                    chapters_to_embed = chunk_manga_chapters
-                    logger.debug(f"Making embed of chapters {chapters_to_embed}")
-
-                    normalised_chapters = [
-                        self.normalise_chapter(chapter) for chapter in chapters_to_embed
-                    ]
-                    normalised_manga_embed = self.normalise_manga(
-                        manga_id, **{"fields": normalised_chapters}
-                    )
-                    logger.debug(
-                        f"Deleted chapters manga embed: {normalised_manga_embed}"
-                    )
-                    webhook.add_embed(normalised_manga_embed)
-                    chapters_sent.extend(chunk_manga_chapters)
-                else:
-                    chapters_not_sent.extend(chunk_manga_chapters)
-
-                if len(webhook.embeds) >= 10 or last_manga:
-                    self.send_webhook()
-
-            self.unformatted_chapters[manga_id][:] = [
-                chapter for chapter in chapters_not_sent if chapter not in chapters_sent
-            ]
-
-    def post(self):
-        self.send_webhook()
-
-    def main(self, chapter: dict, last_manga: bool = True):
-        manga_id = chapter.get("md_manga_id", "none")
-        logger.debug(f"Chapter embed to make: {chapter}")
-
-        if manga_id in self.unformatted_chapters:
-            self.unformatted_chapters[manga_id].append(chapter)
-        else:
-            self.unformatted_chapters[manga_id] = [chapter]
-
-        logger.debug(f"Added chapter to manga id {manga_id}")
-
-        self.check_chapter_list_length(last_manga)
-
-        if len(webhook.embeds) >= 10 or last_manga:
-            self.send_webhook()
+    def main(self):
+        embed = self.make_embed()
+        self.webhook.add_embed(embed)
+        self.send_webhook(self.webhook)
 
 
 class MPlusBotNotIndexedWebhook(WebhookHelper):

@@ -39,7 +39,6 @@ class ChapterDeleterProcess:
 
         self.chapter_delete_ratelimit = 8
         self.chapter_delete_process = None
-        self.deleter_discord_bot = MPlusBotDeleterWebhook()
 
         logger.info(f"Chapters to delete: {self.chapters_to_delete}")
 
@@ -84,7 +83,6 @@ class ChapterDeleterProcess:
         self,
         chapter: dict = {},
         to_delete_id: Optional[str] = None,
-        looped_all: bool = False,
     ):
         """Check if the chapters expired and remove off mangadex if they are."""
         # If the expiry date of the chapter is less than the current time and
@@ -124,7 +122,7 @@ class ChapterDeleterProcess:
                 if delete_reponse.status_code == 200:
                     logger.info(f"Deleted {chapter}.")
                     print(f"----Deleted {deleted_message}")
-                    self.deleter_discord_bot.main(chapter, looped_all)
+                    MPlusBotDeleterWebhook(chapter).main()
                     break
 
         if self.on_db and chapter:
@@ -142,7 +140,7 @@ class ChapterDeleterProcess:
         for count, chapter_to_delete in enumerate(_local_list, start=1):
             self.md_auth_object.login()
             looped_all = count == len(_local_list)
-            self._remove_old_chapter(chapter_to_delete, looped_all)
+            self._remove_old_chapter(chapter_to_delete)
 
             try:
                 self.chapters_to_delete.remove(chapter_to_delete)
@@ -151,8 +149,6 @@ class ChapterDeleterProcess:
 
         if looped_all:
             del self.chapters_to_delete[:]
-
-        self.deleter_discord_bot.post()
 
     def add_more_chapters(self, chapters_to_add: List[dict], on_db: bool = True):
         """Extend the list of chapters to delete with another list."""

@@ -19,7 +19,7 @@ from mangaplus.mplus_api import MPlusAPI
 from mangaplus.dupes_checker import DeleteDuplicatesMD
 from mangaplus.bot_process import BotProcess
 
-__version__ = "2.0.1"
+__version__ = "2.0.2"
 
 logger = logging.getLogger("mangaplus")
 
