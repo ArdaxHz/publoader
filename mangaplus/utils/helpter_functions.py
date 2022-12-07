@@ -1,7 +1,7 @@
 import logging
 import math
 import time
-from typing import List
+from typing import List, Optional
 
 import requests
 
@@ -74,12 +74,17 @@ def get_md_api(session: requests.Session, route: str, **params: dict) -> List[di
         # End the loop when all the pages have been gone through
         # Offset 10000 is the highest you can go, reset offset and get next
         # 10k batch using the last available chapter's created at date
-        if len(chapters_response_data["data"]) == 0 or not chapters_response_data["data"]:
+        if (
+            len(chapters_response_data["data"]) == 0
+            or not chapters_response_data["data"]
+        ):
             break
 
         if offset >= 10000:
             logger.debug(f"Reached 10k {route}s, looping over next 10k.")
-            created_at_since_time = chapters[-1]["attributes"]["createdAt"].split("+")[0]
+            created_at_since_time = chapters[-1]["attributes"]["createdAt"].split("+")[
+                0
+            ]
             offset = 0
             retry = 0
             iteration = 0
@@ -91,3 +96,46 @@ def get_md_api(session: requests.Session, route: str, **params: dict) -> List[di
 
     time.sleep(ratelimit_time)
     return chapters
+
+
+def iter_aggregate_chapters(aggregate_chapters: dict):
+    """Return a generator for each chapter object in the aggregate response."""
+    for volume in aggregate_chapters:
+        if isinstance(aggregate_chapters, dict):
+            volume_iter = aggregate_chapters[volume]["chapters"]
+        elif isinstance(aggregate_chapters, list):
+            volume_iter = volume["chapters"]
+
+        for chapter in volume_iter:
+            if isinstance(chapter, str):
+                chapter_iter = volume_iter[chapter]
+            elif isinstance(chapter, dict):
+                chapter_iter = chapter
+
+            yield chapter_iter
+
+
+def fetch_aggregate(
+    session: requests.Session, manga_id: str, **params
+) -> Optional[dict]:
+    """Call the mangadex api to get the volumes of each chapter."""
+    for i in range(upload_retry):
+        try:
+            aggregate_response = session.get(
+                f"{mangadex_api_url}/manga/{manga_id}/aggregate",
+                params=params,
+                verify=False,
+            )
+        except requests.RequestException as e:
+            logger.error(e)
+            continue
+
+        if aggregate_response.status_code in range(200, 300):
+            aggregate_response_json = convert_json(aggregate_response)
+            if aggregate_response_json is not None:
+                return aggregate_response_json["volumes"]
+
+    error = print_error(aggregate_response)
+    logger.error(
+        f"Error returned from aggregate response for manga {manga_id}: {error}"
+    )

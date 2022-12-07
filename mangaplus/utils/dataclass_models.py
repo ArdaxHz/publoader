@@ -27,6 +27,7 @@ class Chapter:
     chapter_title: str
     chapter_number: str
     chapter_language: str
+    chapter_volume: Optional[str] = field(default=None)
     chapter_id: Optional[int] = field(default=None)
     md_chapter_id: Optional[str] = field(default=None)
     manga_id: Optional[int] = field(default=None)

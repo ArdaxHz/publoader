@@ -7,6 +7,7 @@ import requests
 from . import update_database, ratelimit_time, Chapter, mplus_language_map
 from .chapter_uploader import ChapterUploaderProcess
 from .webhook import MPlusBotUpdatesWebhook
+from .utils.helpter_functions import fetch_aggregate
 
 if TYPE_CHECKING:
     from .chapter_deleter import ChapterDeleterProcess
@@ -48,6 +49,8 @@ class MangaUploaderProcess:
         self.chapters_on_db = chapters_on_db
         self.posted_chapters: List[Chapter] = []
         self.failed_uploads: List[Chapter] = []
+
+        self.get_chapter_volumes()
 
         if self.chapters_on_md:
             self._delete_extra_chapters()
@@ -97,6 +100,28 @@ class MangaUploaderProcess:
         chapters_to_delete = self._remove_chapters_not_mplus()
         if chapters_to_delete:
             self.deleter_process_object.add_more_chapters(chapters_to_delete)
+
+    def get_chapter_volumes(self):
+        aggregate_chapters = fetch_aggregate(
+            self.session,
+            self.mangadex_manga_id,
+            # **{"translatedLanguage[]": ["en"]},
+        )
+        if aggregate_chapters is None:
+            return
+
+        for chapter in self.updated_chapters:
+            for volume in aggregate_chapters:
+                if isinstance(aggregate_chapters, dict):
+                    volume_iter = aggregate_chapters[volume]["chapters"]
+                elif isinstance(aggregate_chapters, list):
+                    volume_iter = volume["chapters"]
+
+                if isinstance(volume_iter, dict):
+                    volume_chapters = volume_iter.keys()
+
+                    if chapter.chapter_number in volume_chapters:
+                        chapter.chapter_volume = volume
 
     def start_manga_uploading_process(self, last_manga: bool):
         self.skipped = 0

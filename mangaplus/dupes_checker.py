@@ -1,6 +1,5 @@
 import logging
 import sqlite3
-import time
 from datetime import datetime
 from typing import TYPE_CHECKING, Dict, List, Optional
 
@@ -9,12 +8,15 @@ from . import (
     convert_json,
     print_error,
     mangadex_api_url,
-    ratelimit_time,
     mplus_group_id,
     upload_retry,
     mplus_language_map,
 )
-from .utils.helpter_functions import get_md_api
+from .utils.helpter_functions import (
+    fetch_aggregate,
+    get_md_api,
+    iter_aggregate_chapters,
+)
 from .webhook import MPlusBotDupesWebhook
 from .utils.utils import format_title
 
@@ -42,47 +44,11 @@ class DeleteDuplicatesMD:
         self.languages = list(set(mplus_language_map.values()))
         self.to_delete = []
 
-    def fetch_aggregate(self, manga_id: str) -> Optional[dict]:
-        logger.info(f"Getting aggregate info for manga {manga_id} in languages {self.languages}.")
-
-        for i in range(upload_retry):
-            try:
-                aggregate_response = self.session.get(
-                    f"{mangadex_api_url}/manga/{manga_id}/aggregate",
-                    params={
-                        "translatedLanguage[]": self.languages,
-                        "groups[]": [mplus_group_id],
-                    },
-                    verify=False,
-                )
-            except requests.RequestException as e:
-                logger.error(e)
-                continue
-
-            if aggregate_response.status_code in range(200, 300):
-                aggregate_response_json = convert_json(aggregate_response)
-                if aggregate_response_json is not None:
-                    return aggregate_response_json["volumes"]
-
-        error = print_error(aggregate_response)
-        logger.error(f"Error returned from aggregate response for manga {manga_id}: {error}")
-
     def check_count(self, aggregate_chapters: dict) -> List[dict]:
         to_check = []
-        for volume in aggregate_chapters:
-            if isinstance(aggregate_chapters, dict):
-                volume_iter = aggregate_chapters[volume]["chapters"]
-            elif isinstance(aggregate_chapters, list):
-                volume_iter = volume["chapters"]
-
-            for chapter in volume_iter:
-                if isinstance(chapter, str):
-                    chapter_iter = volume_iter[chapter]
-                elif isinstance(chapter, dict):
-                    chapter_iter = chapter
-
-                if chapter_iter["count"] > 1:
-                    to_check.append(chapter_iter)
+        for chapter in iter_aggregate_chapters(aggregate_chapters):
+            if chapter["count"] > 1:
+                to_check.append(chapter)
         return to_check
 
     def fetch_chapters(self, chapters: List[str]) -> Optional[List[dict]]:
@@ -116,7 +82,9 @@ class DeleteDuplicatesMD:
         return {manga_id: {"id": manga_id, "title": manga_title}}
 
     def filter_group(self, chapter: dict) -> List[str]:
-        return [g["id"] for g in chapter["relationships"] if g["type"] == "scanlation_group"]
+        return [
+            g["id"] for g in chapter["relationships"] if g["type"] == "scanlation_group"
+        ]
 
     def check_chapters(
         self, chapters: List[dict], dupes_webhook: "MPlusBotDupesWebhook"
@@ -138,7 +106,8 @@ class DeleteDuplicatesMD:
                     current_attributes["translatedLanguage"]
                     == previous_attributes["translatedLanguage"]
                     and current_attributes["chapter"] == previous_attributes["chapter"]
-                    and current_attributes["externalUrl"] == previous_attributes["externalUrl"]
+                    and current_attributes["externalUrl"]
+                    == previous_attributes["externalUrl"]
                 ):
                     if chapter not in to_check:
                         to_check.append(chapter)
@@ -151,7 +120,9 @@ class DeleteDuplicatesMD:
             for chapter in to_check:
                 if datetime.strptime(
                     chapter["attributes"]["createdAt"], "%Y-%m-%dT%H:%M:%S%z"
-                ) < datetime.strptime(oldest["attributes"]["createdAt"], "%Y-%m-%dT%H:%M:%S%z"):
+                ) < datetime.strptime(
+                    oldest["attributes"]["createdAt"], "%Y-%m-%dT%H:%M:%S%z"
+                ):
                     oldest = chapter
 
             oldest_id = oldest["id"]
@@ -190,7 +161,17 @@ class DeleteDuplicatesMD:
             dupes_webhook = MPlusBotDupesWebhook(manga_data)
             dupes_found = False
 
-            aggregate_chapters_all_langs_unchecked = self.fetch_aggregate(manga_id)
+            logger.info(
+                f"Getting aggregate info for manga {manga_id} in languages {self.languages}."
+            )
+            aggregate_chapters_all_langs_unchecked = fetch_aggregate(
+                self.session,
+                manga_id,
+                **{
+                    "translatedLanguage[]": self.languages,
+                    "groups[]": [mplus_group_id],
+                },
+            )
             if aggregate_chapters_all_langs_unchecked is None:
                 continue
 
@@ -198,7 +179,9 @@ class DeleteDuplicatesMD:
                 aggregate_chapters_all_langs_unchecked
             )
 
-            main_chapters = [chapter["id"] for chapter in aggregate_chapters_all_langs_checked]
+            main_chapters = [
+                chapter["id"] for chapter in aggregate_chapters_all_langs_checked
+            ]
             other_chapters = []
             for chapter in aggregate_chapters_all_langs_checked:
                 other_chapters.extend(chapter["others"])

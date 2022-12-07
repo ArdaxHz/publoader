@@ -179,7 +179,7 @@ class ChapterUploaderProcess:
 
         payload = {
             "chapterDraft": {
-                "volume": None,
+                "volume": self.chapter.chapter_volume,
                 "chapter": self.chapter.chapter_number,
                 "title": self.chapter.chapter_title,
                 "translatedLanguage": self.chapter.chapter_language,
