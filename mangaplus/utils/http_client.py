@@ -57,7 +57,7 @@ def print_error(
     )
     error_message = ""
 
-    logger.error(f"Error response: {error_response.raw}")
+    # logger.error(f"Error response: {error_response.raw}")
 
     if status_code == 429:
         error_message = f"429: {http_error_codes.get(str(status_code))}"
@@ -65,7 +65,7 @@ def print_error(
             logger.error(error_message)
         if show_error:
             print(error_message)
-        time.sleep(ratelimit_time * 4)
+        time.sleep(ratelimit_time * 6)
         return error_message
 
     # Api didn't return json object

@@ -216,6 +216,7 @@ class MPlusBotUpdatesWebhook(WebhookBase):
         chapters: List["Chapter"],
         failed_chapters: List["Chapter"],
         skipped: int,
+        edited: int,
     ) -> None:
         super().__init__(manga)
 
@@ -225,9 +226,10 @@ class MPlusBotUpdatesWebhook(WebhookBase):
         self.uploaded = len(chapters)
         self.failed = len(self.failed_chapters)
         self.skipped = skipped
+        self.edited = edited
 
         self.normalised_manga = self.normalise_manga(
-            self.uploaded, self.failed, self.skipped
+            self.uploaded, self.failed, self.skipped, self.edited
         )
         self.normalised_chapters = self.normalise_chapters(self.chapters)
         self.normalised_failed_chapters = self.normalise_chapters(
@@ -235,14 +237,15 @@ class MPlusBotUpdatesWebhook(WebhookBase):
         )
 
     def normalise_manga(
-        self, chapter_count: int, failed: int, skipped: int
+        self, chapter_count: int, failed: int, skipped: int, edited: int
     ) -> Dict[str, str]:
         return {
             "title": f"{self.manga_title}",
             "description": f"MangaDex manga link: [here]({self.mangadex_manga_url})\n"
             f"Uploaded: {chapter_count}\n"
             f"Failed: {failed}\n"
-            f"Skipped: {skipped}",
+            f"Skipped: {skipped}\n"
+            f"Edited: {edited}",
             "timestamp": datetime.datetime.now().isoformat(),
             "color": self.colour,
         }

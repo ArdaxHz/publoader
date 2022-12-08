@@ -112,6 +112,9 @@ class MangaUploaderProcess:
 
         for chapter in self.updated_chapters:
             for volume in aggregate_chapters:
+                if volume == "none":
+                    continue
+
                 if isinstance(aggregate_chapters, dict):
                     volume_iter = aggregate_chapters[volume]["chapters"]
                 elif isinstance(aggregate_chapters, list):
@@ -125,6 +128,7 @@ class MangaUploaderProcess:
 
     def start_manga_uploading_process(self, last_manga: bool):
         self.skipped = 0
+        self.edited = 0
         self.skipped_chapter = False
         chapter = self.updated_chapters[0]
         for count, chapter in enumerate(self.updated_chapters, start=1):
@@ -143,11 +147,13 @@ class MangaUploaderProcess:
             )
 
             uploaded = chapter_to_upload_process.start_upload(self.chapters_on_md)
-            if uploaded in (1, 2):
+            if uploaded in ("on_md", "session_error", "edited"):
                 self.skipped += 1
-                if uploaded in (1,):
+                if uploaded in ("on_md",):
                     self.skipped_chapter = True
-                if uploaded in (2,):
+                elif uploaded in ("edited",):
+                    self.edited += 1
+                elif uploaded in ("session_error",):
                     self.failed_uploads.append(chapter)
                 continue
 
@@ -159,11 +165,17 @@ class MangaUploaderProcess:
             logger.info(skipped_chapters_message)
             print(skipped_chapters_message)
 
+        if self.edited != 0:
+            edited_chapters_message = f"Edited {self.edited} chapters out of {len(self.updated_chapters)} for manga {chapter.manga.manga_name}: {self.mangadex_manga_id} - {chapter.manga_id}."
+            logger.info(edited_chapters_message)
+            print(edited_chapters_message)
+
         MPlusBotUpdatesWebhook(
             self.mangadex_manga_data,
             self.posted_chapters,
             self.failed_uploads,
             self.skipped,
+            self.edited,
         ).main(last_manga)
 
         time.sleep(ratelimit_time * 2)

@@ -17,6 +17,7 @@ from . import (
     get_md_id,
     flatten,
     update_database,
+    mangadex_api_url,
 )
 
 
@@ -52,6 +53,7 @@ class ChapterUploaderProcess:
             f"Manga: {self.chapter.manga.manga_name}, "
             f"{self.mangadex_manga_id} - {self.chapter.manga_id}, "
             f"chapter: {self.chapter.chapter_number}, "
+            f"volume: {self.chapter.chapter_volume}, "
             f"language: {self.chapter.chapter_language}, "
             f"title: {self.chapter.chapter_title}"
         )
@@ -241,27 +243,83 @@ class ChapterUploaderProcess:
             return False
         return succesful_upload
 
+    def edit_chapter(self, md_chapter: dict):
+        """Update the chapter on mangadex if it is different."""
+        md_id = md_chapter["id"]
+        chapter_attrs = md_chapter["attributes"]
+        data_to_post = {
+            "volume": chapter_attrs["volume"],
+            "chapter": chapter_attrs["chapter"],
+            "title": chapter_attrs["title"],
+            "translatedLanguage": chapter_attrs["translatedLanguage"],
+            "externalUrl": chapter_attrs["externalUrl"],
+            "version": chapter_attrs["version"],
+            "groups": [
+                g["id"]
+                for g in md_chapter["relationships"]
+                if g["type"] == "scanlation_group"
+            ],
+        }
+        changed = False
+
+        if str(self.chapter.chapter_id) not in chapter_attrs["externalUrl"]:
+            logger.debug(
+                f"MD chapter {md_id} mangaplus id {chapter_attrs['externalUrl']} doesn't match id {self.chapter.chapter_id}"
+            )
+            return False
+
+        logger.info(f"Editing {md_id} with old info {chapter_attrs}")
+
+        if self.chapter.chapter_volume != chapter_attrs["volume"]:
+            data_to_post["volume"] = self.chapter.chapter_volume
+            changed = True
+
+        if self.chapter.chapter_number != chapter_attrs["chapter"]:
+            data_to_post["chapter"] = self.chapter.chapter_number
+            changed = True
+
+        if self.chapter.chapter_title != chapter_attrs["title"]:
+            data_to_post["title"] = self.chapter.chapter_title
+            changed = True
+
+        if changed:
+            logger.info(f"Editing chapter {md_id} with new info {data_to_post}")
+
+            for commit_retries in range(self.upload_retry_total):
+                try:
+                    update_response = self.session.put(
+                        f"{mangadex_api_url}/chapter/{md_id}",
+                        json=data_to_post,
+                        verify=False,
+                    )
+                except requests.RequestException as e:
+                    logger.error(e)
+                    continue
+
+                if update_response.status_code == 200:
+                    logger.info(f"Edited chapter {md_id}")
+                    print(f"Edited chapter:  {self.manga_generic_error_message}")
+                    time.sleep(ratelimit_time * 3)
+                    return True
+                elif update_response.status_code == 401:
+                    print_error(update_response, log_error=True)
+                    self.md_auth_object.login()
+                    continue
+                elif update_response.status_code == 404:
+                    print_error(update_response, log_error=True)
+                    time.sleep(ratelimit_time * 3)
+                    return False
+                else:
+                    logger.warning(f"Failed to edit {md_id}, retrying.")
+                    print_error(update_response, log_error=True)
+
+                time.sleep(ratelimit_time * 3)
+        else:
+            logger.info(f"Nothing to edit for chapter {md_id}")
+        return False
+
     def _check_for_duplicate_chapter_md_list(self, manga_chapters: List[dict]) -> bool:
         """Check for duplicate chapters on mangadex."""
-        # Skip duplicate chapters
-
-        # chapters_on_md = [
-        #     md_chapter
-        #     for md_chapter in manga_chapters
-        #     if (
-        #         md_chapter["attributes"]["chapter"] == self.chapter.chapter_number
-        #         and md_chapter["attributes"]["translatedLanguage"]
-        #         == self.chapter.chapter_language
-        #         and md_chapter["attributes"]["externalUrl"] is not None
-        #     )
-        # ]
-
-        # chapters_not_on_md = [
-        #     md_chapter
-        #     for md_chapter in manga_chapters
-        #     if md_chapter not in chapters_on_md
-        # ]
-
         for md_chapter in manga_chapters:
             if (
                 md_chapter["attributes"]["chapter"] == self.chapter.chapter_number
@@ -272,15 +330,17 @@ class ChapterUploaderProcess:
                 dupe_chapter_message = f"{self.manga_generic_error_message} already exists on mangadex, skipping."
                 logger.info(dupe_chapter_message)
                 print(dupe_chapter_message)
+
+                edited = self.edit_chapter(md_chapter)
                 # Add duplicate chapter to database to avoid checking it again
                 # in the future
                 update_database(
                     self.database_connection, self.chapter, md_chapter["id"]
                 )
-                return True
-        return False
+                return "edited" if edited else "dupe"
+        return "dupe"
 
-    def _check_already_uploaded(self) -> bool:
+    def _check_already_uploaded_internal_list(self) -> bool:
         """Check if chapter to upload is already in the internal list of uploaded chapters."""
         for chap in self.posted_md_updates:
             if (
@@ -291,7 +351,7 @@ class ChapterUploaderProcess:
                 return True
         return False
 
-    def _check_uploaded_same_ids(self, manga_chapters: List[dict]) -> bool:
+    def _check_uploaded_different_id(self, manga_chapters: List[dict]) -> bool:
         """Check if chapter id to upload has been uploaded already under a different id."""
         same_chapter_list_md = [
             re.sub(
@@ -318,19 +378,19 @@ class ChapterUploaderProcess:
         return False
 
     def start_upload(self, manga_chapters: list) -> Literal[0, 1, 2]:
-        if self._check_for_duplicate_chapter_md_list(manga_chapters):
-            return 1
+        if dupe_response := self._check_for_duplicate_chapter_md_list(manga_chapters):
+            return dupe_response if dupe_response in ("edited",) else "on_md"
 
-        if self._check_already_uploaded():
-            return 1
+        if self._check_already_uploaded_internal_list():
+            return "on_md"
 
-        if self._check_uploaded_same_ids(manga_chapters):
-            return 1
+        if self._check_uploaded_different_id(manga_chapters):
+            return "on_md"
 
         upload_session_response_json = self._create_upload_session()
         if upload_session_response_json is None:
             time.sleep(ratelimit_time)
-            return 2
+            return "session_error"
 
         self.upload_session_id = upload_session_response_json["data"]["id"]
         logger.info(
@@ -340,8 +400,8 @@ class ChapterUploaderProcess:
         if not chapter_committed:
             self.remove_upload_session()
             time.sleep(ratelimit_time)
-            return 2
+            return "session_error"
 
         self.posted_md_updates.append(self.chapter)
         time.sleep(ratelimit_time)
-        return 0
+        return "uploaded"
