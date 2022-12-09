@@ -6,7 +6,6 @@ from .utils.utils import (
     upload_retry,
     md_upload_api_url,
     mplus_language_map,
-    http_error_codes,
     components_path,
     get_md_id,
     flatten,
@@ -17,9 +16,6 @@ from .utils.database import (
     update_database,
 )
 
-from .utils.http_client import (
-    convert_json,
-    print_error,
-)
+from .utils.http_model import RequestError
 
 from .utils.dataclass_models import Chapter, Manga

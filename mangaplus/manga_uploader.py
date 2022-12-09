@@ -11,7 +11,7 @@ from .utils.helpter_functions import fetch_aggregate
 
 if TYPE_CHECKING:
     from .chapter_deleter import ChapterDeleterProcess
-    from .auth_md import AuthMD
+    from .http import HTTPClient
 
 logger = logging.getLogger("mangaplus")
 
@@ -20,12 +20,11 @@ class MangaUploaderProcess:
     def __init__(
         self,
         database_connection: sqlite3.Connection,
-        session: requests.Session,
+        http_client: "HTTPClient",
         updated_chapters: List[Chapter],
         all_manga_chapters: List[Chapter],
         mangadex_manga_id: str,
         deleter_process_object: "ChapterDeleterProcess",
-        md_auth_object: "AuthMD",
         chapters_on_md: List[dict],
         current_uploaded_chapters: List[Chapter],
         same_chapter_dict: Dict[str, List[int]],
@@ -35,13 +34,12 @@ class MangaUploaderProcess:
         **kwargs,
     ):
         self.database_connection = database_connection
-        self.session = session
+        self.http_client = http_client
         self.updated_chapters = updated_chapters
         self.all_manga_chapters = all_manga_chapters
         self.mangadex_manga_id = mangadex_manga_id
         self.chapters_on_md = chapters_on_md
         self.deleter_process_object = deleter_process_object
-        self.md_auth_object = md_auth_object
         self.posted_md_updates = current_uploaded_chapters
         self.same_chapter_dict = same_chapter_dict
         self.mangadex_manga_data = mangadex_manga_data
@@ -103,7 +101,7 @@ class MangaUploaderProcess:
 
     def get_chapter_volumes(self):
         aggregate_chapters = fetch_aggregate(
-            self.session,
+            self.http_client,
             self.mangadex_manga_id,
             # **{"translatedLanguage[]": ["en"]},
         )
@@ -124,7 +122,11 @@ class MangaUploaderProcess:
                     volume_chapters = volume_iter.keys()
 
                     if chapter.chapter_number in volume_chapters:
-                        chapter.chapter_volume = volume
+                        volume_str = str(volume).lstrip("0")
+                        if volume_str == "" or not volume_str:
+                            volume_str = "0"
+
+                        chapter.chapter_volume = volume_str
 
     def start_manga_uploading_process(self, last_manga: bool):
         self.skipped = 0
@@ -134,31 +136,32 @@ class MangaUploaderProcess:
         for count, chapter in enumerate(self.updated_chapters, start=1):
             chapter: Chapter = chapter
             chapter.md_manga_id = self.mangadex_manga_id
-            self.md_auth_object.login()
+            self.http_client.login()
 
             chapter_to_upload_process = ChapterUploaderProcess(
                 database_connection=self.database_connection,
-                session=self.session,
+                http_client=self.http_client,
                 mangadex_manga_id=self.mangadex_manga_id,
                 chapter=chapter,
-                md_auth_object=self.md_auth_object,
                 posted_md_updates=self.posted_md_updates,
                 same_chapter_dict=self.same_chapter_dict,
             )
 
             uploaded = chapter_to_upload_process.start_upload(self.chapters_on_md)
             if uploaded in ("on_md", "session_error", "edited"):
-                self.skipped += 1
                 if uploaded in ("on_md",):
+                    self.skipped += 1
                     self.skipped_chapter = True
                 elif uploaded in ("edited",):
                     self.edited += 1
                 elif uploaded in ("session_error",):
+                    self.skipped += 1
                     self.failed_uploads.append(chapter)
                 continue
 
             self.skipped_chapter = False
             self.posted_chapters.append(chapter)
+            time.sleep(1)
 
         if self.skipped != 0:
             skipped_chapters_message = f"Skipped {self.skipped} chapters out of {len(self.updated_chapters)} for manga {chapter.manga.manga_name}: {self.mangadex_manga_id} - {chapter.manga_id}."
@@ -177,5 +180,3 @@ class MangaUploaderProcess:
             self.skipped,
             self.edited,
         ).main(last_manga)
-
-        time.sleep(ratelimit_time * 2)

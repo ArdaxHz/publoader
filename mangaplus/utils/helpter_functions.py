@@ -1,17 +1,18 @@
 import logging
 import math
 import time
-from typing import List, Optional
-
-import requests
+from typing import TYPE_CHECKING, List, Optional
 
 from .utils import mangadex_api_url, ratelimit_time, upload_retry
-from .http_client import print_error, convert_json
+from . import RequestError
+
+if TYPE_CHECKING:
+    from ..http import HTTPClient
 
 logger = logging.getLogger("mangaplus")
 
 
-def get_md_api(session: requests.Session, route: str, **params: dict) -> List[dict]:
+def get_md_api(http_client: "HTTPClient", route: str, **params: dict) -> List[dict]:
     """Go through each page in the api to get all the chapters/manga."""
     chapters = []
     limit = 100
@@ -37,46 +38,39 @@ def get_md_api(session: requests.Session, route: str, **params: dict) -> List[di
 
         # Call the api and get the json data
         try:
-            chapters_response = session.get(
+            chapters_response = http_client.get(
                 f"{mangadex_api_url}/{route}", params=parameters, verify=False
             )
-            logger.info(f"Request url {chapters_response.url}")
-        except requests.RequestException as e:
+        except RequestError as e:
             logger.error(e)
             retry += 1
             continue
 
         if chapters_response.status_code != 200:
             manga_response_message = f"Couldn't get the {route}s of the group."
-            print_error(chapters_response, log_error=True)
             logger.error(manga_response_message)
             retry += 1
             continue
 
-        chapters_response_data = convert_json(chapters_response)
-        if chapters_response_data is None:
+        if chapters_response.data is None:
             logger.warning(f"Couldn't convert {route}s data into json, retrying.")
             retry += 1
             continue
 
-        chapters.extend(chapters_response_data["data"])
+        chapters.extend(chapters_response.data["data"])
         offset += limit
 
         if iteration == 0:
             # Finds how many pages needed to be called
-            pages = math.ceil(chapters_response_data.get("total", 0) / limit)
+            pages = math.ceil(chapters_response.data.get("total", 0) / limit)
             logger.debug(f"{pages} page(s) for group {route}s.")
-
-        # Wait every 5 pages
-        if iteration % 5 == 0:
-            time.sleep(ratelimit_time)
 
         # End the loop when all the pages have been gone through
         # Offset 10000 is the highest you can go, reset offset and get next
         # 10k batch using the last available chapter's created at date
         if (
-            len(chapters_response_data["data"]) == 0
-            or not chapters_response_data["data"]
+            len(chapters_response.data["data"]) == 0
+            or not chapters_response.data["data"]
         ):
             break
 
@@ -88,13 +82,11 @@ def get_md_api(session: requests.Session, route: str, **params: dict) -> List[di
             offset = 0
             retry = 0
             iteration = 0
-            time.sleep(5)
             continue
 
         iteration += 1
         retry = 0
 
-    time.sleep(ratelimit_time)
     return chapters
 
 
@@ -116,26 +108,21 @@ def iter_aggregate_chapters(aggregate_chapters: dict):
 
 
 def fetch_aggregate(
-    session: requests.Session, manga_id: str, **params
+    http_client: "HTTPClient", manga_id: str, **params
 ) -> Optional[dict]:
     """Call the mangadex api to get the volumes of each chapter."""
-    for i in range(upload_retry):
-        try:
-            aggregate_response = session.get(
-                f"{mangadex_api_url}/manga/{manga_id}/aggregate",
-                params=params,
-                verify=False,
-            )
-        except requests.RequestException as e:
-            logger.error(e)
-            continue
+    try:
+        aggregate_response = http_client.get(
+            f"{mangadex_api_url}/manga/{manga_id}/aggregate",
+            params=params,
+        )
+    except RequestError as e:
+        return
 
-        if aggregate_response.status_code in range(200, 300):
-            aggregate_response_json = convert_json(aggregate_response)
-            if aggregate_response_json is not None:
-                return aggregate_response_json["volumes"]
+    if (
+        aggregate_response.status_code in range(200, 300)
+        and aggregate_response.data is not None
+    ):
+        return aggregate_response.data["volumes"]
 
-    error = print_error(aggregate_response)
-    logger.error(
-        f"Error returned from aggregate response for manga {manga_id}: {error}"
-    )
+    logger.error(f"Error returned from aggregate response for manga {manga_id}")

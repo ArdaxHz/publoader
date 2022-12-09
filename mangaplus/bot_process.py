@@ -23,7 +23,7 @@ from . import (
 
 if TYPE_CHECKING:
     from .chapter_deleter import ChapterDeleterProcess
-    from .auth_md import AuthMD
+    from .http import HTTPClient
 
 logger = logging.getLogger("mangaplus")
 
@@ -32,11 +32,10 @@ class BotProcess:
     def __init__(
         self,
         config: configparser.RawConfigParser,
-        session: requests.Session,
+        http_client: "HTTPClient",
         updates: List[Chapter],
         all_mplus_chapters: List[Chapter],
         deleter_process_object: "ChapterDeleterProcess",
-        md_auth_object: "AuthMD",
         manga_id_map: Dict[str, List[int]],
         database_connection: sqlite3.Connection,
         title_regexes: Dict[str, List[int]],
@@ -45,11 +44,10 @@ class BotProcess:
         manga_data_local: Dict[str, dict],
     ):
         self.config = config
-        self.session = session
+        self.http_client = http_client
         self.updates = updates
         self.all_mplus_chapters = all_mplus_chapters
         self.deleter_process_object = deleter_process_object
-        self.md_auth_object = md_auth_object
         self.manga_id_map = manga_id_map
         self.database_connection = database_connection
         self.title_regexes = title_regexes
@@ -61,14 +59,15 @@ class BotProcess:
         self.processes: List[multiprocessing.Process] = []
         self.current_uploaded_chapters: List[Chapter] = []
         self.manga_data_local = manga_data_local
+
+        self._get_manga_data_md()
+        self.updated_manga_chapters = self._sort_chapters_by_manga(self.updates)
         self.chapters_on_md = self._get_mplus_chapters()
         self.manga_untracked = [
             m
             for m in list(self.chapters_on_md.keys())
             if m not in list(self.manga_id_map.keys())
         ]
-
-        self._get_manga_data_md()
 
         logger.info(f"Manga not tracked but on mangadex: {self.manga_untracked}")
 
@@ -110,12 +109,13 @@ class BotProcess:
         logger.debug("Getting all m+'s uploaded chapters.")
         print("Getting the mangaplus chapters on mangadex.")
         chapters_unsorted = get_md_api(
-            self.session,
+            self.http_client,
             "chapter",
             **{
                 "groups[]": [mplus_group_id],
                 "order[createdAt]": "desc",
                 "includes[]": ["manga"],
+                # "manga[]": self.updated_manga_chapters.keys(),
             },
         )
 
@@ -150,7 +150,7 @@ class BotProcess:
             for manga_splice in tracked_manga_splice:
                 tracked_manga_data.extend(
                     get_md_api(
-                        self.session,
+                        self.http_client,
                         "manga",
                         **{
                             "ids[]": manga_splice,
@@ -227,10 +227,11 @@ class BotProcess:
                 for l in range(0, len(uploaded_chapter_ids), 100)
             ]
 
+            time.sleep(ratelimit_time * 3)
             for uploaded_ids in uploaded_chapter_ids_split:
                 chapters_on_md.extend(
                     get_md_api(
-                        self.session,
+                        self.http_client,
                         "chapter",
                         **{
                             "ids[]": uploaded_ids,
@@ -254,20 +255,18 @@ class BotProcess:
     def upload_chapters(self):
         """Go through each new chapter and upload it to mangadex."""
         # Sort each chapter by manga
-        updated_manga_chapters = self._sort_chapters_by_manga(self.updates)
         all_manga_chapters = self._sort_chapters_by_manga(self.all_mplus_chapters)
         self._delete_extra_chapters()
 
-        for index, mangadex_manga_id in enumerate(updated_manga_chapters, start=1):
-            self.md_auth_object.login()
+        for index, mangadex_manga_id in enumerate(self.updated_manga_chapters, start=1):
+            self.http_client.login()
             manga_uploader = MangaUploaderProcess(
                 database_connection=self.database_connection,
-                session=self.session,
-                updated_chapters=updated_manga_chapters[mangadex_manga_id],
+                http_client=self.http_client,
+                updated_chapters=self.updated_manga_chapters[mangadex_manga_id],
                 all_manga_chapters=all_manga_chapters[mangadex_manga_id],
                 mangadex_manga_id=mangadex_manga_id,
                 deleter_process_object=self.deleter_process_object,
-                md_auth_object=self.md_auth_object,
                 chapters_on_md=self.chapters_on_md.get(mangadex_manga_id, []),
                 current_uploaded_chapters=self.current_uploaded_chapters,
                 same_chapter_dict=self.same_chapter_dict,
@@ -276,9 +275,9 @@ class BotProcess:
                 chapters_on_db=self.chapters_on_db,
             )
             manga_uploader.start_manga_uploading_process(
-                index == len(updated_manga_chapters)
+                index == len(self.updated_manga_chapters)
             )
+            time.sleep(0.5)
 
         if self.current_uploaded_chapters or self.clean_db:
-            time.sleep(ratelimit_time)
             self._check_all_chapters_uploaded()

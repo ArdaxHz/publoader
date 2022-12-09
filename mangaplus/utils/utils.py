@@ -16,14 +16,6 @@ mplus_language_map = {
     "6": "th",
 }
 
-http_error_codes = {
-    "400": "Bad request.",
-    "401": "Unauthorised.",
-    "403": "Forbidden.",
-    "404": "Not found.",
-    "429": "Too many requests.",
-}
-
 root_path = Path(".")
 config_file_path = root_path.joinpath("config").with_suffix(".ini")
 
@@ -183,6 +175,11 @@ try:
     upload_retry = int(config["User Set"].get("upload_retry", ""))
 except (ValueError, KeyError):
     upload_retry = 3
+
+try:
+    max_requests = int(config["User Set"].get("max_requests", ""))
+except (ValueError, KeyError):
+    max_requests = 5
 
 
 def flatten(t: List[list]) -> list:

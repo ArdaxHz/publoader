@@ -3,13 +3,10 @@ import sqlite3
 from datetime import datetime
 from typing import TYPE_CHECKING, Dict, List, Optional
 
-import requests
 from . import (
-    convert_json,
-    print_error,
+    RequestError,
     mangadex_api_url,
     mplus_group_id,
-    upload_retry,
     mplus_language_map,
 )
 from .utils.helpter_functions import (
@@ -22,6 +19,7 @@ from .utils.utils import format_title
 
 if TYPE_CHECKING:
     from .chapter_deleter import ChapterDeleterProcess
+    from .http import HTTPClient
 
 logger = logging.getLogger("mangaplus")
 
@@ -29,13 +27,13 @@ logger = logging.getLogger("mangaplus")
 class DeleteDuplicatesMD:
     def __init__(
         self,
-        session: requests.Session,
+        http_client: "HTTPClient",
         manga_id_map: Dict[str, List[int]],
         deleter_process_object: "ChapterDeleterProcess",
         database_connection: sqlite3.Connection,
         manga_data_local: Dict[str, dict],
     ) -> None:
-        self.session = session
+        self.http_client = http_client
         self.manga_id_map = manga_id_map
         self.deleter_process_object = deleter_process_object
         self.database_connection = database_connection
@@ -53,24 +51,21 @@ class DeleteDuplicatesMD:
 
     def fetch_chapters(self, chapters: List[str]) -> Optional[List[dict]]:
         logger.debug(f"Getting chapter data for chapter ids: {chapters}")
-        for i in range(upload_retry):
-            try:
-                chapters_response = self.session.get(
-                    f"{mangadex_api_url}/chapter",
-                    params={"ids[]": chapters, "limit": 100, "includes[]": ["manga"]},
-                    verify=False,
-                )
-            except requests.RequestException as e:
-                logger.error(e)
-                continue
+        try:
+            chapters_response = self.http_client.get(
+                f"{mangadex_api_url}/chapter",
+                params={"ids[]": chapters, "limit": 100, "includes[]": ["manga"]},
+                verify=False,
+            )
+        except RequestError as e:
+            logger.error(e)
+            return
 
-            if chapters_response.status_code in range(200, 300):
-                chapters_response_json = convert_json(chapters_response)
-                if chapters_response_json is not None:
-                    return chapters_response_json["data"]
-
-            error = print_error(chapters_response, log_error=True)
-        return None
+        if (
+            chapters_response.status_code in range(200, 300)
+            and chapters_response.data is not None
+        ):
+            return chapters_response.data["data"]
 
     def sort_manga_data(self, chapters: list):
         chapter = chapters[0]
@@ -165,7 +160,7 @@ class DeleteDuplicatesMD:
                 f"Getting aggregate info for manga {manga_id} in languages {self.languages}."
             )
             aggregate_chapters_all_langs_unchecked = fetch_aggregate(
-                self.session,
+                self.http_client,
                 manga_id,
                 **{
                     "translatedLanguage[]": self.languages,
@@ -196,7 +191,7 @@ class DeleteDuplicatesMD:
             for chapter_chunk in all_chapter_ids_unsorted_split:
                 chapters_md_unsorted.extend(
                     get_md_api(
-                        self.session,
+                        self.http_client,
                         "chapter",
                         **{"ids[]": chapter_chunk, "includes[]": ["manga"]},
                     )

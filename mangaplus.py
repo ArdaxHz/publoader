@@ -14,12 +14,12 @@ from mangaplus.utils.database import database_name, database_path
 
 from mangaplus.webhook import webhook
 from mangaplus.chapter_deleter import ChapterDeleterProcess
-from mangaplus.auth_md import AuthMD
+from mangaplus.http import HTTPClient
 from mangaplus.mplus_api import MPlusAPI
 from mangaplus.dupes_checker import DeleteDuplicatesMD
 from mangaplus.bot_process import BotProcess
 
-__version__ = "2.0.5"
+__version__ = "2.0.6"
 
 logger = logging.getLogger("mangaplus")
 
@@ -60,14 +60,11 @@ def main(db_connection: Optional[sqlite3.Connection] = None, clean_db=False):
         "Retrieved posted chapters from database and got mangaplus ids from manga id map file."
     )
 
-    session = requests.Session()
-    session.headers.update({"User-Agent": f"MP-MD_bot/{__version__}"})
-    md_auth_object = AuthMD(session, config)
+    http_client = HTTPClient(config, __version__)
 
     # Start deleting expired chapters
     deleter_process_object = ChapterDeleterProcess(
-        session=session,
-        md_auth_object=md_auth_object,
+        http_client=http_client,
         database_connection=database_connection,
     )
 
@@ -89,11 +86,10 @@ def main(db_connection: Optional[sqlite3.Connection] = None, clean_db=False):
             try:
                 BotProcess(
                     config=config,
-                    session=session,
+                    http_client=http_client,
                     updates=updates,
                     all_mplus_chapters=all_mplus_chapters,
                     deleter_process_object=deleter_process_object,
-                    md_auth_object=md_auth_object,
                     manga_id_map=manga_id_map,
                     database_connection=database_connection,
                     title_regexes=title_regexes,
@@ -110,7 +106,7 @@ def main(db_connection: Optional[sqlite3.Connection] = None, clean_db=False):
 
     if clean_db:
         dupes_deleter = DeleteDuplicatesMD(
-            session,
+            http_client,
             manga_id_map,
             deleter_process_object,
             database_connection,

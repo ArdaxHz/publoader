@@ -4,16 +4,16 @@ import time
 from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional
 
-import requests
+
 from .webhook import MPlusBotDeleterWebhook
 from . import (
-    print_error,
+    RequestError,
     mangadex_api_url,
     upload_retry,
 )
 
 if TYPE_CHECKING:
-    from .auth_md import AuthMD
+    from .http import HTTPClient
 
 logger = logging.getLogger("mangaplus")
 
@@ -22,17 +22,15 @@ class ChapterDeleterProcess:
     def __init__(
         self,
         *,
-        session: requests.Session,
+        http_client: "HTTPClient",
         posted_chapters: list = [],
-        md_auth_object: "AuthMD",
         on_db: bool = True,
         database_connection: "sqlite3.Connection",
     ):
-        self.session = session
+        self.http_client = http_client
         self.on_db = on_db
         self.database_connection = database_connection
         self.posted_chapters = posted_chapters
-        self.md_auth_object = md_auth_object
         self.chapters_to_delete = self.get_chapter_to_delete(
             self.posted_chapters if self.posted_chapters else []
         )
@@ -97,37 +95,24 @@ class ChapterDeleterProcess:
         deleted_message = f'{md_chapter_id}: {chapter.get("chapter_id", None)}, manga {manga_id}, chapter {chapter.get("chapter_number", None)}, language {chapter.get("chapter_language", None)}.'
 
         if md_chapter_id is not None:
-            for i in range(upload_retry):
-                try:
-                    delete_reponse = self.session.delete(
-                        f"{mangadex_api_url}/chapter/{md_chapter_id}", verify=False
-                    )
-                except requests.RequestException:
-                    continue
+            try:
+                delete_reponse = self.http_client.delete(
+                    f"{mangadex_api_url}/chapter/{md_chapter_id}"
+                )
+            except RequestError as e:
+                logger.error(e)
+                return
 
-                if delete_reponse.status_code != 200:
-                    logger.error(f"Couldn't delete expired chapter {deleted_message}")
-                    print_error(delete_reponse, log_error=True)
+            if delete_reponse.status_code == 200:
+                logger.info(f"Deleted {chapter}.")
+                print(f"----Deleted {deleted_message}")
+                if self.on_db and chapter:
+                    self._delete_from_database(chapter)
 
-                    if delete_reponse.status_code == 401:
-                        unauthorised_message = (
-                            f"You're not logged in to delete this chapter {chapter}."
-                        )
-                        logger.error(unauthorised_message)
-                        print(unauthorised_message)
+                MPlusBotDeleterWebhook(chapter).main()
+                return
 
-                        self.md_auth_object.login()
-                        continue
-
-                if delete_reponse.status_code == 200:
-                    logger.info(f"Deleted {chapter}.")
-                    print(f"----Deleted {deleted_message}")
-                    MPlusBotDeleterWebhook(chapter).main()
-                    break
-
-        if self.on_db and chapter:
-            self._delete_from_database(chapter)
-        time.sleep(self.chapter_delete_ratelimit)
+        logger.error(f"Couldn't delete expired chapter {deleted_message}")
 
     def _delete_expired_chapters(self):
         """Delete expired chapters from mangadex."""
@@ -138,7 +123,7 @@ class ChapterDeleterProcess:
 
         _local_list = self.chapters_to_delete[:]
         for count, chapter_to_delete in enumerate(_local_list, start=1):
-            self.md_auth_object.login()
+            self.http_client.login()
             looped_all = count == len(_local_list)
             self._remove_old_chapter(chapter_to_delete)
 
@@ -158,5 +143,5 @@ class ChapterDeleterProcess:
     def delete(self):
         """Start the chapter deleter process."""
         if self.chapters_to_delete:
-            self.md_auth_object.login()
+            self.http_client.login()
             self._delete_expired_chapters()
