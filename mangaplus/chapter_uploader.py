@@ -1,16 +1,11 @@
 import logging
 import re
-import sqlite3
-import time
 from datetime import datetime
-from typing import TYPE_CHECKING, Dict, List, Literal, Optional
+from typing import TYPE_CHECKING, Dict, List, Optional
 
-import requests
-
-from mangaplus.utils.http_model import RequestError
+from .utils.http_model import RequestError
 from . import (
     md_upload_api_url,
-    ratelimit_time,
     mplus_group_id,
     upload_retry,
     Chapter,
@@ -20,9 +15,10 @@ from . import (
     mangadex_api_url,
 )
 
-
 if TYPE_CHECKING:
+    import sqlite3
     from .http import HTTPClient
+
 
 logger = logging.getLogger("mangaplus")
 
@@ -30,7 +26,7 @@ logger = logging.getLogger("mangaplus")
 class ChapterUploaderProcess:
     def __init__(
         self,
-        database_connection: sqlite3.Connection,
+        database_connection: "sqlite3.Connection",
         http_client: "HTTPClient",
         mangadex_manga_id: str,
         chapter: "Chapter",
@@ -172,9 +168,7 @@ class ChapterUploaderProcess:
                 self.chapter.md_chapter_id = succesful_upload_id
                 logger.info(succesful_upload_message)
                 print(succesful_upload_message)
-                update_database(
-                    self.database_connection, self.chapter, succesful_upload_id
-                )
+                update_database(self.database_connection, self.chapter)
             else:
                 chapter_commit_response_json_message = f"Couldn't convert successful chapter commit api response into a json"
                 logger.error(chapter_commit_response_json_message)
@@ -254,6 +248,7 @@ class ChapterUploaderProcess:
                 == self.chapter.chapter_language
                 and md_chapter["attributes"]["externalUrl"] is not None
             ):
+                self.chapter.md_chapter_id = md_chapter["id"]
                 dupe_chapter_message = f"{self.manga_generic_error_message} already exists on mangadex, skipping."
                 logger.info(dupe_chapter_message)
                 print(dupe_chapter_message)
@@ -261,9 +256,7 @@ class ChapterUploaderProcess:
                 edited = self.edit_chapter(md_chapter)
                 # Add duplicate chapter to database to avoid checking it again
                 # in the future
-                update_database(
-                    self.database_connection, self.chapter, md_chapter["id"]
-                )
+                update_database(self.database_connection, self.chapter)
                 return "edited" if edited else "on_md"
         return "new"
 

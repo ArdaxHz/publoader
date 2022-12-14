@@ -1,10 +1,10 @@
 import configparser
 import json
 import logging
+import re
 from datetime import date
 from pathlib import Path
-from typing import Dict, List, Optional
-
+from typing import Dict, List
 
 mplus_language_map = {
     "0": "en",
@@ -15,6 +15,8 @@ mplus_language_map = {
     "5": "ru",
     "6": "th",
 }
+
+EXPIRE_TIME = 946684799
 
 root_path = Path(".")
 config_file_path = root_path.joinpath("config").with_suffix(".ini")
@@ -164,6 +166,9 @@ components_path.mkdir(parents=True, exist_ok=True)
 mangadex_api_url = config["Paths"]["mangadex_api_url"]
 md_upload_api_url = f"{mangadex_api_url}/upload"
 mplus_group_id = "4f1de6a2-f0c5-4ac5-bce5-02c7dbb67deb"
+mplus_url_regex = re.compile(
+    r"(?:https\:\/\/mangaplus\.shueisha\.co\.jp\/viewer\/)(\d+)", re.I
+)
 
 try:
     ratelimit_time = int(config["User Set"].get("mangadex_ratelimit_time", ""))
@@ -180,29 +185,3 @@ try:
     max_requests = int(config["User Set"].get("max_requests", ""))
 except (ValueError, KeyError):
     max_requests = 5
-
-
-def flatten(t: List[list]) -> list:
-    """Flatten nested lists into one list."""
-    return [item for sublist in t for item in sublist]
-
-
-def get_md_id(manga_id_map: Dict[str, List[int]], mangaplus_id: int) -> Optional[str]:
-    """Get the mangadex id from the mangaplus one."""
-    for md_id in manga_id_map:
-        if mangaplus_id in manga_id_map[md_id]:
-            return md_id
-
-
-def format_title(manga_data: dict) -> str:
-    attributes = manga_data.get("attributes", None)
-    if attributes is None:
-        return manga_data["id"]
-
-    manga_title = attributes["title"].get("en")
-    if manga_title is None:
-        key = next(iter(attributes["title"]))
-        manga_title = attributes["title"].get(
-            attributes["originalLanguage"], attributes["title"][key]
-        )
-    return manga_title

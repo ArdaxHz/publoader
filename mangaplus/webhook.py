@@ -8,10 +8,11 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Union
 
 from discord_webhook import DiscordEmbed, DiscordWebhook
 
-from .utils.utils import config
+from .utils.utils import config, EXPIRE_TIME
 
 if TYPE_CHECKING:
     from mangaplus import Chapter
+
 
 logger = logging.getLogger("webhook")
 
@@ -76,7 +77,7 @@ class WebhookHelper:
             f"{self._format_link(LinkToFormatType.MANGADEX_CHAPTER, chapter.get('md_chapter_id'), failed_upload)}"
             f"{self._format_link(LinkToFormatType.MANGAPLUS_CHAPTER, chapter.get('chapter_id'))}"
             f"Chapter title: `{chapter.get('chapter_title')}`\n"
-            f"Chapter expiry: `{datetime.datetime.fromtimestamp(chapter.get('chapter_expire', 946684799)).isoformat()}`\n"
+            f"Chapter expiry: `{datetime.datetime.fromtimestamp(chapter.get('chapter_expire', EXPIRE_TIME)).isoformat()}`\n"
             f"{self._format_link(LinkToFormatType.MANGADEX_MANGA, chapter.get('md_manga_id'), failed_upload)}"
             f"{self._format_link(LinkToFormatType.MANGAPLUS_MANGA, chapter.get('manga_id'))}"
         )

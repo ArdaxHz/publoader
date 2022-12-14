@@ -1,12 +1,12 @@
-from datetime import datetime
 import json
 import logging
 import time
+from datetime import datetime
 from typing import Optional
 
 import requests
 
-from .utils import ratelimit_time, max_requests, upload_retry
+from .utils import max_requests, upload_retry
 
 
 logger = logging.getLogger("mangaplus")

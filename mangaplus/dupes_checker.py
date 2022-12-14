@@ -1,8 +1,8 @@
 import logging
-import sqlite3
 from datetime import datetime
 from typing import TYPE_CHECKING, Dict, List, Optional
 
+from .utils.database import update_expired_chapter_database
 from . import (
     RequestError,
     mangadex_api_url,
@@ -13,11 +13,12 @@ from .utils.helpter_functions import (
     fetch_aggregate,
     get_md_api,
     iter_aggregate_chapters,
+    format_title,
 )
 from .webhook import MPlusBotDupesWebhook
-from .utils.utils import format_title
 
 if TYPE_CHECKING:
+    import sqlite3
     from .chapter_deleter import ChapterDeleterProcess
     from .http import HTTPClient
 
@@ -30,7 +31,7 @@ class DeleteDuplicatesMD:
         http_client: "HTTPClient",
         manga_id_map: Dict[str, List[int]],
         deleter_process_object: "ChapterDeleterProcess",
-        database_connection: sqlite3.Connection,
+        database_connection: "sqlite3.Connection",
         manga_data_local: Dict[str, dict],
     ) -> None:
         self.http_client = http_client
@@ -215,15 +216,10 @@ class DeleteDuplicatesMD:
                 logger.debug(f"Found dupes in manga {manga_id} for language {language}")
 
                 chapters_to_delete_list: List[dict] = [
-                    {
-                        "md_chapter_id": c["id"],
-                        "md_manga_id": manga_id,
-                        "chapter_language": c["attributes"]["translatedLanguage"],
-                        "chapter_number": c["attributes"]["chapter"],
-                        "chapter_timestamp": 946684799,
-                        "chapter_expire": 946684799,
-                    }
-                    for c in chapters_to_delete
+                    update_expired_chapter_database(
+                        self.database_connection, expired_obj, md_manga_id=manga_id
+                    )
+                    for expired_obj in chapters_to_delete
                 ]
 
                 self.deleter_process_object.add_more_chapters(chapters_to_delete_list)

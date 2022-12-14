@@ -8,18 +8,18 @@ from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
-from mangaplus.utils import utils
 from mangaplus import open_database, components_path
+from mangaplus.utils import utils
 from mangaplus.utils.database import database_name, database_path
 
-from mangaplus.webhook import webhook
+from mangaplus.bot_process import BotProcess
 from mangaplus.chapter_deleter import ChapterDeleterProcess
+from mangaplus.dupes_checker import DeleteDuplicatesMD
 from mangaplus.http import HTTPClient
 from mangaplus.mplus_api import MPlusAPI
-from mangaplus.dupes_checker import DeleteDuplicatesMD
-from mangaplus.bot_process import BotProcess
+from mangaplus.webhook import webhook
 
-__version__ = "2.0.6"
+__version__ = "2.0.7"
 
 logger = logging.getLogger("mangaplus")
 
@@ -59,6 +59,7 @@ def main(db_connection: Optional[sqlite3.Connection] = None, clean_db=False):
     logger.info(
         "Retrieved posted chapters from database and got mangaplus ids from manga id map file."
     )
+    chapters_on_md = {}
 
     http_client = HTTPClient(config, __version__)
 
@@ -96,6 +97,7 @@ def main(db_connection: Optional[sqlite3.Connection] = None, clean_db=False):
                     clean_db=clean_db,
                     chapters_on_db=posted_chapters_data,
                     manga_data_local=manga_data_local,
+                    chapters_on_md=chapters_on_md,
                 ).upload_chapters()
             except (requests.RequestException, sqlite3.OperationalError) as e:
                 logger.error(e)

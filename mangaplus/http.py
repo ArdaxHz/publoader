@@ -1,12 +1,11 @@
-import base64
 import configparser
 import json
 import logging
-from datetime import datetime, timedelta
 
+from . import mangadex_api_url, components_path
 from .utils.http_model import HTTPModel
 from .utils import RequestError
-from . import mangadex_api_url, components_path
+
 
 logger = logging.getLogger("mangaplus")
 

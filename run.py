@@ -46,6 +46,7 @@ def daily_check():
 
 def clean_db():
     """Call the clean_db function of the mangaplus bot."""
+    check_for_update(root_path)
     print("Running the clean database function.")
     subprocess.call([RUNNER, "mangaplus.py", "-c"])
 
@@ -69,17 +70,17 @@ if __name__ == "__main__":
     main()
     print("End of initial run, starting scheduler.")
     schedule = Scheduler(tzinfo=timezone.utc)
-    schedule.weekly(
-        trigger.Wednesday(
-            dtTime(
-                hour=daily_run_time_checks_hour,
-                minute=daily_run_time_checks_minute,
-                tzinfo=timezone.utc,
-            ),
-        ),
-        clean_db,
-        weight=8,
-    )
+    # schedule.weekly(
+    #     trigger.Wednesday(
+    #         dtTime(
+    #             hour=daily_run_time_checks_hour,
+    #             minute=daily_run_time_checks_minute,
+    #             tzinfo=timezone.utc,
+    #         ),
+    #     ),
+    #     clean_db,
+    #     weight=8,
+    # )
     schedule.daily(
         dtTime(
             hour=daily_run_time_daily_hour,
@@ -89,24 +90,24 @@ if __name__ == "__main__":
         main,
         weight=9,
     )
-    schedule.daily(
-        dtTime(
-            hour=daily_run_time_checks_hour,
-            minute=daily_run_time_checks_minute,
-            tzinfo=timezone.utc,
-        ),
-        daily_check,
-        weight=1,
-    )
     # schedule.daily(
     #     dtTime(
     #         hour=daily_run_time_checks_hour,
     #         minute=daily_run_time_checks_minute,
     #         tzinfo=timezone.utc,
     #     ),
-    #     clean_db,
-    #     weight=8,
+    #     daily_check,
+    #     weight=1,
     # )
+    schedule.daily(
+        dtTime(
+            hour=daily_run_time_checks_hour,
+            minute=daily_run_time_checks_minute,
+            tzinfo=timezone.utc,
+        ),
+        clean_db,
+        weight=8,
+    )
 
     while True:
         schedule.exec_jobs()

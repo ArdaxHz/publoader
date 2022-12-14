@@ -1,17 +1,18 @@
 import logging
-import sqlite3
 import time
 from typing import TYPE_CHECKING, Dict, List
 
-import requests
-from . import update_database, ratelimit_time, Chapter, mplus_language_map
+from . import Chapter, mplus_language_map
 from .chapter_uploader import ChapterUploaderProcess
 from .webhook import MPlusBotUpdatesWebhook
+from .utils.database import update_expired_chapter_database
 from .utils.helpter_functions import fetch_aggregate
 
 if TYPE_CHECKING:
+    import sqlite3
     from .chapter_deleter import ChapterDeleterProcess
     from .http import HTTPClient
+
 
 logger = logging.getLogger("mangaplus")
 
@@ -19,7 +20,7 @@ logger = logging.getLogger("mangaplus")
 class MangaUploaderProcess:
     def __init__(
         self,
-        database_connection: sqlite3.Connection,
+        database_connection: "sqlite3.Connection",
         http_client: "HTTPClient",
         updated_chapters: List[Chapter],
         all_manga_chapters: List[Chapter],
@@ -75,22 +76,13 @@ class MangaUploaderProcess:
 
         chapters_to_delete = []
         for expired in md_chapters_not_mplus:
-            md_chapter_id = expired["id"]
-
-            expired_chapter_object = Chapter(
-                chapter_timestamp=946684799,
-                chapter_expire=946684799,
-                chapter_language=expired["attributes"]["translatedLanguage"],
-                chapter_title=expired["attributes"]["title"],
-                chapter_number=expired["attributes"]["chapter"],
+            expired_chapter_object = update_expired_chapter_database(
+                self.database_connection,
+                expired,
+                chapters_on_db=self.chapters_on_db,
                 md_manga_id=self.mangadex_manga_id,
-                md_chapter_id=md_chapter_id,
             )
-
-            update_database(
-                self.database_connection, expired_chapter_object, md_chapter_id
-            )
-            chapters_to_delete.append(vars(expired_chapter_object))
+            chapters_to_delete.append(expired_chapter_object)
 
         return chapters_to_delete
 

@@ -8,10 +8,10 @@ from dataclasses import replace
 from datetime import datetime
 from typing import Dict, List, Optional, Union
 
-
-from . import response_pb2 as response_pb
-from . import Chapter, Manga, get_md_id
+from . import response_pb2 as response_pb, get_md_id
+from . import Chapter, Manga
 from .webhook import MPlusBotWebhook
+
 
 logger = logging.getLogger("mangaplus")
 logger_debug = logging.getLogger("debug")

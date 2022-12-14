@@ -7,9 +7,8 @@ from .utils.utils import (
     md_upload_api_url,
     mplus_language_map,
     components_path,
-    get_md_id,
-    flatten,
 )
+from .utils import flatten, get_md_id
 
 from .utils.database import (
     open_database,

@@ -1,29 +1,27 @@
 import configparser
 import json
 import logging
-import multiprocessing
-import sqlite3
 import time
 from typing import TYPE_CHECKING, Dict, List
 
-import requests
+from .utils.database import update_expired_chapter_database
+from .utils.helpter_functions import get_md_api, format_title
 
-from .utils.helpter_functions import get_md_api
-from .utils.utils import format_title
 from .webhook import MPlusBotNotIndexedWebhook
 from .manga_uploader import MangaUploaderProcess
 from . import (
     ratelimit_time,
     mplus_group_id,
     Chapter,
-    update_database,
     components_path,
     get_md_id,
 )
 
 if TYPE_CHECKING:
+    import sqlite3
     from .chapter_deleter import ChapterDeleterProcess
     from .http import HTTPClient
+
 
 logger = logging.getLogger("mangaplus")
 
@@ -37,11 +35,12 @@ class BotProcess:
         all_mplus_chapters: List[Chapter],
         deleter_process_object: "ChapterDeleterProcess",
         manga_id_map: Dict[str, List[int]],
-        database_connection: sqlite3.Connection,
+        database_connection: "sqlite3.Connection",
         title_regexes: Dict[str, List[int]],
         clean_db: bool,
         chapters_on_db: List[dict],
         manga_data_local: Dict[str, dict],
+        chapters_on_md: Dict[str, List[dict]],
     ):
         self.config = config
         self.http_client = http_client
@@ -56,13 +55,13 @@ class BotProcess:
         )
         self.clean_db = clean_db
         self.chapters_on_db = chapters_on_db
-        self.processes: List[multiprocessing.Process] = []
         self.current_uploaded_chapters: List[Chapter] = []
         self.manga_data_local = manga_data_local
 
         self._get_manga_data_md()
         self.updated_manga_chapters = self._sort_chapters_by_manga(self.updates)
         self.chapters_on_md = self._get_mplus_chapters()
+
         self.manga_untracked = [
             m
             for m in list(self.chapters_on_md.keys())
@@ -78,22 +77,13 @@ class BotProcess:
         for manga_id in self.chapters_on_md:
             if manga_id in self.manga_untracked:
                 for expired in self.chapters_on_md[manga_id]:
-                    md_chapter_id = expired["id"]
-
-                    expired_chapter_object = Chapter(
-                        chapter_timestamp=946684799,
-                        chapter_expire=946684799,
-                        chapter_language=expired["attributes"]["translatedLanguage"],
-                        chapter_title=expired["attributes"]["title"],
-                        chapter_number=expired["attributes"]["chapter"],
+                    expired_chapter_object = update_expired_chapter_database(
+                        self.database_connection,
+                        expired,
+                        chapters_on_db=self.chapters_on_db,
                         md_manga_id=manga_id,
-                        md_chapter_id=md_chapter_id,
                     )
-
-                    update_database(
-                        self.database_connection, expired_chapter_object, md_chapter_id
-                    )
-                    chapters_to_delete.append(vars(expired_chapter_object))
+                    chapters_to_delete.append(expired_chapter_object)
 
         return chapters_to_delete
 
@@ -108,27 +98,17 @@ class BotProcess:
     def _get_mplus_chapters(self) -> Dict[str, List[dict]]:
         logger.debug("Getting all m+'s uploaded chapters.")
         print("Getting the mangaplus chapters on mangadex.")
-        chapters_unsorted = get_md_api(
-            self.http_client,
-            "chapter",
-            **{
-                "groups[]": [mplus_group_id],
-                "order[createdAt]": "desc",
-                "includes[]": ["manga"],
-                # "manga[]": self.updated_manga_chapters.keys(),
-            },
-        )
-
-        logger.debug("Sorting the uploaded chapters by MD ID.")
         chapters_sorted = {}
-        for chapter in chapters_unsorted:
-            manga = [g for g in chapter["relationships"] if g["type"] == "manga"][0]
-            manga_id = manga["id"]
-
-            try:
-                chapters_sorted[manga_id].append(chapter)
-            except (KeyError, ValueError, AttributeError):
-                chapters_sorted[manga_id] = [chapter]
+        for manga_id in set(self.updated_manga_chapters.keys()):
+            chapters_sorted[manga_id] = get_md_api(
+                self.http_client,
+                "chapter",
+                **{
+                    "groups[]": [mplus_group_id],
+                    "order[createdAt]": "desc",
+                    "manga": manga_id,
+                },
+            )
         return chapters_sorted
 
     def _get_manga_data_md(self) -> Dict[str, dict]:

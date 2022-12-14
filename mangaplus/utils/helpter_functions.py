@@ -1,13 +1,13 @@
 import logging
 import math
-import time
-from typing import TYPE_CHECKING, List, Optional
+from typing import TYPE_CHECKING, List, Optional, Dict
 
-from .utils import mangadex_api_url, ratelimit_time, upload_retry
-from . import RequestError
+from .http_model import RequestError
+from .utils import mangadex_api_url, upload_retry
 
 if TYPE_CHECKING:
     from ..http import HTTPClient
+
 
 logger = logging.getLogger("mangaplus")
 
@@ -126,3 +126,29 @@ def fetch_aggregate(
         return aggregate_response.data["volumes"]
 
     logger.error(f"Error returned from aggregate response for manga {manga_id}")
+
+
+def flatten(t: List[list]) -> list:
+    """Flatten nested lists into one list."""
+    return [item for sublist in t for item in sublist]
+
+
+def get_md_id(manga_id_map: Dict[str, List[int]], mangaplus_id: int) -> Optional[str]:
+    """Get the mangadex id from the mangaplus one."""
+    for md_id in manga_id_map:
+        if mangaplus_id in manga_id_map[md_id]:
+            return md_id
+
+
+def format_title(manga_data: dict) -> str:
+    attributes = manga_data.get("attributes", None)
+    if attributes is None:
+        return manga_data["id"]
+
+    manga_title = attributes["title"].get("en")
+    if manga_title is None:
+        key = next(iter(attributes["title"]))
+        manga_title = attributes["title"].get(
+            attributes["originalLanguage"], attributes["title"][key]
+        )
+    return manga_title
