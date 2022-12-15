@@ -22,6 +22,7 @@ def make_webhook():
 
 
 webhook = make_webhook()
+COLOUR = "B86F8C"
 
 
 class LinkToFormatType(Enum):
@@ -33,7 +34,7 @@ class LinkToFormatType(Enum):
 
 class WebhookHelper:
     def __init__(self) -> None:
-        self.colour = "B86F8C"
+        self.colour = COLOUR
         self.mangadex_chapter_url = "https://mangadex.org/chapter/{}"
         self.mangaplus_manga_url = "https://mangaplus.shueisha.co.jp/titles/{}"
         self.mangaplus_chapter_url = "https://mangaplus.shueisha.co.jp/viewer/{}"
@@ -211,6 +212,12 @@ class WebhookBase(WebhookHelper):
 
 
 class MPlusBotUpdatesWebhook(WebhookBase):
+    no_new_chapters_embed = None
+
+    @staticmethod
+    def make_static_method():
+        return DiscordEmbed(**{"color": COLOUR})
+
     def __init__(
         self,
         manga: dict,
@@ -270,10 +277,26 @@ class MPlusBotUpdatesWebhook(WebhookBase):
             self.format_embed(self.normalised_chapters)
         if self.failed_chapters:
             self.format_embed(self.normalised_failed_chapters)
-
-        if not self.chapters and not self.failed_chapters:
+        if self.edited > 0:
             embed = self.make_embed(self.normalised_manga)
             webhook.add_embed(embed)
+
+        # if not self.chapters and not self.failed_chapters:
+        #     if MPlusBotUpdatesWebhook.no_new_chapters_embed is None:
+        #         MPlusBotUpdatesWebhook.no_new_chapters_embed = (
+        #             MPlusBotUpdatesWebhook.make_static_method()
+        #         )
+
+        #     MPlusBotUpdatesWebhook.no_new_chapters_embed.add_embed_field(
+        #         name=self.normalised_manga["title"],
+        #         value=self.normalised_manga["description"],
+        #     )
+
+        #     if len(MPlusBotUpdatesWebhook.no_new_chapters_embed.fields) >= 10:
+        #         webhook.add_embed(MPlusBotUpdatesWebhook.no_new_chapters_embed)
+        #         self.send_webhook()
+        #         MPlusBotUpdatesWebhook.no_new_chapters_embed.fields[:] = []
+        #         return
 
         if last_manga:
             embed = self.make_embed(
