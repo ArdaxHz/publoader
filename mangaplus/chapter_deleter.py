@@ -2,15 +2,15 @@ import logging
 from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional
 
+from .utils.http import RequestError
 from .webhook import MPlusBotDeleterWebhook
 from . import (
-    RequestError,
     mangadex_api_url,
 )
 
 if TYPE_CHECKING:
     import sqlite3
-    from .http import HTTPClient
+    from .utils.http import HTTPClient
 
 
 logger = logging.getLogger("mangaplus")

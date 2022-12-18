@@ -46,7 +46,7 @@ def setup_logs(
     logs_path = path.joinpath(filename)
     fileh = logging.FileHandler(logs_path, "a")
     formatter = logging.Formatter(
-        "%(asctime)s,%(msecs)d %(levelname)-8s [%(filename)s:%(lineno)d] %(message)s"
+        "%(asctime)s %(levelname)-8s [%(filename)s:%(funcName)s:%(lineno)d] %(message)s"
     )
     fileh.setFormatter(formatter)
 

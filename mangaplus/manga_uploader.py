@@ -11,7 +11,7 @@ from .utils.helpter_functions import fetch_aggregate
 if TYPE_CHECKING:
     import sqlite3
     from .chapter_deleter import ChapterDeleterProcess
-    from .http import HTTPClient
+    from .utils.http import HTTPClient
 
 
 logger = logging.getLogger("mangaplus")

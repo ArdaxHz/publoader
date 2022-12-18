@@ -2,11 +2,11 @@ import logging
 import math
 from typing import TYPE_CHECKING, List, Optional, Dict
 
-from .http_model import RequestError
 from .utils import mangadex_api_url, upload_retry
 
 if TYPE_CHECKING:
-    from ..http import HTTPClient
+    from .http import RequestError
+    from .http import HTTPClient
 
 
 logger = logging.getLogger("mangaplus")

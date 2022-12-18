@@ -2,9 +2,9 @@ import logging
 from datetime import datetime
 from typing import TYPE_CHECKING, Dict, List, Optional
 
+from .utils.http import RequestError
 from .utils.database import update_expired_chapter_database
 from . import (
-    RequestError,
     mangadex_api_url,
     mplus_group_id,
     mplus_language_map,
@@ -20,7 +20,7 @@ from .webhook import MPlusBotDupesWebhook
 if TYPE_CHECKING:
     import sqlite3
     from .chapter_deleter import ChapterDeleterProcess
-    from .http import HTTPClient
+    from .utils.http import HTTPClient
 
 logger = logging.getLogger("mangaplus")
 
@@ -208,9 +208,8 @@ class DeleteDuplicatesMD:
                 chapters_to_delete = self.check_chapters(
                     chapters_md_sorted[language], dupes_webhook
                 )
-                dupes_found = bool(chapters_to_delete)
 
-                if not dupes_found:
+                if not chapters_to_delete:
                     continue
 
                 logger.debug(f"Found dupes in manga {manga_id} for language {language}")

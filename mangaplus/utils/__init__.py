@@ -15,8 +15,4 @@ from .database import (
     update_database,
 )
 
-from .http_model import (
-    RequestError,
-)
-
 from .dataclass_models import Chapter, Manga

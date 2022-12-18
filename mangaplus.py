@@ -15,11 +15,11 @@ from mangaplus.utils.database import database_name, database_path
 from mangaplus.bot_process import BotProcess
 from mangaplus.chapter_deleter import ChapterDeleterProcess
 from mangaplus.dupes_checker import DeleteDuplicatesMD
-from mangaplus.http import HTTPClient
 from mangaplus.mplus_api import MPlusAPI
 from mangaplus.webhook import webhook
+from mangaplus.utils.http import HTTPClient
 
-__version__ = "2.0.7"
+__version__ = "2.0.8"
 
 logger = logging.getLogger("mangaplus")
 

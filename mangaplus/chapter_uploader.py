@@ -3,7 +3,7 @@ import re
 from datetime import datetime
 from typing import TYPE_CHECKING, Dict, List, Optional
 
-from .utils.http_model import RequestError
+from .utils.http import RequestError
 from . import (
     md_upload_api_url,
     mplus_group_id,
@@ -17,7 +17,7 @@ from . import (
 
 if TYPE_CHECKING:
     import sqlite3
-    from .http import HTTPClient
+    from .utils.http import HTTPClient
 
 
 logger = logging.getLogger("mangaplus")
