@@ -19,7 +19,7 @@ from mangaplus.mplus_api import MPlusAPI
 from mangaplus.webhook import webhook
 from mangaplus.utils.http import HTTPClient
 
-__version__ = "2.0.8"
+__version__ = "2.0.82"
 
 logger = logging.getLogger("mangaplus")
 

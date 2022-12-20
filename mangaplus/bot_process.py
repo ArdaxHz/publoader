@@ -243,6 +243,7 @@ class BotProcess:
             manga_uploader = MangaUploaderProcess(
                 database_connection=self.database_connection,
                 http_client=self.http_client,
+                clean_db=self.clean_db,
                 updated_chapters=self.updated_manga_chapters[mangadex_manga_id],
                 all_manga_chapters=all_manga_chapters[mangadex_manga_id],
                 mangadex_manga_id=mangadex_manga_id,

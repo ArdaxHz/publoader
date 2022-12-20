@@ -22,6 +22,7 @@ class MangaUploaderProcess:
         self,
         database_connection: "sqlite3.Connection",
         http_client: "HTTPClient",
+        clean_db: bool,
         updated_chapters: List[Chapter],
         all_manga_chapters: List[Chapter],
         mangadex_manga_id: str,
@@ -36,6 +37,7 @@ class MangaUploaderProcess:
     ):
         self.database_connection = database_connection
         self.http_client = http_client
+        self.clean_db = clean_db
         self.updated_chapters = updated_chapters
         self.all_manga_chapters = all_manga_chapters
         self.mangadex_manga_id = mangadex_manga_id
@@ -112,8 +114,9 @@ class MangaUploaderProcess:
 
                 if isinstance(volume_iter, dict):
                     volume_chapters = volume_iter.keys()
+                    chapter_number = chapter.chapter_number.split(".", 1)[0]
 
-                    if chapter.chapter_number in volume_chapters:
+                    if chapter_number in volume_chapters:
                         volume_str = str(volume).lstrip("0")
                         if volume_str == "" or not volume_str:
                             volume_str = "0"
@@ -171,4 +174,5 @@ class MangaUploaderProcess:
             self.failed_uploads,
             self.skipped,
             self.edited,
+            self.clean_db,
         ).main(last_manga)

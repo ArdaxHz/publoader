@@ -225,6 +225,7 @@ class MPlusBotUpdatesWebhook(WebhookBase):
         failed_chapters: List["Chapter"],
         skipped: int,
         edited: int,
+        clean_db: bool,
     ) -> None:
         super().__init__(manga)
 
@@ -235,6 +236,7 @@ class MPlusBotUpdatesWebhook(WebhookBase):
         self.failed = len(self.failed_chapters)
         self.skipped = skipped
         self.edited = edited
+        self.clean_db = clean_db
 
         self.normalised_manga = self.normalise_manga(
             self.uploaded, self.failed, self.skipped, self.edited
@@ -278,6 +280,9 @@ class MPlusBotUpdatesWebhook(WebhookBase):
         if self.failed_chapters:
             self.format_embed(self.normalised_failed_chapters)
         if self.edited > 0:
+            embed = self.make_embed(self.normalised_manga)
+            webhook.add_embed(embed)
+        if self.skipped > 0 and not self.clean_db:
             embed = self.make_embed(self.normalised_manga)
             webhook.add_embed(embed)
 
