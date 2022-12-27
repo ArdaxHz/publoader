@@ -306,10 +306,6 @@ class HTTPModel:
         raise RequestError(formatted_request_string)
 
     def _login(self, check_login: bool):
-        if not check_login and self._successful_login:
-            logger.info("Already logged in, not checking for login.")
-            return
-
         if self._first_login:
             logger.info("Trying to login through the .mdauth file.")
 
@@ -433,6 +429,7 @@ class HTTPModel:
                 f"{self._md_auth_api_url}/login",
                 json={"username": username, "password": password},
                 sleep=False,
+                successful_codes=[401, 403, 404],
             )
         except RequestError as e:
             logger.error(e)
