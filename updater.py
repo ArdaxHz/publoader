@@ -3,7 +3,7 @@ from pathlib import Path
 
 import git
 
-import mangaplus.utils.utils
+import mangaplus.utils.logs
 
 logger = logging.getLogger("debug")
 

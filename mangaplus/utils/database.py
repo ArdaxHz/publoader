@@ -4,8 +4,10 @@ from copy import copy
 from pathlib import Path
 from typing import List, Optional, Union
 
+from . import components_path
+from .config import config
 from .dataclass_models import Chapter
-from .utils import config, components_path, mplus_url_regex, EXPIRE_TIME
+from .utils import mplus_url_regex, EXPIRE_TIME
 
 
 logger = logging.getLogger("mangaplus")

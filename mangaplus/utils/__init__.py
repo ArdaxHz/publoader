@@ -1,13 +1,9 @@
 from .utils import (
-    setup_logs,
-    mangadex_api_url,
-    ratelimit_time,
     mplus_group_id,
-    upload_retry,
-    md_upload_api_url,
     mplus_language_map,
-    components_path,
 )
+from .config import components_path, mangadex_api_url, md_upload_api_url, upload_retry
+from .logs import setup_logs
 from .helpter_functions import flatten, get_md_id
 
 from .database import (

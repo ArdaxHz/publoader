@@ -8,8 +8,9 @@ from dataclasses import replace
 from datetime import datetime
 from typing import Dict, List, Optional, Union
 
-from . import response_pb2 as response_pb, get_md_id
-from . import Chapter, Manga
+from . import response_pb2 as response_pb
+from . import Chapter, Manga, get_md_id
+from .utils.utils import chapter_number_regex
 from .webhook import MPlusBotWebhook
 
 
@@ -347,8 +348,13 @@ class MPlusAPI:
                 for chap_number in chapter_number.split(",")
             ]
 
-        chapter_number_split: List[Optional[str]] = chapter_number_split
-        return chapter_number_split
+        returned_chapter_numbers = []
+        for num in chapter_number_split:
+            if num is None or not bool(chapter_number_regex.match(num)):
+                returned_chapter_numbers.append(None)
+            else:
+                returned_chapter_numbers.append(num)
+        return returned_chapter_numbers
 
     def _normalise_chapter_title(
         self, chapter: Chapter, chapter_number: List[Optional[str]]

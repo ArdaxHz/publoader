@@ -9,6 +9,7 @@ MAX_REQUESTS=5
 UPLOAD_RETRY=3
 BOT_RUN_TIME_DAILY=15:10
 BOT_RUN_TIME_CHECKS=00:00
+MAX_LOG_DAYS=30
 
 # All file paths are joined under the components path
 [Paths]

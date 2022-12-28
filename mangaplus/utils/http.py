@@ -1,4 +1,3 @@
-import base64
 import configparser
 import json
 import logging
@@ -9,7 +8,8 @@ from typing import Optional
 
 import requests
 
-from .utils import max_requests, upload_retry, mangadex_api_url, components_path
+from . import components_path, mangadex_api_url
+from .config import max_requests, upload_retry
 
 
 logger = logging.getLogger("mangaplus")

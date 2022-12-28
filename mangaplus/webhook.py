@@ -8,7 +8,8 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Union
 
 from discord_webhook import DiscordEmbed, DiscordWebhook
 
-from .utils.utils import config, EXPIRE_TIME
+from mangaplus.utils.config import config
+from mangaplus.utils.utils import EXPIRE_TIME
 
 if TYPE_CHECKING:
     from mangaplus import Chapter

@@ -2,7 +2,7 @@ import logging
 import math
 from typing import TYPE_CHECKING, List, Optional, Dict
 
-from .utils import mangadex_api_url, upload_retry
+from .config import mangadex_api_url, upload_retry
 
 if TYPE_CHECKING:
     from .http import RequestError

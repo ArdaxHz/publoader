@@ -9,7 +9,8 @@ from requests.packages.urllib3.exceptions import InsecureRequestWarning
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
 from mangaplus import open_database, components_path
-from mangaplus.utils import utils
+from mangaplus.utils.config import config
+from mangaplus.utils.utils import open_manga_id_map, open_title_regex, open_manga_data
 from mangaplus.utils.database import database_name, database_path
 
 from mangaplus.bot_process import BotProcess
@@ -19,22 +20,20 @@ from mangaplus.mplus_api import MPlusAPI
 from mangaplus.webhook import webhook
 from mangaplus.utils.http import HTTPClient
 
-__version__ = "2.0.82"
+__version__ = "2.0.9"
 
 logger = logging.getLogger("mangaplus")
-
-config = utils.config
 
 
 def main(db_connection: Optional[sqlite3.Connection] = None, clean_db=False):
     """Main function for getting the updates."""
-    manga_id_map = utils.open_manga_id_map(
+    manga_id_map = open_manga_id_map(
         components_path.joinpath(config["Paths"]["manga_id_map_path"])
     )
-    title_regexes = utils.open_title_regex(
+    title_regexes = open_title_regex(
         components_path.joinpath(config["Paths"]["title_regex_path"])
     )
-    manga_data_local = utils.open_manga_data(
+    manga_data_local = open_manga_data(
         components_path.joinpath(config["Paths"]["manga_data_path"])
     )
 

@@ -54,10 +54,17 @@ class ChapterDeleterProcess:
         else:
             posted_chapters = self._get_all_chapters()
 
-        return [
+        expired = [
             dict(x)
             for x in posted_chapters
             if datetime.fromtimestamp(x["chapter_expire"]) <= datetime.now()
+        ]
+
+        return [
+            chap
+            for chap in expired
+            if chap["md_chapter_id"]
+            not in [cha["md_chapter_id"] for cha in posted_chapters]
         ]
 
     def _delete_from_database(self, chapter: dict):
@@ -136,7 +143,13 @@ class ChapterDeleterProcess:
     def add_more_chapters(self, chapters_to_add: List[dict], on_db: bool = True):
         """Extend the list of chapters to delete with another list."""
         self.on_db = on_db
-        self.chapters_to_delete.extend(chapters_to_add)
+        chapters_to_extend = [
+            chap
+            for chap in chapters_to_add
+            if chap["md_chapter_id"]
+            not in [cha["md_chapter_id"] for cha in self.chapters_to_delete]
+        ]
+        self.chapters_to_delete.extend(chapters_to_extend)
 
     def delete(self):
         """Start the chapter deleter process."""
