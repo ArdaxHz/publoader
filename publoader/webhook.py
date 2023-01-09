@@ -6,13 +6,13 @@ from enum import Enum
 from json import JSONDecodeError
 from typing import TYPE_CHECKING, Dict, List, Optional, Union
 
+from publoader.utils.config import config
+from publoader.utils.utils import EXPIRE_TIME
+
 from discord_webhook import DiscordEmbed, DiscordWebhook
 
-from mangaplus.utils.config import config
-from mangaplus.utils.utils import EXPIRE_TIME
-
 if TYPE_CHECKING:
-    from mangaplus import Chapter
+    from publoader.models.dataclasses import Chapter
 
 
 logger = logging.getLogger("webhook")
@@ -26,43 +26,30 @@ webhook = make_webhook()
 COLOUR = "B86F8C"
 
 
-class LinkToFormatType(Enum):
-    MANGADEX_MANGA = "MangaDex manga"
-    MANGADEX_CHAPTER = "MangaDex chapter"
-    MANGAPLUS_MANGA = "MangaPlus manga"
-    MANGAPLUS_CHAPTER = "MangaPlus chapter"
-
-
 class WebhookHelper:
-    def __init__(self) -> None:
+    def __init__(self, extension_name: str) -> None:
+        self.extension_name = extension_name
         self.colour = COLOUR
         self.mangadex_chapter_url = "https://mangadex.org/chapter/{}"
-        self.mangaplus_manga_url = "https://mangaplus.shueisha.co.jp/titles/{}"
-        self.mangaplus_chapter_url = "https://mangaplus.shueisha.co.jp/viewer/{}"
         self.mangadex_manga_url = "https://mangadex.org/manga/{}"
 
     def _format_link(
         self,
-        type: LinkToFormatType,
-        id_to_use: Optional[str],
+        name: Optional[str] = None,
+        url: Optional[str] = None,
+        type: Optional[str] = None,
         skip_chapter_id: bool = False,
     ):
-        url = ""
-        name = type.value
+        if name is not None:
+            name = name.title()
 
-        if skip_chapter_id or id_to_use is None:
+        if type is not None:
+            type = type.lower()
+
+        if skip_chapter_id or url is None:
             return ""
 
-        if type == LinkToFormatType.MANGADEX_MANGA:
-            url = self.mangadex_manga_url.format(id_to_use)
-        elif type == LinkToFormatType.MANGADEX_CHAPTER:
-            url = self.mangadex_chapter_url.format(id_to_use)
-        elif type == LinkToFormatType.MANGAPLUS_MANGA:
-            url = self.mangaplus_manga_url.format(id_to_use)
-        else:
-            url = self.mangaplus_chapter_url.format(id_to_use)
-
-        return f"{name} link: [here]({url})\n"
+        return f"{name} {type} link: [here]({url})\n"
 
     def normalise_chapter(
         self,
@@ -76,12 +63,12 @@ class WebhookHelper:
 
         name = f"Chapter: {chapter.get('chapter_number')}\nLanguage: {chapter.get('chapter_language')}"
         value = (
-            f"{self._format_link(LinkToFormatType.MANGADEX_CHAPTER, chapter.get('md_chapter_id'), failed_upload)}"
-            f"{self._format_link(LinkToFormatType.MANGAPLUS_CHAPTER, chapter.get('chapter_id'))}"
+            f"{self._format_link(name='MangaDex', type='chapter', url=self.mangadex_chapter_url.format(chapter.get('md_chapter_id')), skip_chapter_id=failed_upload)}"
+            f"{self._format_link(name=self.extension_name, type='chapter', url=chapter.get('chapter_url'))}"
             f"Chapter title: `{chapter.get('chapter_title')}`\n"
-            f"Chapter expiry: `{datetime.datetime.fromtimestamp(chapter.get('chapter_expire', EXPIRE_TIME)).isoformat()}`\n"
-            f"{self._format_link(LinkToFormatType.MANGADEX_MANGA, chapter.get('md_manga_id'), failed_upload)}"
-            f"{self._format_link(LinkToFormatType.MANGAPLUS_MANGA, chapter.get('manga_id'))}"
+            f"Chapter expiry: `{chapter.get('chapter_expire', EXPIRE_TIME).isoformat()}`\n"
+            f"{self._format_link(name='MangaDex', type='manga', url=self.mangadex_manga_url.format(chapter.get('md_manga_id')), skip_chapter_id=failed_upload)}"
+            f"{self._format_link(name=self.extension_name, type='manga', url=chapter.get('manga_url'))}"
         )
 
         return {"name": name, "value": value, "inline": inline}
@@ -185,9 +172,10 @@ class WebhookHelper:
 class WebhookBase(WebhookHelper):
     def __init__(
         self,
+        extension_name: str,
         manga: dict,
     ) -> None:
-        super().__init__()
+        super().__init__(extension_name)
         self.manga = manga
         logger.debug(f"Making embed for manga {self.manga}")
         self.manga_id = manga["id"]
@@ -212,7 +200,7 @@ class WebhookBase(WebhookHelper):
             embed.add_embed_field(**c)
 
 
-class MPlusBotUpdatesWebhook(WebhookBase):
+class PubloaderUpdatesWebhook(WebhookBase):
     no_new_chapters_embed = None
 
     @staticmethod
@@ -221,6 +209,7 @@ class MPlusBotUpdatesWebhook(WebhookBase):
 
     def __init__(
         self,
+        extension_name: str,
         manga: dict,
         chapters: List["Chapter"],
         failed_chapters: List["Chapter"],
@@ -228,7 +217,7 @@ class MPlusBotUpdatesWebhook(WebhookBase):
         edited: int,
         clean_db: bool,
     ) -> None:
-        super().__init__(manga)
+        super().__init__(extension_name, manga)
 
         self.chapters: List["Chapter"] = chapters
         self.failed_chapters = failed_chapters
@@ -272,6 +261,13 @@ class MPlusBotUpdatesWebhook(WebhookBase):
             if len(webhook.embeds) >= 10 or len(embed.fields) >= 5:
                 self.send_webhook()
 
+    def send_first_manga_external_name(self, external_name):
+        embed = self.make_embed(
+            {"title": f"Posting updates for {external_name}.", "color": self.colour}
+        )
+        webhook.add_embed(embed)
+        self.send_webhook()
+
     def main(self, last_manga: bool = True):
         if self.uploaded > 0 or self.failed > 0:
             self.send_webhook()
@@ -288,20 +284,20 @@ class MPlusBotUpdatesWebhook(WebhookBase):
             webhook.add_embed(embed)
 
         # if not self.chapters and not self.failed_chapters:
-        #     if MPlusBotUpdatesWebhook.no_new_chapters_embed is None:
-        #         MPlusBotUpdatesWebhook.no_new_chapters_embed = (
-        #             MPlusBotUpdatesWebhook.make_static_method()
+        #     if PubloaderUpdatesWebhook.no_new_chapters_embed is None:
+        #         PubloaderUpdatesWebhook.no_new_chapters_embed = (
+        #             PubloaderUpdatesWebhook.make_static_method()
         #         )
 
-        #     MPlusBotUpdatesWebhook.no_new_chapters_embed.add_embed_field(
+        #     PubloaderUpdatesWebhook.no_new_chapters_embed.add_embed_field(
         #         name=self.normalised_manga["title"],
         #         value=self.normalised_manga["description"],
         #     )
 
-        #     if len(MPlusBotUpdatesWebhook.no_new_chapters_embed.fields) >= 10:
-        #         webhook.add_embed(MPlusBotUpdatesWebhook.no_new_chapters_embed)
+        #     if len(PubloaderUpdatesWebhook.no_new_chapters_embed.fields) >= 10:
+        #         webhook.add_embed(PubloaderUpdatesWebhook.no_new_chapters_embed)
         #         self.send_webhook()
-        #         MPlusBotUpdatesWebhook.no_new_chapters_embed.fields[:] = []
+        #         PubloaderUpdatesWebhook.no_new_chapters_embed.fields[:] = []
         #         return
 
         if last_manga:
@@ -327,8 +323,9 @@ class MPlusBotUpdatesWebhook(WebhookBase):
                 self.send_webhook()
 
 
-class MPlusBotDupesWebhook(WebhookBase):
-    def __init__(self, manga: Optional[dict] = None) -> None:
+class PubloaderDupesWebhook(WebhookBase):
+    def __init__(self, extension_name: str, manga: Optional[dict] = None) -> None:
+        self.extension_name = extension_name
         self.normalised_manga = None
         self.manga = manga
         if manga is not None:
@@ -338,7 +335,7 @@ class MPlusBotDupesWebhook(WebhookBase):
 
     def init_manga(self, manga: Optional[dict]):
         if manga is not None:
-            super().__init__(manga)
+            super().__init__(self.extension_name, manga)
             self.colour = "C8AA69"
             self.normalised_manga = self.normalise_manga()
 
@@ -375,9 +372,9 @@ class MPlusBotDupesWebhook(WebhookBase):
                 self.send_webhook()
 
 
-class MPlusBotDeleterWebhook(WebhookHelper):
-    def __init__(self, chapter: dict) -> None:
-        super().__init__()
+class PubloaderDeleterWebhook(WebhookHelper):
+    def __init__(self, extension_name: str, chapter: dict) -> None:
+        super().__init__(extension_name)
         self.colour = "C43542"
         self.chapter = chapter
         self.webhook = make_webhook()
@@ -402,9 +399,9 @@ class MPlusBotDeleterWebhook(WebhookHelper):
         self.send_webhook(self.webhook)
 
 
-class MPlusBotNotIndexedWebhook(WebhookHelper):
-    def __init__(self, chapter_ids: List[str]) -> None:
-        super().__init__()
+class PubloaderNotIndexedWebhook(WebhookHelper):
+    def __init__(self, extension_name: str, chapter_ids: List[str]) -> None:
+        super().__init__(extension_name)
         self.chapter_ids = chapter_ids
         self.colour = "45539B"
 
@@ -436,9 +433,10 @@ class MPlusBotNotIndexedWebhook(WebhookHelper):
         self.send_webhook()
 
 
-class MPlusBotWebhook(WebhookHelper):
-    def __init__(self, **kwargs) -> None:
-        super().__init__()
+class PubloaderWebhook(WebhookHelper):
+    def __init__(self, extension_name: str, **kwargs) -> None:
+        super().__init__(extension_name)
+        self.embed = None
         self.embed_title = kwargs.get("title")
         self.embed_description = kwargs.get("description")
         self.embed_colour = kwargs.get("colour")

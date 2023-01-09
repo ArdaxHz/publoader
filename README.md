@@ -1,6 +1,6 @@
-# M+ MD Uploader
-## Run the bot from Finland, due to region blocking. Some chapters will show up as unavailable in other regions.
-#### Tested on Python 3.9
+# Official Publisher MangaDex Uploader
+## Works by reading new updates provided by the extensions. Extensions can be of any free-to-read chapters publisher.
+#### Tested on Python 3.9+
 
 
 ```bash
@@ -11,11 +11,9 @@ pip install -r requirements.txt
 python3 run.py
 ```
 
+## Contributing
+If there is something you think needs changing, open an issue or a PR with your changes. Format the code using the [Black](https://pypi.org/project/black/) formatter with the default args.
 
 
-## Contribution
-Any pull request to change files other than `manga.json` or `title_regex.json` will be rejected.
-If there is a new series to add, add the ids to `manga.json`, following the same format as the rest of the file.
-
-**If a series has multiple languages, extend the md id array with the additional language id.**
-#### Check if the id has been added first before opening a pull request.
+## Extensions
+If there is a publisher missing, you can make your own extension. Check the [extensions readme](publoader/extensions/CONTRIBUTING.md) for how to do so.

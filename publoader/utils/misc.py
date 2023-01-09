@@ -2,14 +2,14 @@ import logging
 import math
 from typing import TYPE_CHECKING, List, Optional, Dict
 
-from .config import mangadex_api_url, upload_retry
+from publoader.models.http import RequestError
+from publoader.utils.config import mangadex_api_url, upload_retry
 
 if TYPE_CHECKING:
-    from .http import RequestError
-    from .http import HTTPClient
+    from publoader.models.http import HTTPClient
 
 
-logger = logging.getLogger("mangaplus")
+logger = logging.getLogger("publoader")
 
 
 def get_md_api(http_client: "HTTPClient", route: str, **params: dict) -> List[dict]:
@@ -133,11 +133,13 @@ def flatten(t: List[list]) -> list:
     return [item for sublist in t for item in sublist]
 
 
-def get_md_id(manga_id_map: Dict[str, List[int]], mangaplus_id: int) -> Optional[str]:
-    """Get the mangadex id from the mangaplus one."""
-    for md_id in manga_id_map:
-        if mangaplus_id in manga_id_map[md_id]:
-            return md_id
+def find_key_from_list_value(
+    dict_to_search: Dict[str, List[str]], list_element: str
+) -> Optional[str]:
+    """Get the key from the list value one."""
+    for key in dict_to_search:
+        if list_element in dict_to_search[key]:
+            return key
 
 
 def format_title(manga_data: dict) -> str:

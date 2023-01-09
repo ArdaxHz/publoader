@@ -1,9 +1,9 @@
 import configparser
 import logging
 
-from .utils import root_path
+from publoader.utils.utils import root_path
 
-logger = logging.getLogger("mangaplus")
+logger = logging.getLogger("publoader")
 
 
 def load_config_info(config: configparser.RawConfigParser):
@@ -14,14 +14,6 @@ def load_config_info(config: configparser.RawConfigParser):
     if config["Paths"].get("mangadex_api_url", "") == "":
         logger.warning("Mangadex api path empty, using default.")
         config["Paths"]["mangadex_api_url"] = "https://api.mangadex.org"
-
-    if config["Paths"].get("manga_id_map_path", "") == "":
-        logger.info("Manga id map path empty, using default.")
-        config["Paths"]["manga_id_map_path"] = "manga.json"
-
-    if config["Paths"].get("title_regex_path", "") == "":
-        logger.info("Title regex map path empty, using default.")
-        config["Paths"]["title_regex_path"] = "title_regex.json"
 
     if config["Paths"].get("mdauth_path", "") == "":
         logger.info("mdauth path empty, using default.")

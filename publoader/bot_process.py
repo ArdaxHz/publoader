@@ -4,26 +4,20 @@ import logging
 import time
 from typing import TYPE_CHECKING, Dict, List
 
-from .utils.database import update_expired_chapter_database
-from .utils.helpter_functions import get_md_api, format_title
-
-from .webhook import MPlusBotNotIndexedWebhook
-from .manga_uploader import MangaUploaderProcess
-from . import (
-    ratelimit_time,
-    mplus_group_id,
-    Chapter,
-    components_path,
-    get_md_id,
-)
+from publoader.manga_uploader import MangaUploaderProcess
+from publoader.webhook import PubloaderNotIndexedWebhook, PubloaderWebhook
+from publoader.models.database import update_expired_chapter_database
+from publoader.models.dataclasses import Chapter, Manga
+from publoader.utils.config import ratelimit_time, components_path
+from publoader.utils.misc import get_md_api, format_title
 
 if TYPE_CHECKING:
     import sqlite3
-    from .chapter_deleter import ChapterDeleterProcess
-    from .utils.http import HTTPClient
+    from publoader.chapter_deleter import ChapterDeleterProcess
+    from publoader.models.http import HTTPClient
 
 
-logger = logging.getLogger("mangaplus")
+logger = logging.getLogger("publoader")
 
 
 class BotProcess:
@@ -31,47 +25,80 @@ class BotProcess:
         self,
         config: configparser.RawConfigParser,
         http_client: "HTTPClient",
+        extension,
+        extension_name: str,
         updates: List[Chapter],
-        all_mplus_chapters: List[Chapter],
+        all_chapters: List[Chapter],
+        untracked_manga: List[Manga],
+        tracked_mangadex_ids: List[str],
+        mangadex_group_id: str,
+        custom_regexes: dict,
+        extension_languages: list[str],
         deleter_process_object: "ChapterDeleterProcess",
-        manga_id_map: Dict[str, List[int]],
         database_connection: "sqlite3.Connection",
-        title_regexes: Dict[str, List[int]],
         clean_db: bool,
-        chapters_on_db: List[dict],
+        chapters_on_db: List[Chapter],
         manga_data_local: Dict[str, dict],
-        chapters_on_md: Dict[str, List[dict]],
     ):
         self.config = config
         self.http_client = http_client
-        self.updates = updates
-        self.all_mplus_chapters = all_mplus_chapters
+        self.extension = extension
         self.deleter_process_object = deleter_process_object
-        self.manga_id_map = manga_id_map
         self.database_connection = database_connection
-        self.title_regexes = title_regexes
+        self.clean_db = clean_db
+        self.chapters_on_db = chapters_on_db
+        self.manga_data_local = manga_data_local
+
+        self.updates = updates
+        self.extension_name = extension_name
+        self.all_chapters = all_chapters
+        self.untracked_manga = untracked_manga
+        self.tracked_mangadex_ids = tracked_mangadex_ids
+        self.title_regexes = custom_regexes
+        self.mangadex_group_id = mangadex_group_id
+        self.extension_languages = extension_languages
+
         self.same_chapter_dict: Dict[str, List[int]] = self.title_regexes.get(
             "same", {}
         )
-        self.clean_db = clean_db
-        self.chapters_on_db = chapters_on_db
-        self.current_uploaded_chapters: List[Chapter] = []
-        self.manga_data_local = manga_data_local
 
+        self.current_uploaded_chapters: List[Chapter] = []
         self._get_manga_data_md()
         self.updated_manga_chapters = self._sort_chapters_by_manga(self.updates)
-        self.chapters_on_md = self._get_mplus_chapters()
+        self.chapters_on_md = self._get_external_chapters_md()
 
         self.manga_untracked = [
             m
             for m in list(self.chapters_on_md.keys())
-            if m not in list(self.manga_id_map.keys())
+            if m not in self.tracked_mangadex_ids
         ]
 
         logger.info(f"Manga not tracked but on mangadex: {self.manga_untracked}")
 
-    def _remove_chapters_not_mplus(self) -> List[dict]:
-        """Find chapters on MangaDex not on MangaPlus."""
+    def send_untracked_manga_webhook(self):
+        for untracked in self.untracked_manga:
+            logger.info(
+                f"Found untracked manga {untracked.manga_id}: {untracked.manga_name}."
+            )
+            print(
+                f"Found untracked manga {untracked.manga_id}: {untracked.manga_name}."
+            )
+
+        if self.untracked_manga:
+            untracked_manga_webhook = PubloaderWebhook(
+                extension_name=self.extension_name,
+                title="Untracked Manga",
+                description="\n".join(
+                    [
+                        f"[{manga.manga_id}]({manga.manga_url}): `{manga.manga_name}`"
+                        for manga in self.untracked_manga
+                    ]
+                ),
+            )
+            untracked_manga_webhook.send()
+
+    def _remove_chapters_not_external(self) -> List[dict]:
+        """Find chapters on MangaDex not on external."""
         chapters_to_delete = []
 
         for manga_id in self.chapters_on_md:
@@ -88,23 +115,23 @@ class BotProcess:
         return chapters_to_delete
 
     def _delete_extra_chapters(self):
-        chapters_to_delete = self._remove_chapters_not_mplus()
+        chapters_to_delete = self._remove_chapters_not_external()
         logger.info(
             f"{self.__class__.__name__} deleter finder found: {chapters_to_delete}"
         )
         if chapters_to_delete:
             self.deleter_process_object.add_more_chapters(chapters_to_delete)
 
-    def _get_mplus_chapters(self) -> Dict[str, List[dict]]:
-        logger.debug("Getting all m+'s uploaded chapters.")
-        print("Getting the mangaplus chapters on mangadex.")
+    def _get_external_chapters_md(self) -> Dict[str, List[dict]]:
+        logger.debug(f"Getting all {self.extension_name}'s uploaded chapters.")
+        print(f"Getting the {self.extension_name} chapters on mangadex.")
         chapters_sorted = {}
         for manga_id in set(self.updated_manga_chapters.keys()):
             chapters_sorted[manga_id] = get_md_api(
                 self.http_client,
                 "chapter",
                 **{
-                    "groups[]": [mplus_group_id],
+                    "groups[]": [self.mangadex_group_id],
                     "order[createdAt]": "desc",
                     "manga": manga_id,
                 },
@@ -115,7 +142,7 @@ class BotProcess:
         """Get the manga data from mangadex if needed and sort by manga id."""
         get_manga_data = []
 
-        tracked_manga = self.manga_id_map.keys()
+        tracked_manga = self.tracked_mangadex_ids
         for tracked in tracked_manga:
             if tracked not in self.manga_data_local.keys():
                 get_manga_data.append(tracked)
@@ -160,11 +187,15 @@ class BotProcess:
     ) -> Dict[str, List[Chapter]]:
         """Sort the chapters by manga id."""
         chapters_sorted = {}
+        if not updates:
+            return {}
 
         for chapter in updates:
-            md_id = get_md_id(self.manga_id_map, chapter.manga_id)
+            md_id = chapter.md_manga_id
             if md_id is None:
-                logger.warning(f"No mangadex id found for mplus id {chapter.manga_id}.")
+                logger.warning(
+                    f"No mangadex id found for {self.extension_name} id {chapter.manga_id}."
+                )
                 continue
 
             try:
@@ -193,7 +224,7 @@ class BotProcess:
         #         [
         #             chapter["md_chapter_id"]
         #             for chapter in self.chapters_on_db
-        #             if datetime.fromtimestamp(chapter["chapter_expire"])
+        #             if datetime.fromisoformat(chapter["chapter_expire"])
         #             >= datetime.now()
         #             and chapter["md_chapter_id"] is not None
         #         ]
@@ -228,25 +259,34 @@ class BotProcess:
             ]
 
             logger.info(f"Chapters not indexed: {chapters_not_on_md}")
-            MPlusBotNotIndexedWebhook(chapters_not_on_md).main()
+            PubloaderNotIndexedWebhook(self.extension_name, chapters_not_on_md).main()
         else:
             logger.info("No uploaded chapter mangadex ids.")
 
     def upload_chapters(self):
         """Go through each new chapter and upload it to mangadex."""
         # Sort each chapter by manga
-        all_manga_chapters = self._sort_chapters_by_manga(self.all_mplus_chapters)
+        all_manga_chapters = self._sort_chapters_by_manga(self.all_chapters)
         self._delete_extra_chapters()
+
+        start_webhook = PubloaderWebhook(
+            self.extension_name,
+            title=f"Posting updates for publisher {self.extension_name}",
+        )
+        start_webhook.send()
+        self.send_untracked_manga_webhook()
 
         for index, mangadex_manga_id in enumerate(self.updated_manga_chapters, start=1):
             self.http_client.login()
             manga_uploader = MangaUploaderProcess(
+                extension_name=self.extension_name,
                 database_connection=self.database_connection,
                 http_client=self.http_client,
                 clean_db=self.clean_db,
-                updated_chapters=self.updated_manga_chapters[mangadex_manga_id],
-                all_manga_chapters=all_manga_chapters[mangadex_manga_id],
+                updated_chapters=self.updated_manga_chapters.get(mangadex_manga_id, []),
+                all_manga_chapters=all_manga_chapters.get(mangadex_manga_id, []),
                 mangadex_manga_id=mangadex_manga_id,
+                mangadex_group_id=self.mangadex_group_id,
                 deleter_process_object=self.deleter_process_object,
                 chapters_on_md=self.chapters_on_md.get(mangadex_manga_id, []),
                 current_uploaded_chapters=self.current_uploaded_chapters,
@@ -254,6 +294,7 @@ class BotProcess:
                 mangadex_manga_data=self.manga_data_local.get(mangadex_manga_id, ""),
                 custom_language=self.title_regexes.get("custom_language", {}),
                 chapters_on_db=self.chapters_on_db,
+                languages=self.extension_languages,
             )
             manga_uploader.start_manga_uploading_process(
                 index == len(self.updated_manga_chapters)

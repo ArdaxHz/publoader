@@ -1,6 +1,5 @@
 requests
-protobuf
 scheduler
 discord-webhook
-aiohttp
 GitPython
+pydantic

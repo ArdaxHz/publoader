@@ -1,3 +1,4 @@
+import argparse
 import configparser
 import subprocess
 import sys
@@ -33,25 +34,50 @@ def open_config_file() -> configparser.RawConfigParser:
 config = open_config_file()
 
 
+def install_requirements():
+    for file in root_path.rglob("requirements.txt"):
+        print(f"Installing requirements from {file.resolve()}")
+        try:
+            successful_install = subprocess.run(f'pip install -r "{file.resolve()}"')
+        except FileNotFoundError:
+            continue
+        print(
+            f"Requirements installation completed with error code {successful_install.returncode} for file {file.resolve()}"
+        )
+
+
 def main():
-    """Call the main function of the mangaplus bot."""
-    subprocess.call([RUNNER, "mangaplus.py"])
+    """Call the main function of the publoader bot."""
+    subprocess.call([RUNNER, "publoader.py"])
 
 
 def daily_check():
     """Check for any updates and then run the bot."""
     check_for_update(root_path)
-    subprocess.call([RUNNER, "mangaplus.py"])
+    install_requirements()
+    subprocess.call([RUNNER, "publoader.py"])
 
 
 def clean_db():
-    """Call the clean_db function of the mangaplus bot."""
+    """Call the clean_db function of the publoader bot."""
     check_for_update(root_path)
+    install_requirements()
     print("Running the clean database function.")
-    subprocess.call([RUNNER, "mangaplus.py", "-c"])
+    subprocess.call([RUNNER, "publoader.py", "-c"])
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--clean",
+        "-c",
+        default=False,
+        const=True,
+        nargs="?",
+        help="Clean the database.",
+    )
+
+    vargs = vars(parser.parse_args())
 
     daily_run_time_daily_hour = int(
         config["User Set"]["bot_run_time_daily"].split(":")[0]
@@ -67,7 +93,12 @@ if __name__ == "__main__":
     )
 
     print("Initial run of bot.")
-    main()
+
+    if vargs["clean"]:
+        clean_db()
+    else:
+        main()
+
     print("End of initial run, starting scheduler.")
     schedule = Scheduler(tzinfo=timezone.utc)
     # schedule.weekly(

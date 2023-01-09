@@ -6,13 +6,16 @@ from copy import copy
 from datetime import datetime
 from typing import Optional
 
+from publoader.utils.config import (
+    max_requests,
+    upload_retry,
+    components_path,
+    mangadex_api_url,
+)
+
 import requests
 
-from . import components_path, mangadex_api_url
-from .config import max_requests, upload_retry
-
-
-logger = logging.getLogger("mangaplus")
+logger = logging.getLogger("publoader")
 http_error_codes = {
     "400": "Bad Request.",
     "401": "Unauthorised.",
@@ -61,7 +64,7 @@ class HTTPResponse:
     def json(self) -> Optional[dict]:
         """Convert the api response into a parsable json."""
         critical_decode_error_message = (
-            "Couldn't convert mangadex api response into a json."
+            f"{self.status_code}: Couldn't convert mangadex api response into a json."
         )
 
         logger.debug(f"Request id: {self.response.headers.get('x-request-id', None)}")
@@ -74,6 +77,7 @@ class HTTPResponse:
             return converted_response
         except json.JSONDecodeError:
             logger.critical(critical_decode_error_message)
+            logger.error(self.response.content)
             print(critical_decode_error_message)
             return
         except AttributeError:
@@ -85,6 +89,7 @@ class HTTPResponse:
                 return converted_response
             except json.JSONDecodeError:
                 logger.critical(critical_decode_error_message)
+                logger.error(self.response.content)
                 print(critical_decode_error_message)
                 return
 
@@ -197,6 +202,9 @@ class HTTPModel:
             self.number_of_requests = 0
             logger.debug(f"Sleeping {sleep} seconds")
             time.sleep(sleep)
+
+            if remaining == 0 and status_code != 429:
+                loop = False
         return loop
 
     def _format_request_log(
@@ -244,6 +252,7 @@ class HTTPModel:
                 response = self.session.request(
                     method, route, json=json, params=params, data=data, files=files
                 )
+                logger.debug(response.url)
 
                 loop = self._calculate_sleep_time(
                     status_code=response.status_code,

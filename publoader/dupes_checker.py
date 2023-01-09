@@ -2,45 +2,45 @@ import logging
 from datetime import datetime
 from typing import TYPE_CHECKING, Dict, List, Optional
 
-from .utils.http import RequestError
-from .utils.database import update_expired_chapter_database
-from . import (
-    mangadex_api_url,
-    mplus_group_id,
-    mplus_language_map,
-)
-from .utils.helpter_functions import (
+from publoader.webhook import PubloaderDupesWebhook
+from publoader.models.database import update_expired_chapter_database
+from publoader.models.http import RequestError
+from publoader.utils.config import mangadex_api_url
+from publoader.utils.misc import (
     fetch_aggregate,
     get_md_api,
     iter_aggregate_chapters,
     format_title,
 )
-from .webhook import MPlusBotDupesWebhook
 
 if TYPE_CHECKING:
     import sqlite3
-    from .chapter_deleter import ChapterDeleterProcess
-    from .utils.http import HTTPClient
+    from publoader.chapter_deleter import ChapterDeleterProcess
+    from publoader.models.http import HTTPClient
 
-logger = logging.getLogger("mangaplus")
+logger = logging.getLogger("publoader")
 
 
 class DeleteDuplicatesMD:
     def __init__(
         self,
         http_client: "HTTPClient",
-        manga_id_map: Dict[str, List[int]],
+        extension_name: str,
+        tracked_mangadex_ids: List[str],
         deleter_process_object: "ChapterDeleterProcess",
         database_connection: "sqlite3.Connection",
         manga_data_local: Dict[str, dict],
+        extension_languages: List[str],
+        mangadex_group_id: str,
     ) -> None:
         self.http_client = http_client
-        self.manga_id_map = manga_id_map
+        self.extension_name = extension_name
+        self.tracked_mangadex_ids = tracked_mangadex_ids
         self.deleter_process_object = deleter_process_object
         self.database_connection = database_connection
         self.manga_data_local = manga_data_local
-        self.tracked_mangadex_ids = list(manga_id_map.keys())
-        self.languages = list(set(mplus_language_map.values()))
+        self.languages = list(set(extension_languages))
+        self.mangadex_group_id = mangadex_group_id
         self.to_delete = []
 
     def check_count(self, aggregate_chapters: dict) -> List[dict]:
@@ -83,7 +83,7 @@ class DeleteDuplicatesMD:
         ]
 
     def check_chapters(
-        self, chapters: List[dict], dupes_webhook: "MPlusBotDupesWebhook"
+        self, chapters: List[dict], dupes_webhook: "PubloaderDupesWebhook"
     ) -> List[dict]:
         to_check = []
 
@@ -97,7 +97,10 @@ class DeleteDuplicatesMD:
             previous_attributes = previous_chapter["attributes"]
             previous_groups = self.filter_group(previous_chapter)
 
-            if mplus_group_id in current_groups and mplus_group_id in previous_groups:
+            if (
+                self.mangadex_group_id in current_groups
+                and self.mangadex_group_id in previous_groups
+            ):
                 if (
                     current_attributes["translatedLanguage"]
                     == previous_attributes["translatedLanguage"]
@@ -154,23 +157,25 @@ class DeleteDuplicatesMD:
 
         for mang_index, manga_id in enumerate(self.tracked_mangadex_ids, start=1):
             manga_data = self.manga_data_local.get(manga_id)
-            dupes_webhook = MPlusBotDupesWebhook(manga_data)
+            dupes_webhook = PubloaderDupesWebhook(self.extension_name, manga_data)
             dupes_found = False
 
             logger.info(
-                f"Getting aggregate info for manga {manga_id} in languages {self.languages}."
+                f"Getting aggregate info for extensions.{self.extension_name} manga {manga_id} in languages {self.languages}."
             )
             aggregate_chapters_all_langs_unchecked = fetch_aggregate(
                 self.http_client,
                 manga_id,
                 **{
                     "translatedLanguage[]": self.languages,
-                    "groups[]": [mplus_group_id],
+                    "groups[]": [self.mangadex_group_id],
                 },
             )
             if aggregate_chapters_all_langs_unchecked is None:
+                logger.info(f"Aggregate fetching for extensions.{self.extension_name} manga {manga_id} returned null.")
                 continue
 
+            logger.debug(f"Checking which chapters have more than 1 of the same number chapters.")
             aggregate_chapters_all_langs_checked = self.check_count(
                 aggregate_chapters_all_langs_unchecked
             )
@@ -187,6 +192,8 @@ class DeleteDuplicatesMD:
                 all_chapter_ids_unsorted[l : l + 100]
                 for l in range(0, len(all_chapter_ids_unsorted), 100)
             ]
+
+            logger.debug(f"Getting chapter data for chapters with more than 1 count.")
 
             chapters_md_unsorted = []
             for chapter_chunk in all_chapter_ids_unsorted_split:

@@ -3,53 +3,55 @@ import re
 from datetime import datetime
 from typing import TYPE_CHECKING, Dict, List, Optional
 
-from .utils.http import RequestError
-from . import (
+from publoader.models.database import update_database
+from publoader.models.dataclasses import Chapter
+from publoader.models.http import RequestError
+from publoader.utils.config import (
     md_upload_api_url,
-    mplus_group_id,
     upload_retry,
-    Chapter,
-    get_md_id,
-    flatten,
-    update_database,
     mangadex_api_url,
 )
+from publoader.utils.misc import find_key_from_list_value, flatten
 
 if TYPE_CHECKING:
     import sqlite3
-    from .utils.http import HTTPClient
+    from publoader.models.http import HTTPClient
 
 
-logger = logging.getLogger("mangaplus")
+logger = logging.getLogger("publoader")
 
 
 class ChapterUploaderProcess:
     def __init__(
         self,
+        extension_name: str,
         database_connection: "sqlite3.Connection",
         http_client: "HTTPClient",
         mangadex_manga_id: str,
+        mangadex_group_id: str,
         chapter: "Chapter",
         posted_md_updates: List["Chapter"],
         same_chapter_dict: Dict[str, List[int]],
         **kwargs,
     ):
+        self.extension_name = extension_name
         self.database_connection = database_connection
         self.http_client = http_client
         self.mangadex_manga_id = mangadex_manga_id
+        self.mangadex_group_id = mangadex_group_id
         self.chapter = chapter
         self.posted_md_updates = posted_md_updates
         self.same_chapter_dict = same_chapter_dict
 
-        self.mplus_chapter_url = "https://mangaplus.shueisha.co.jp/viewer/{}"
-
         self.manga_generic_error_message = (
-            f"Manga: {self.chapter.manga.manga_name}, "
+            f"Extension: {self.extension_name}, "
+            f"Manga: {self.chapter.manga_name}, "
             f"{self.mangadex_manga_id} - {self.chapter.manga_id}, "
-            f"chapter: {self.chapter.chapter_number}, "
-            f"volume: {self.chapter.chapter_volume}, "
-            f"language: {self.chapter.chapter_language}, "
-            f"title: {self.chapter.chapter_title}"
+            f"chapter: {self.chapter.chapter_id}, "
+            f"number: {self.chapter.chapter_number!r}, "
+            f"volume: {self.chapter.chapter_volume!r}, "
+            f"language: {self.chapter.chapter_language!r}, "
+            f"title: {self.chapter.chapter_title!r}"
         )
         self.upload_retry_total = upload_retry
         self.upload_session_id: Optional[str] = None
@@ -88,7 +90,7 @@ class ChapterUploaderProcess:
                 self.remove_upload_session(existing_session.data["data"]["id"])
                 return
             elif existing_session.status_code == 404:
-                logger.info("No existing upload session found.")
+                logger.debug("No existing upload session found.")
                 return
 
         logger.error("Exising upload session not deleted.")
@@ -110,7 +112,7 @@ class ChapterUploaderProcess:
                     f"{md_upload_api_url}/begin",
                     json={
                         "manga": self.mangadex_manga_id,
-                        "groups": [mplus_group_id],
+                        "groups": [self.mangadex_group_id],
                     },
                     tries=1,
                 )
@@ -122,17 +124,21 @@ class ChapterUploaderProcess:
                 if upload_session_response.data is not None:
                     return upload_session_response.data
 
-                upload_session_response_json_message = f"Couldn't convert successful upload session creation into a json, retrying. {self.manga_generic_error_message}."
-                logger.error(upload_session_response_json_message)
-                print(upload_session_response_json_message)
+                upload_session_response_json_message = f"Couldn't convert successful upload session creation into a json, retrying."
+                logger.error(f"{upload_session_response_json_message} {self.chapter}")
+                print(
+                    f"{upload_session_response_json_message} {self.manga_generic_error_message}."
+                )
                 continue
 
         # Couldn't create an upload session, skip the chapter
         upload_session_response_json_message = (
             f"Couldn't create an upload session for {self.manga_generic_error_message}."
         )
-        logger.error(upload_session_response_json_message)
-        print(upload_session_response_json_message)
+        logger.error(f"{upload_session_response_json_message} {self.chapter}")
+        print(
+            f"{upload_session_response_json_message} {self.manga_generic_error_message}."
+        )
 
     def _commit_chapter(self) -> bool:
         """Try commit the chapter to mangadex."""
@@ -142,13 +148,15 @@ class ChapterUploaderProcess:
                 "chapter": self.chapter.chapter_number,
                 "title": self.chapter.chapter_title,
                 "translatedLanguage": self.chapter.chapter_language,
-                "externalUrl": self.mplus_chapter_url.format(self.chapter.chapter_id),
-                "publishAt": datetime.fromtimestamp(
-                    self.chapter.chapter_expire
-                ).strftime("%Y-%m-%dT%H:%M:%S%z"),
+                "externalUrl": self.chapter.chapter_url,
             },
             "pageOrder": [],
         }
+
+        if self.chapter.chapter_expire is not None:
+            payload["chapterDraft"]["publishAt"] = self.chapter.chapter_expire.strftime(
+                "%Y-%m-%dT%H:%M:%S%z"
+            )
 
         logger.info(f"Commit payload: {payload}")
 
@@ -163,21 +171,28 @@ class ChapterUploaderProcess:
 
         if chapter_commit_response.status_code == 200:
             if chapter_commit_response.data is not None:
-                succesful_upload_id = chapter_commit_response.data["data"]["id"]
-                succesful_upload_message = f"Committed {succesful_upload_id} - {self.chapter.chapter_id} for {self.manga_generic_error_message}."
-                self.chapter.md_chapter_id = succesful_upload_id
-                logger.info(succesful_upload_message)
-                print(succesful_upload_message)
+                successful_upload_id = chapter_commit_response.data["data"]["id"]
+                self.chapter.md_chapter_id = successful_upload_id
+
+                successful_upload_message = (
+                    f"Committed {successful_upload_id} - {self.chapter.chapter_id} for"
+                )
+                logger.info(f"{successful_upload_message} {self.chapter}")
+                print(f"{successful_upload_message} {self.manga_generic_error_message}")
+
                 update_database(self.database_connection, self.chapter)
             else:
                 chapter_commit_response_json_message = f"Couldn't convert successful chapter commit api response into a json"
-                logger.error(chapter_commit_response_json_message)
+                logger.warning(
+                    f"{chapter_commit_response_json_message} for {self.chapter}"
+                )
                 print(chapter_commit_response_json_message)
             return True
 
-        error_message = f"Couldn't commit {self.upload_session_id}, manga {self.mangadex_manga_id} - {self.chapter.manga_id} chapter {self.chapter.chapter_number} language {self.chapter.chapter_language}."
-        logger.error(error_message)
-        print(error_message)
+        logger.error(f"Couldn't commit {self.chapter}")
+        print(
+            f"Couldn't commit {self.upload_session_id}, manga {self.mangadex_manga_id} - {self.chapter.manga_id} chapter {self.chapter.chapter_number!r} language {self.chapter.chapter_language}."
+        )
         self.remove_upload_session()
         return False
 
@@ -202,7 +217,7 @@ class ChapterUploaderProcess:
 
         if str(self.chapter.chapter_id) not in chapter_attrs["externalUrl"]:
             logger.debug(
-                f"MD chapter {md_id} mangaplus id {chapter_attrs['externalUrl']} doesn't match id {self.chapter.chapter_id}"
+                f"MD chapter {md_id} {self.extension_name} id {chapter_attrs['externalUrl']} doesn't match id {self.chapter.chapter_id}"
             )
             return False
 
@@ -233,13 +248,13 @@ class ChapterUploaderProcess:
 
             if update_response.status_code == 200:
                 logger.info(f"Edited chapter {md_id}")
-                print(f"Edited chapter: {self.manga_generic_error_message}")
+                print(f"--Edited chapter: {self.manga_generic_error_message}")
                 return True
         else:
             logger.info(f"Nothing to edit for chapter {md_id}")
         return False
 
-    def _check_for_duplicate_chapter_md_list(self, manga_chapters: List[dict]) -> bool:
+    def _check_for_duplicate_chapter_md_list(self, manga_chapters: List[dict]) -> str:
         """Check for duplicate chapters on mangadex."""
         for md_chapter in manga_chapters:
             if (
@@ -247,11 +262,14 @@ class ChapterUploaderProcess:
                 and md_chapter["attributes"]["translatedLanguage"]
                 == self.chapter.chapter_language
                 and md_chapter["attributes"]["externalUrl"] is not None
+                and self.chapter.chapter_id in md_chapter["attributes"]["externalUrl"]
+                and self.chapter.chapter_id not in flatten(list(self.same_chapter_dict.values()))
             ):
                 self.chapter.md_chapter_id = md_chapter["id"]
-                dupe_chapter_message = f"{self.manga_generic_error_message} already exists on mangadex, skipping."
-                logger.info(dupe_chapter_message)
-                print(dupe_chapter_message)
+                logger.info(f"Chapter already on MangaDex: {self.chapter}")
+                print(
+                    f"{self.manga_generic_error_message} already exists on mangadex, skipping."
+                )
 
                 edited = self.edit_chapter(md_chapter)
                 # Add duplicate chapter to database to avoid checking it again
@@ -274,11 +292,7 @@ class ChapterUploaderProcess:
     def _check_uploaded_different_id(self, manga_chapters: List[dict]) -> bool:
         """Check if chapter id to upload has been uploaded already under a different id."""
         same_chapter_list_md = [
-            re.sub(
-                r"https\:\/\/mangaplus\.shueisha\.co\.jp\/viewer\/",
-                "",
-                c["attributes"]["externalUrl"],
-            )
+            c["attributes"]["externalUrl"]
             for c in manga_chapters
             if c["attributes"]["chapter"] == self.chapter.chapter_number
             and c["attributes"]["translatedLanguage"] == self.chapter.chapter_language
@@ -288,10 +302,17 @@ class ChapterUploaderProcess:
         ]
 
         if self.chapter.chapter_id in flatten(list(self.same_chapter_dict.values())):
-            master_id = get_md_id(self.same_chapter_dict, self.chapter.chapter_id)
+            master_id = find_key_from_list_value(
+                self.same_chapter_dict, self.chapter.chapter_id
+            )
             if master_id is not None:
                 if (
-                    master_id in same_chapter_list_md
+                    any(
+                        [
+                            re.search(master_id, search)
+                            for search in same_chapter_list_md
+                        ]
+                    )
                     or master_id in same_chapter_list_posted_ids
                 ):
                     return True

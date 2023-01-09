@@ -2,18 +2,18 @@ import logging
 from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional
 
-from .utils.http import RequestError
-from .webhook import MPlusBotDeleterWebhook
-from . import (
+from publoader.webhook import PubloaderDeleterWebhook
+from publoader.models.http import RequestError
+from publoader.utils.config import (
     mangadex_api_url,
 )
 
 if TYPE_CHECKING:
     import sqlite3
-    from .utils.http import HTTPClient
+    from publoader.models.http import HTTPClient
 
 
-logger = logging.getLogger("mangaplus")
+logger = logging.getLogger("publoader")
 
 
 class ChapterDeleterProcess:
@@ -43,7 +43,8 @@ class ChapterDeleterProcess:
         return [
             dict(k)
             for k in self.database_connection.execute(
-                "SELECT * FROM chapters"
+                "SELECT * FROM chapters WHERE chapter_expire IS NOT NULL and chapter_expire <= ?",
+                (datetime.now(),),
             ).fetchall()
         ]
 
@@ -57,7 +58,7 @@ class ChapterDeleterProcess:
         expired = [
             dict(x)
             for x in posted_chapters
-            if datetime.fromtimestamp(x["chapter_expire"]) <= datetime.now()
+            if x["chapter_expire"] is not None and x["chapter_expire"] <= datetime.now()
         ]
 
         return [
@@ -84,12 +85,15 @@ class ChapterDeleterProcess:
 
     def _remove_old_chapter(
         self,
-        chapter: dict = {},
+        chapter: dict = None,
         to_delete_id: Optional[str] = None,
     ):
         """Check if the chapters expired and remove off mangadex if they are."""
         # If the expiry date of the chapter is less than the current time and
         # the md chapter id is available, try delete
+        if chapter is None:
+            return
+
         md_chapter_id: Optional[str] = chapter.get("md_chapter_id", to_delete_id)
         logger.info(
             f"Moving {md_chapter_id} from chapters table to deleted_chapters table."
@@ -114,7 +118,7 @@ class ChapterDeleterProcess:
                 if self.on_db and chapter:
                     self._delete_from_database(chapter)
 
-                MPlusBotDeleterWebhook(chapter).main()
+                PubloaderDeleterWebhook(chapter.get("extension_name"), chapter).main()
                 return
 
         logger.error(f"Couldn't delete expired chapter {deleted_message}")

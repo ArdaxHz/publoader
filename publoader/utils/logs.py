@@ -2,12 +2,16 @@ import logging
 from datetime import date, timedelta, datetime
 from pathlib import Path
 
-from .utils import root_path
-from .config import max_log_days
+from publoader.utils.config import max_log_days
+from publoader.utils.utils import root_path
+
+
+logs_root_path = root_path.joinpath("logs")
+logs_root_path.mkdir(parents=True, exist_ok=True)
 
 
 def format_log_dir_path(directory_name: str):
-    log_folder_path = root_path.joinpath("logs").joinpath(directory_name)
+    log_folder_path = logs_root_path.joinpath(directory_name)
     log_folder_path.mkdir(parents=True, exist_ok=True)
     return log_folder_path
 
@@ -16,6 +20,7 @@ current_date = date.today()
 last_date_keep_logs = current_date - timedelta(days=max_log_days)
 
 bot_logs_folder_path = format_log_dir_path("bot")
+extensions_logs_folder_path = format_log_dir_path("extensions")
 webhook_logs_folder_path = format_log_dir_path("webhook")
 debug_logs_folder_path = format_log_dir_path("debug")
 
@@ -25,6 +30,7 @@ def setup_logs(
     path: Path = bot_logs_folder_path,
     logger_filename: str = None,
 ):
+    path.mkdir(exist_ok=True, parents=True)
     if logger_filename is None:
         logger_filename = logger_name
 
@@ -46,14 +52,14 @@ def setup_logs(
 
 
 setup_logs(
-    logger_name="mangaplus",
+    logger_name="publoader",
     path=bot_logs_folder_path,
-    logger_filename="mplus_md_uploader",
+    logger_filename="publoader",
 )
 setup_logs(
     logger_name="debug",
     path=debug_logs_folder_path,
-    logger_filename="mplus_md_uploader_debug",
+    logger_filename="publoader_debug",
 )
 setup_logs(
     logger_name="webhook",
@@ -61,17 +67,15 @@ setup_logs(
     logger_filename="webhook",
 )
 
-_logger = logging.getLogger("mangaplus")
+_logger = logging.getLogger("publoader")
 
 
 def clear_old_logs(folder_path: Path):
-    for log_file in folder_path.glob("*.log"):
+    for log_file in folder_path.rglob("*.log"):
         file_date = datetime.fromtimestamp(log_file.stat().st_mtime).date()
         if file_date < last_date_keep_logs:
             _logger.debug(f"{log_file.name} is over {max_log_days} days old, deleting.")
             log_file.unlink()
 
 
-clear_old_logs(bot_logs_folder_path)
-clear_old_logs(webhook_logs_folder_path)
-clear_old_logs(debug_logs_folder_path)
+clear_old_logs(logs_root_path)

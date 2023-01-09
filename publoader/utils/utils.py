@@ -1,25 +1,17 @@
+import datetime
 import json
 import logging
 import re
 from pathlib import Path
 from typing import Dict, List
 
-logger = logging.getLogger("mangaplus")
+logger = logging.getLogger("publoader")
 
 root_path = Path(".")
-mplus_language_map = {
-    "0": "en",
-    "1": "es-la",
-    "2": "fr",
-    "3": "id",
-    "4": "pt-br",
-    "5": "ru",
-    "6": "th",
-}
 
 
 def open_manga_id_map(manga_map_path: Path) -> Dict[str, List[int]]:
-    """Open mangaplus id to mangadex id map."""
+    """Open external id to mangadex id map."""
     try:
         with open(manga_map_path, "r") as manga_map_fp:
             manga_map = json.load(manga_map_fp)
@@ -43,17 +35,15 @@ def open_title_regex(title_regex_path: Path) -> dict:
         logger.info("Opened title regex file.")
     except json.JSONDecodeError as e:
         logger.critical("Title regex file is corrupted.")
-        raise json.JSONDecodeError(
-            msg="Title regex file is corrupted.", doc=e.doc, pos=e.pos
-        )
+        return {}
     except FileNotFoundError:
         logger.critical("Title regex file is missing.")
-        raise FileNotFoundError("Couldn't file title regex file.")
+        return {}
     return title_regexes
 
 
 def open_manga_data(manga_data_path: Path) -> Dict[str, dict]:
-    """Open mangaplus id to mangadex id map."""
+    """Open MangaDex titles data."""
     manga_data = {}
     try:
         with open(manga_data_path, "r") as manga_data_fp:
@@ -66,9 +56,5 @@ def open_manga_data(manga_data_path: Path) -> Dict[str, dict]:
     return manga_data
 
 
-mplus_group_id = "4f1de6a2-f0c5-4ac5-bce5-02c7dbb67deb"
-mplus_url_regex = re.compile(
-    r"(?:https\:\/\/mangaplus\.shueisha\.co\.jp\/viewer\/)(\d+)", re.I
-)
 chapter_number_regex = re.compile(r"^(0|[1-9]\d*)((\.\d+){1,2})?[a-z]?$", re.I)
-EXPIRE_TIME = 946684799
+EXPIRE_TIME = datetime.datetime(year=1990, month=1, day=1)
