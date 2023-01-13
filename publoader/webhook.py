@@ -2,17 +2,14 @@ import datetime
 import logging
 import math
 import time
-from enum import Enum
 from json import JSONDecodeError
-from typing import TYPE_CHECKING, Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union
 
+from publoader.models.dataclasses import Chapter
 from publoader.utils.config import config
 from publoader.utils.utils import EXPIRE_TIME
 
 from discord_webhook import DiscordEmbed, DiscordWebhook
-
-if TYPE_CHECKING:
-    from publoader.models.dataclasses import Chapter
 
 
 logger = logging.getLogger("webhook")
@@ -53,22 +50,20 @@ class WebhookHelper:
 
     def normalise_chapter(
         self,
-        chapter: Union["Chapter", dict],
+        chapter: Chapter,
         failed_upload: bool = False,
         inline: bool = True,
     ) -> Dict[str, str]:
-
-        if not isinstance(chapter, dict):
-            chapter = vars(chapter)
-
-        name = f"Chapter: {chapter.get('chapter_number')}\nLanguage: {chapter.get('chapter_language')}"
+        name = (
+            f"Chapter: {chapter.chapter_number}\nLanguage: {chapter.chapter_language}"
+        )
         value = (
-            f"{self._format_link(name='MangaDex', type='chapter', url=self.mangadex_chapter_url.format(chapter.get('md_chapter_id')), skip_chapter_id=failed_upload)}"
-            f"{self._format_link(name=self.extension_name, type='chapter', url=chapter.get('chapter_url'))}"
-            f"Chapter title: `{chapter.get('chapter_title')}`\n"
-            f"Chapter expiry: `{chapter.get('chapter_expire', EXPIRE_TIME).isoformat()}`\n"
-            f"{self._format_link(name='MangaDex', type='manga', url=self.mangadex_manga_url.format(chapter.get('md_manga_id')), skip_chapter_id=failed_upload)}"
-            f"{self._format_link(name=self.extension_name, type='manga', url=chapter.get('manga_url'))}"
+            f"{self._format_link(name='MangaDex', type='chapter', url=self.mangadex_chapter_url.format(chapter.md_chapter_id), skip_chapter_id=failed_upload)}"
+            f"{self._format_link(name=self.extension_name, type='chapter', url=chapter.chapter_url)}"
+            f"Chapter title: `{chapter.chapter_title}`\n"
+            f"Chapter expiry: `{(chapter.chapter_expire or EXPIRE_TIME).isoformat()}`\n"
+            f"{self._format_link(name='MangaDex', type='manga', url=self.mangadex_manga_url.format(chapter.md_manga_id), skip_chapter_id=failed_upload)}"
+            f"{self._format_link(name=self.extension_name, type='manga', url=chapter.manga_url)}"
         )
 
         return {"name": name, "value": value, "inline": inline}
@@ -78,8 +73,8 @@ class WebhookHelper:
             self.normalise_chapter(chapter, failed_upload) for chapter in chapters
         ]
         return [
-            normalised_chapters[l : l + 25]
-            for l in range(0, len(normalised_chapters), 25)
+            normalised_chapters[elem : elem + 25]
+            for elem in range(0, len(normalised_chapters), 25)
         ]
 
     def _calculate_embed_size(self, embed: Union[DiscordEmbed, dict]):
@@ -119,11 +114,11 @@ class WebhookHelper:
 
     def _check_embed_length(self, embed, embed_len):
         if embed_len >= 6000:
-            num_fields = len(embed["fields"])
+            num_fields = embed["fields"]
             splitter = math.cail(len(num_fields) / 2)
             fields_split = [
-                num_fields[l : l + splitter]
-                for l in range(0, len(num_fields), splitter)
+                num_fields[elem : elem + splitter]
+                for elem in range(0, len(num_fields), splitter)
             ]
 
             split_embeds = self._make_multiple_embeds(embed, fields_split)
@@ -145,8 +140,8 @@ class WebhookHelper:
             self.check_embeds_size(local_webhook)
 
             embeds_split = [
-                local_webhook.embeds[l : l + 10]
-                for l in range(0, len(local_webhook.embeds), 10)
+                local_webhook.embeds[elem : elem + 10]
+                for elem in range(0, len(local_webhook.embeds), 10)
             ]
             local_webhook.embeds.clear()
 
@@ -251,11 +246,11 @@ class PubloaderUpdatesWebhook(WebhookBase):
         }
 
     def format_embed(self, chapters_to_use: List[List[dict]]):
-        for list in chapters_to_use:
+        for chapter_list in chapters_to_use:
             embed = self.make_embed(self.normalised_manga)
-            self.add_fields_to_embed(embed, list)
+            self.add_fields_to_embed(embed, chapter_list)
 
-            if list:
+            if chapter_list:
                 webhook.add_embed(embed)
 
             if len(webhook.embeds) >= 10 or len(embed.fields) >= 5:
@@ -311,8 +306,8 @@ class PubloaderUpdatesWebhook(WebhookBase):
         else:
             if len(webhook.embeds) >= 10:
                 webhook_embeds = [
-                    webhook.embeds[l : l + 10]
-                    for l in range(0, len(webhook.embeds), 10)
+                    webhook.embeds[elem : elem + 10]
+                    for elem in range(0, len(webhook.embeds), 10)
                 ]
                 for embed_list in webhook_embeds:
                     webhook.embeds = embed_list
@@ -373,7 +368,7 @@ class PubloaderDupesWebhook(WebhookBase):
 
 
 class PubloaderDeleterWebhook(WebhookHelper):
-    def __init__(self, extension_name: str, chapter: dict) -> None:
+    def __init__(self, extension_name: str, chapter: Chapter) -> None:
         super().__init__(extension_name)
         self.colour = "C43542"
         self.chapter = chapter
@@ -382,7 +377,7 @@ class PubloaderDeleterWebhook(WebhookHelper):
 
     def make_embed(self):
         embed = DiscordEmbed(
-            title=f"Deleted chapter {self.chapter['md_chapter_id']}",
+            title=f"Deleted chapter {self.chapter.md_chapter_id}",
             description=f"{self.normalised_chapter['name']}\n{self.normalised_chapter['value']}",
             **{
                 "color": self.colour,

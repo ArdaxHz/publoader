@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger("publoader")
 
 
-class BotProcess:
+class ExtensionUploader:
     def __init__(
         self,
         config: configparser.RawConfigParser,
@@ -54,11 +54,11 @@ class BotProcess:
         self.all_chapters = all_chapters
         self.untracked_manga = untracked_manga
         self.tracked_mangadex_ids = tracked_mangadex_ids
-        self.title_regexes = custom_regexes
+        self.custom_regexes = custom_regexes
         self.mangadex_group_id = mangadex_group_id
         self.extension_languages = extension_languages
 
-        self.same_chapter_dict: Dict[str, List[int]] = self.title_regexes.get(
+        self.same_chapter_dict: Dict[str, List[str]] = self.custom_regexes.get(
             "same", {}
         )
 
@@ -97,7 +97,7 @@ class BotProcess:
             )
             untracked_manga_webhook.send()
 
-    def _remove_chapters_not_external(self) -> List[dict]:
+    def _remove_chapters_not_external(self) -> List[Chapter]:
         """Find chapters on MangaDex not on external."""
         chapters_to_delete = []
 
@@ -105,8 +105,9 @@ class BotProcess:
             if manga_id in self.manga_untracked:
                 for expired in self.chapters_on_md[manga_id]:
                     expired_chapter_object = update_expired_chapter_database(
-                        self.database_connection,
-                        expired,
+                        database_connection=self.database_connection,
+                        extension_name=self.extension_name,
+                        md_chapter_obj=expired,
                         chapters_on_db=self.chapters_on_db,
                         md_manga_id=manga_id,
                     )
@@ -149,7 +150,8 @@ class BotProcess:
 
         if get_manga_data:
             tracked_manga_splice = [
-                get_manga_data[l : l + 100] for l in range(0, len(get_manga_data), 100)
+                get_manga_data[elem : elem + 100]
+                for elem in range(0, len(get_manga_data), 100)
             ]
 
             tracked_manga_data = []
@@ -211,7 +213,6 @@ class BotProcess:
         )
         print("Checking which chapters weren't indexed.")
         chapters_on_md = []
-        chapters_not_on_md = []
 
         uploaded_chapter_ids = [
             chapter.md_chapter_id
@@ -222,11 +223,11 @@ class BotProcess:
         # if self.clean_db:
         #     uploaded_chapter_ids.extend(
         #         [
-        #             chapter["md_chapter_id"]
+        #             chapter.md_chapter_id
         #             for chapter in self.chapters_on_db
-        #             if datetime.fromisoformat(chapter["chapter_expire"])
+        #             if chapter.chapter_expire
         #             >= datetime.now()
-        #             and chapter["md_chapter_id"] is not None
+        #             and chapter.md_chapter_id. is not None
         #         ]
         #     )
 
@@ -234,8 +235,8 @@ class BotProcess:
         if uploaded_chapter_ids:
             logger.info(f"Uploaded chapters mangadex ids: {uploaded_chapter_ids}")
             uploaded_chapter_ids_split = [
-                uploaded_chapter_ids[l : l + 100]
-                for l in range(0, len(uploaded_chapter_ids), 100)
+                uploaded_chapter_ids[elem : elem + 100]
+                for elem in range(0, len(uploaded_chapter_ids), 100)
             ]
 
             time.sleep(ratelimit_time * 3)
@@ -292,7 +293,7 @@ class BotProcess:
                 current_uploaded_chapters=self.current_uploaded_chapters,
                 same_chapter_dict=self.same_chapter_dict,
                 mangadex_manga_data=self.manga_data_local.get(mangadex_manga_id, ""),
-                custom_language=self.title_regexes.get("custom_language", {}),
+                custom_language=self.custom_regexes.get("custom_language", {}),
                 chapters_on_db=self.chapters_on_db,
                 languages=self.extension_languages,
             )

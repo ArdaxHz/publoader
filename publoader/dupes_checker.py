@@ -2,6 +2,7 @@ import logging
 from datetime import datetime
 from typing import TYPE_CHECKING, Dict, List, Optional
 
+from publoader.models.dataclasses import Chapter
 from publoader.webhook import PubloaderDupesWebhook
 from publoader.models.database import update_expired_chapter_database
 from publoader.models.http import RequestError
@@ -172,10 +173,14 @@ class DeleteDuplicatesMD:
                 },
             )
             if aggregate_chapters_all_langs_unchecked is None:
-                logger.info(f"Aggregate fetching for extensions.{self.extension_name} manga {manga_id} returned null.")
+                logger.info(
+                    f"Aggregate fetching for extensions.{self.extension_name} manga {manga_id} returned null."
+                )
                 continue
 
-            logger.debug(f"Checking which chapters have more than 1 of the same number chapters.")
+            logger.debug(
+                f"Checking which chapters have more than one of the same number chapters."
+            )
             aggregate_chapters_all_langs_checked = self.check_count(
                 aggregate_chapters_all_langs_unchecked
             )
@@ -189,11 +194,11 @@ class DeleteDuplicatesMD:
 
             all_chapter_ids_unsorted = [*main_chapters, *other_chapters]
             all_chapter_ids_unsorted_split = [
-                all_chapter_ids_unsorted[l : l + 100]
-                for l in range(0, len(all_chapter_ids_unsorted), 100)
+                all_chapter_ids_unsorted[elem : elem + 100]
+                for elem in range(0, len(all_chapter_ids_unsorted), 100)
             ]
 
-            logger.debug(f"Getting chapter data for chapters with more than 1 count.")
+            logger.debug(f"Getting chapter data for chapters with more than one count.")
 
             chapters_md_unsorted = []
             for chapter_chunk in all_chapter_ids_unsorted_split:
@@ -221,9 +226,12 @@ class DeleteDuplicatesMD:
 
                 logger.debug(f"Found dupes in manga {manga_id} for language {language}")
 
-                chapters_to_delete_list: List[dict] = [
+                chapters_to_delete_list: List[Chapter] = [
                     update_expired_chapter_database(
-                        self.database_connection, expired_obj, md_manga_id=manga_id
+                        database_connection=self.database_connection,
+                        extension_name=self.extension_name,
+                        md_chapter_obj=expired_obj,
+                        md_manga_id=manga_id,
                     )
                     for expired_obj in chapters_to_delete
                 ]

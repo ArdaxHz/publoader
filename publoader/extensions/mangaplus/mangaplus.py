@@ -5,7 +5,7 @@ import math
 import re
 import string
 from copy import copy
-from datetime import datetime
+from datetime import datetime, time, timezone
 from pathlib import Path
 from typing import List, Optional, Union
 
@@ -20,7 +20,7 @@ from publoader.utils.utils import (
 )
 
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 setup_logs(
     logger_name="mangaplus",
@@ -35,18 +35,9 @@ class Extension:
     def __init__(self, extension_dirpath: Path):
         self.name = "mangaplus"
         self.mangadex_group_id = "4f1de6a2-f0c5-4ac5-bce5-02c7dbb67deb"
-        self.manga_id_map_filename = "manga.json"
-        self.custom_regexes_filename = "title_regex.json"
+        self.manga_id_map_filename = "manga_id_map.json"
+        self.custom_regexes_filename = "custom_regexes.json"
         self.extension_dirpath = extension_dirpath
-
-        self._manga_id_map = self._open_manga_id_map()
-        self.tracked_mangadex_ids = list(self._manga_id_map.keys())
-        self.tracked_manga = [
-            mplus_id
-            for md_id in self._manga_id_map
-            for mplus_id in self._manga_id_map[md_id]
-        ]
-        self.custom_regexes = self._open_custom_regexes()
 
         self._posted_chapters_ids = []
         self._updated_chapters: List[Chapter] = []
@@ -55,12 +46,6 @@ class Extension:
         self._mplus_base_api_url = "https://jumpg-webapi.tokyo-cdn.com"
         self._chapter_url_format = "https://mangaplus.shueisha.co.jp/viewer/{}"
         self._manga_url_format = "https://mangaplus.shueisha.co.jp/titles/{}"
-
-        self._num2words: Optional[str] = self._get_num2words_string()
-
-    @property
-    def full_extension_name(self):
-        return f"extensions.{self.name}"
 
     @property
     def extension_languages_map(self):
@@ -90,8 +75,27 @@ class Extension:
     def update_posted_chapter_ids(self, posted_chapter_ids: List[str]) -> None:
         self._posted_chapters_ids = posted_chapter_ids
 
+        self.fetch_updates()
+
+    def fetch_updates(self):
+        self._manga_id_map = self._open_manga_id_map()
+        self.tracked_mangadex_ids = list(self._manga_id_map.keys())
+        self.tracked_manga = [
+            mplus_id
+            for md_id in self._manga_id_map
+            for mplus_id in self._manga_id_map[md_id]
+        ]
+        self.custom_regexes = self._open_custom_regexes()
+        self._num2words: Optional[str] = self._get_num2words_string()
+
         self._get_mplus_updated_manga()
         self._get_mplus_updates()
+
+    def run_at(self) -> time:
+        return time(hour=19, minute=0, tzinfo=timezone.utc)
+
+    def clean_at(self) -> Optional[list]:
+        return []
 
     def _open_manga_id_map(self):
         return open_manga_id_map(
@@ -193,7 +197,8 @@ class Extension:
         tasks = []
 
         spliced_manga = [
-            self.tracked_manga[l : l + 3] for l in range(0, len(self.tracked_manga), 3)
+            self.tracked_manga[elem : elem + 3]
+            for elem in range(0, len(self.tracked_manga), 3)
         ]
 
         loop = asyncio.get_event_loop()

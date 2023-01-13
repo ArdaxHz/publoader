@@ -8,9 +8,9 @@ from requests.packages.urllib3.exceptions import InsecureRequestWarning
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
 from publoader import __version__
-from publoader.bot_process import BotProcess
 from publoader.chapter_deleter import ChapterDeleterProcess
 from publoader.dupes_checker import DeleteDuplicatesMD
+from publoader.extension_uploader import ExtensionUploader
 from publoader.load_extensions import load_extensions
 from publoader.webhook import webhook
 from publoader.models.http import HTTPClient
@@ -22,7 +22,7 @@ from publoader.utils.utils import open_manga_data
 logger = logging.getLogger("publoader")
 
 
-def main(clean_db=False):
+def main(clean_db=False, general_run=False):
     """Main function for getting the updates."""
     database_connection, fill_backlog = open_database(database_path)
     manga_data_local = open_manga_data(
@@ -40,7 +40,7 @@ def main(clean_db=False):
         database_connection=database_connection,
     )
 
-    extensions = load_extensions(database_connection, clean_db)
+    extensions = load_extensions(database_connection, clean_db, general_run)
     for site in extensions:
         logger.info(f"Getting updates for {site}")
 
@@ -56,6 +56,7 @@ def main(clean_db=False):
         custom_regexes = extension_data["custom_regexes"]
         extension_languages = extension_data["extension_languages"]
         posted_chapters_ids = extension_data["posted_chapters_ids"]
+        clean_db = extension_data["clean_db"]
 
         try:
             if not updated_chapters:
@@ -82,7 +83,7 @@ def main(clean_db=False):
             posted_chapters_data = [Chapter(**data) for data in posted_chapters_data]
             logger.info("Retrieved posted chapters from database.")
 
-            BotProcess(
+            ExtensionUploader(
                 config=config,
                 http_client=http_client,
                 extension=extension_data,
@@ -117,9 +118,7 @@ def main(clean_db=False):
                 dupes_deleter.delete_dupes()
         except Exception:
             traceback.print_exc()
-            logger.exception(
-                f"{normalised_extension_name} raised an error."
-            )
+            logger.exception(f"{normalised_extension_name} raised an error.")
             continue
 
     deleter_process_object.delete()
@@ -146,13 +145,21 @@ if __name__ == "__main__":
         nargs="?",
         help="Clean the database.",
     )
+    parser.add_argument(
+        "--general",
+        "-g",
+        default=False,
+        const=True,
+        nargs="?",
+        help="General run of the bot.",
+    )
 
     vargs = vars(parser.parse_args())
 
     if vargs["clean"]:
         main(clean_db=True)
     else:
-        main()
+        main(general_run=vargs["general"])
 
     if webhook.embeds:
         webhook.execute(remove_embeds=True)

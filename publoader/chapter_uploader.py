@@ -1,6 +1,5 @@
 import logging
 import re
-from datetime import datetime
 from typing import TYPE_CHECKING, Dict, List, Optional
 
 from publoader.models.database import update_database
@@ -31,7 +30,7 @@ class ChapterUploaderProcess:
         mangadex_group_id: str,
         chapter: "Chapter",
         posted_md_updates: List["Chapter"],
-        same_chapter_dict: Dict[str, List[int]],
+        same_chapter_dict: Dict[str, List[str]],
         **kwargs,
     ):
         self.extension_name = extension_name
@@ -97,7 +96,7 @@ class ChapterUploaderProcess:
         raise Exception(f"Couldn't delete existing upload session.")
 
     def _create_upload_session(self) -> Optional[dict]:
-        """Try create an upload session 3 times."""
+        """Try to create an upload session 3 times."""
         for chapter_upload_session_retry in range(self.upload_retry_total):
             # Delete existing upload session if exists
             try:
@@ -263,7 +262,8 @@ class ChapterUploaderProcess:
                 == self.chapter.chapter_language
                 and md_chapter["attributes"]["externalUrl"] is not None
                 and self.chapter.chapter_id in md_chapter["attributes"]["externalUrl"]
-                and self.chapter.chapter_id not in flatten(list(self.same_chapter_dict.values()))
+                and self.chapter.chapter_id
+                not in flatten(list(self.same_chapter_dict.values()))
             ):
                 self.chapter.md_chapter_id = md_chapter["id"]
                 logger.info(f"Chapter already on MangaDex: {self.chapter}")

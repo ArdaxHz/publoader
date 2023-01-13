@@ -3,14 +3,14 @@ import json
 import logging
 import re
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict
 
 logger = logging.getLogger("publoader")
 
 root_path = Path(".")
 
 
-def open_manga_id_map(manga_map_path: Path) -> Dict[str, List[int]]:
+def open_manga_id_map(manga_map_path: Path) -> dict:
     """Open external id to mangadex id map."""
     try:
         with open(manga_map_path, "r") as manga_map_fp:
@@ -27,11 +27,11 @@ def open_manga_id_map(manga_map_path: Path) -> Dict[str, List[int]]:
     return manga_map
 
 
-def open_title_regex(title_regex_path: Path) -> dict:
-    """Open the chapter title regex."""
+def open_title_regex(custom_regexes_path: Path) -> dict:
+    """Open the custom regexes."""
     try:
-        with open(title_regex_path, "r") as title_regex_fp:
-            title_regexes = json.load(title_regex_fp)
+        with open(custom_regexes_path, "r") as title_regex_fp:
+            custom_regexes = json.load(title_regex_fp)
         logger.info("Opened title regex file.")
     except json.JSONDecodeError as e:
         logger.critical("Title regex file is corrupted.")
@@ -39,7 +39,7 @@ def open_title_regex(title_regex_path: Path) -> dict:
     except FileNotFoundError:
         logger.critical("Title regex file is missing.")
         return {}
-    return title_regexes
+    return custom_regexes
 
 
 def open_manga_data(manga_data_path: Path) -> Dict[str, dict]:

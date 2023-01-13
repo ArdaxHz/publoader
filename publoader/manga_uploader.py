@@ -31,7 +31,7 @@ class MangaUploaderProcess:
         deleter_process_object: "ChapterDeleterProcess",
         chapters_on_md: List[dict],
         current_uploaded_chapters: List[Chapter],
-        same_chapter_dict: Dict[str, List[int]],
+        same_chapter_dict: Dict[str, List[str]],
         mangadex_manga_data: dict,
         custom_language: Dict[str, str],
         chapters_on_db: List[Chapter],
@@ -55,6 +55,9 @@ class MangaUploaderProcess:
         self.chapters_on_db = chapters_on_db
         self.languages = languages
 
+        self.skipped = 0
+        self.edited = 0
+
         self.posted_chapters: List[Chapter] = []
         self.failed_uploads: List[Chapter] = []
 
@@ -63,7 +66,7 @@ class MangaUploaderProcess:
         if self.chapters_on_md:
             self._delete_extra_chapters()
 
-    def _remove_chapters_not_external(self) -> List[dict]:
+    def _remove_chapters_not_external(self) -> List[Chapter]:
         """Find chapters on MangaDex not on external."""
         md_chapters_not_external = [
             c
@@ -81,9 +84,9 @@ class MangaUploaderProcess:
         chapters_to_delete = []
         for expired in md_chapters_not_external:
             expired_chapter_object = update_expired_chapter_database(
-                self.database_connection,
-                self.extension_name,
-                expired,
+                database_connection=self.database_connection,
+                extension_name=self.extension_name,
+                md_chapter_obj=expired,
                 chapters_on_db=self.chapters_on_db,
                 md_manga_id=self.mangadex_manga_id,
             )
@@ -110,6 +113,7 @@ class MangaUploaderProcess:
 
         for chapter in self.updated_chapters:
             for volume in aggregate_chapters:
+                volume_iter = None
                 if volume == "none":
                     continue
 
@@ -130,9 +134,6 @@ class MangaUploaderProcess:
                         chapter.chapter_volume = volume_str
 
     def start_manga_uploading_process(self, last_manga: bool):
-        self.skipped = 0
-        self.edited = 0
-        self.skipped_chapter = False
         chapter = self.updated_chapters[0]
         for count, chapter in enumerate(self.updated_chapters, start=1):
             chapter.md_manga_id = self.mangadex_manga_id
@@ -154,7 +155,6 @@ class MangaUploaderProcess:
             if uploaded in ("on_md", "session_error", "edited"):
                 if uploaded in ("on_md",):
                     self.skipped += 1
-                    self.skipped_chapter = True
                 elif uploaded in ("edited",):
                     self.edited += 1
                 elif uploaded in ("session_error",):
@@ -162,7 +162,6 @@ class MangaUploaderProcess:
                     self.failed_uploads.append(chapter)
                 continue
 
-            self.skipped_chapter = False
             self.posted_chapters.append(chapter)
             time.sleep(1)
 

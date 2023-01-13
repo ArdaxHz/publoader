@@ -7,7 +7,7 @@ from datetime import time as dtTime
 from datetime import timezone
 from pathlib import Path
 
-from scheduler import Scheduler, trigger
+from scheduler import Scheduler
 
 from updater import check_for_update
 
@@ -46,16 +46,13 @@ def install_requirements():
         )
 
 
-def main():
+def main(general_run=False):
     """Call the main function of the publoader bot."""
-    subprocess.call([RUNNER, "publoader.py"])
+    runner = [RUNNER, "publoader.py"]
+    if general_run:
+        runner.append("-g")
 
-
-def daily_check():
-    """Check for any updates and then run the bot."""
-    check_for_update(root_path)
-    install_requirements()
-    subprocess.call([RUNNER, "publoader.py"])
+    subprocess.call(runner)
 
 
 def clean_db():
@@ -75,6 +72,14 @@ if __name__ == "__main__":
         const=True,
         nargs="?",
         help="Clean the database.",
+    )
+    parser.add_argument(
+        "--general",
+        "-g",
+        default=False,
+        const=True,
+        nargs="?",
+        help="General run of the bot.",
     )
 
     vargs = vars(parser.parse_args())
@@ -97,39 +102,18 @@ if __name__ == "__main__":
     if vargs["clean"]:
         clean_db()
     else:
-        main()
+        main(True)
 
     print("End of initial run, starting scheduler.")
-    schedule = Scheduler(tzinfo=timezone.utc)
-    # schedule.weekly(
-    #     trigger.Wednesday(
-    #         dtTime(
-    #             hour=daily_run_time_checks_hour,
-    #             minute=daily_run_time_checks_minute,
-    #             tzinfo=timezone.utc,
-    #         ),
-    #     ),
-    #     clean_db,
-    #     weight=8,
-    # )
-    schedule.daily(
+    schedule = Scheduler(tzinfo=timezone.utc, max_exec=1)
+    schedule.hourly(
         dtTime(
-            hour=daily_run_time_daily_hour,
-            minute=daily_run_time_daily_minute,
+            minute=0,
             tzinfo=timezone.utc,
         ),
         main,
-        weight=9,
+        weight=1,
     )
-    # schedule.daily(
-    #     dtTime(
-    #         hour=daily_run_time_checks_hour,
-    #         minute=daily_run_time_checks_minute,
-    #         tzinfo=timezone.utc,
-    #     ),
-    #     daily_check,
-    #     weight=1,
-    # )
     schedule.daily(
         dtTime(
             hour=daily_run_time_checks_hour,
@@ -137,7 +121,7 @@ if __name__ == "__main__":
             tzinfo=timezone.utc,
         ),
         clean_db,
-        weight=8,
+        weight=9,
     )
 
     while True:

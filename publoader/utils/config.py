@@ -1,5 +1,7 @@
 import configparser
 import logging
+from calendar import WEDNESDAY
+from datetime import time
 
 from publoader.utils.utils import root_path
 
@@ -71,3 +73,37 @@ try:
     max_log_days = int(config["User Set"].get("max_log_days", ""))
 except (ValueError, KeyError):
     max_log_days = 30
+
+
+try:
+    daily_run_time_daily_hour = int(
+        config["User Set"].get("bot_run_time_daily", "").split(":")[0]
+    )
+except (ValueError, KeyError):
+    daily_run_time_daily_hour = 15
+
+try:
+    daily_run_time_daily_minute = int(
+        config["User Set"].get("bot_run_time_daily", "").split(":")[1]
+    )
+except (ValueError, KeyError):
+    daily_run_time_daily_minute = 0
+
+try:
+    daily_run_time_checks_hour = int(
+        config["User Set"].get("bot_run_time_checks", "").split(":")[0]
+    )
+except (ValueError, KeyError):
+    daily_run_time_checks_hour = 0
+
+try:
+    daily_run_time_checks_minute = int(
+        config["User Set"].get("bot_run_time_checks", "").split(":")[1]
+    )
+except (ValueError, KeyError):
+    daily_run_time_checks_minute = 0
+
+DEFAULT_TIME = time(hour=daily_run_time_daily_hour, minute=daily_run_time_daily_minute)
+CLEAN_TIME = time(hour=daily_run_time_checks_hour, minute=daily_run_time_checks_minute)
+DEFAULT_CLEAN_DAY = WEDNESDAY
+ALL_DAYS = range(7)

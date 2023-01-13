@@ -10,6 +10,7 @@ logger = logging.getLogger("debug")
 
 def check_for_update(root_path: Path) -> bool:
     repo = git.Repo(root_path)
+    repo.git.clean("-df")
     repo.git.reset("--hard")
     current = repo.head.commit
     changes = repo.remotes.origin.fetch()

@@ -96,7 +96,7 @@ database_path = components_path.joinpath(database_name)
 
 
 def open_database(db_path: Path) -> tuple[sqlite3.Connection, bool]:
-    database_connection = sqlite3.connect(db_path, detect_types=sqlite3.PARSE_DECLTYPES)
+    database_connection = sqlite3.connect(db_path)
     database_connection.row_factory = sqlite3.Row
     logger.info("Opened database.")
     logger_debug.info("Opened database.")
@@ -196,7 +196,7 @@ def update_expired_chapter_database(
     md_chapter_obj: dict,
     md_manga_id: str,
     chapters_on_db: List[Chapter] = None,
-) -> dict:
+) -> Chapter:
     """Update a chapter as expired on the database."""
     md_chapter_id = md_chapter_obj["id"]
     external_chapter_url = md_chapter_obj["attributes"]["externalUrl"]
@@ -234,7 +234,6 @@ def update_expired_chapter_database(
             extension_name=extension_name,
         )
 
-    expired_chapter_object = vars(expired_chapter_object)
     logger.info(f"Updating database entry with expired entry.")
     update_database(database_connection, expired_chapter_object)
     return expired_chapter_object

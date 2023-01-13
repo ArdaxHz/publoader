@@ -40,25 +40,25 @@ Can be any name. The MangaDex id to the publisher site's manga ids, or whatever 
 The structure of the file can be whatever you want, however you need to provide a list of tracked MangaDex ids.
 
 #### custom_regexes.json
-Can be any name and is not necessary. Your implementation should clean chapter titles to conform to MangaDex's rules. The regexes can be part of your code. For manga that has chapter titles that do not follow your regex implementation, you can use this file for custom title regexes.
+Can be any name and is not necessary. Your implementation should clean chapter titles to conform to MangaDex's rules.
 
-Ids used are in this file are the series' id. Contains custom regexes for titles, and list of the same chapters uploaded on the publisher's site under different ids.
+You can use any means necessary to sanitise the chapter titles. If you use generic, catch-all regexes for the titles and a series' title does not conform to the specified regexes, this file can be used for custom regexes for select series.
+
 If you want to include this file, use the structure as follows:
 
 ```json
 {
     "empty": [],
     "noformat": [],
-    "custom": {},
-    "same": {},
+    "custom": {"series_id": "regex"},
+    "same": {"chapter_to_keep_id": ["other_chapter_id"]},
     "custom_language": {}
 }
 ```
 - `"empty": [],` Empty here, is an array of manga ids for chapters that will never have a title (null).
 - `"noformat": [],` For titles that you do not want your titles regex to format.
-- `"custom": {},` For series you want to use custom regex for. Should follow 
-`"custom": {<series_id>: <regex>},`.
-- `"same": {},` Chapters that are the same, but uploaded under different ids. Should follow `"same": {<chapter_to_keep_id>: [<other_chapter_id>]},`.
+- `"custom": {},` For series you want to use custom regex for. If not, the dictionary should be empty.
+- `"same": {},` Chapters that are the same, but uploaded under different ids. Chapters that are part of the dictionary's values are not uploaded and only the dictionary's keys are. The dictionary should be empty if this field is not applicable.
 - `"custom_language": {}` For series that have languages that are not documented or follow your site's language specification.
 
 ## Dependencies
@@ -66,7 +66,7 @@ If you want to include this file, use the structure as follows:
 You can use whatever modules you want to, but remember to include a `requirements.txt` in your extension directory.
 
 ## Extension main class
-The class that is used to read the chapter data from.
+The class that is used to read the chapter data from. This class **must** be named `Extension` and your extension will not run if this class is not available.
 
 ```python
 class Extension:
@@ -78,13 +78,13 @@ class Extension:
 
 ### Main class key variables
 
-| Field                  | Type        | Description                                                                                                     |
-|------------------------|-------------|-----------------------------------------------------------------------------------------------------------------|
-| `name`                 | `str`       | Name used in the database and in the logs. *This name should not be changed between versions.* |
-| `mangadex_group_id`    | `str`       | MangaDex id of the group to upload to.                                                                          |
-| `custom_regexes`       | `dict`      | Your custom regexes file after being opened and read.                                                           |
-| `extension_languages`  | `List[str]` | A list of languages supported by the extension.                                                                 |
-| `tracked_mangadex_ids` | `List[str]` | A list of MangaDex ids the extension tracks.                                                                    |
+| Field                  | Type        | Description                                                                                   |
+|------------------------|-------------|-----------------------------------------------------------------------------------------------|
+| `name`                 | `str`       | Name used in the database and in the logs. *This name should not be changed.*                 |
+| `mangadex_group_id`    | `str`       | MangaDex id of the group to upload to.                                                        |
+| `custom_regexes`       | `dict`      | Your custom regexes file after being opened and read. If not used, return an empty dict `{}`. |
+| `extension_languages`  | `List[str]` | A list of languages supported by the extension.                                               |
+| `tracked_mangadex_ids` | `List[str]` | A list of MangaDex manga ids the extension uploads to.                                        |
 
 ---
 
@@ -94,6 +94,8 @@ class Extension:
 - `get_updated_chapters(self) -> List[Chapter]` Returns a list of newly released chapters.
 - `get_all_chapters(self) -> List[Chapter]` Returns all the chapters available for a series, uploaded or not uploaded. *If the site does not support retrieving all the available chapters for a series, this should return an empty array.*
 - `get_updated_manga(self) -> List[Manga]` Returns a list of untracked newly added series.
+- `run_at(self) -> datetime.time` A time object of when you want the extension to be run.
+- `clean_at(self) -> Optional[List[int]]` The days you want to run the extension as if it is a fresh install. This allows the bot to check for duplicate chapters, chapters not uploaded and chapters needing to be deleted. Allowed values: `None` for the default day, `[]` for everyday, `[0]` for mondays. Use an int value in the range 0-6 (inclusive) for the day of the week.
 
 ***If these methods return anything other than a list of the `Chapter` class or the `Manga` class, they will be skipped.***
 
@@ -102,18 +104,20 @@ class Extension:
 - `update_posted_chapter_ids(self, posted_chapter_ids: List[str]) -> None` Provides a list of chapter ids (as strings) already uploaded. You can use this list to retrieve the updated chapters list.
 
 The list of chapters returned must be of the `Chapter` class. The chapter class is provided in the package `publoader.models.dataclasses`.
-The chapter class **must** be initialised with the following values:
+The chapter class contains the following fields:
+
+Fields with `Optional[]` can be left as null, fields without must be populated.
 
 - `chapter_timestamp: datetime.datetime`. Datetime object of when the chapter was published.
-- `chapter_expire: Optional[datetime.datetime]`. Datetime object of when the chapter expires.
+- `chapter_expire: Optional[datetime.datetime]`. Datetime object of when the chapter expires, if the chapter does not expire, this can be null.
 - `chapter_title: Optional[str]`. Chapter title.
 - `chapter_number: Optional[str]`. Chapter number, must follow the MangaDex chapter number regex.
 - `chapter_language: str`. ISO-639-2 code.
-- `chapter_volume: Optional[str]`. Chapter volume, null if the chapter has no volume.
+- `chapter_volume: Optional[str]`. Chapter volume. If the series uses seasons, use this field. Keep empty if the chapter does not have a volume.
 - `chapter_id: str`. Chapter id.
-- `chapter_url: str`. External chapter url.
+- `chapter_url: str`. Chapter link.
 - `manga_id: str`. The publisher's series id.
-- `md_manga_id: str`. The MangaDex id to upload the chapter to.
+- `md_manga_id: str`. The MangaDex manga id to upload the chapter to.
 - `manga_name: str`. The series name.
 - `manga_url: str`. The series link.
 
@@ -156,7 +160,7 @@ This function returns the dictionary key after lookup in the dictionary values' 
 
 ### Variables provided for use
 
-```
+```python
 from publoader.utils.utils import chapter_number_regex
 
 chapter_number_regex.match("string")

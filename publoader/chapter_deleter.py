@@ -2,6 +2,7 @@ import logging
 from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional
 
+from publoader.models.dataclasses import Chapter
 from publoader.webhook import PubloaderDeleterWebhook
 from publoader.models.http import RequestError
 from publoader.utils.config import (
@@ -19,73 +20,62 @@ logger = logging.getLogger("publoader")
 class ChapterDeleterProcess:
     def __init__(
         self,
-        *,
         http_client: "HTTPClient",
-        posted_chapters: list = [],
-        on_db: bool = True,
         database_connection: "sqlite3.Connection",
     ):
         self.http_client = http_client
-        self.on_db = on_db
         self.database_connection = database_connection
-        self.posted_chapters = posted_chapters
-        self.chapters_to_delete = self.get_chapter_to_delete(
-            self.posted_chapters if self.posted_chapters else []
-        )
+        self.chapters_to_delete = self.get_chapter_to_delete()
 
         self.chapter_delete_ratelimit = 8
         self.chapter_delete_process = None
 
         logger.info(f"Chapters to delete: {self.chapters_to_delete}")
 
-    def _get_all_chapters(self) -> List[dict]:
+    def _get_all_chapters(self) -> List[Chapter]:
         """Get all the chapters from the database."""
         return [
-            dict(k)
+            Chapter(**k)
             for k in self.database_connection.execute(
                 "SELECT * FROM chapters WHERE chapter_expire IS NOT NULL and chapter_expire <= ?",
                 (datetime.now(),),
             ).fetchall()
         ]
 
-    def get_chapter_to_delete(self, database=False) -> List[dict]:
+    def get_chapter_to_delete(self) -> List[Chapter]:
         """Get only the expired chapters from the total chapters list."""
-        if database:
-            posted_chapters = self.posted_chapters
-        else:
-            posted_chapters = self._get_all_chapters()
+        posted_chapters = self._get_all_chapters()
 
         expired = [
-            dict(x)
+            x
             for x in posted_chapters
-            if x["chapter_expire"] is not None and x["chapter_expire"] <= datetime.now()
+            if x.chapter_expire is not None and x.chapter_expire <= datetime.now()
         ]
 
         return [
             chap
             for chap in expired
-            if chap["md_chapter_id"]
-            not in [cha["md_chapter_id"] for cha in posted_chapters]
+            if chap.md_chapter_id not in [cha.md_chapter_id for cha in posted_chapters]
         ]
 
-    def _delete_from_database(self, chapter: dict):
+    def _delete_from_database(self, chapter: Chapter):
         """Move the chapter from the chapters table to the deleted_chapters table."""
         try:
             self.database_connection.execute(
                 """INSERT INTO deleted_chapters SELECT * FROM chapters WHERE md_chapter_id=(?)""",
-                (chapter["md_chapter_id"],),
+                (chapter.md_chapter_id,),
             )
         except sqlite3.IntegrityError:
             pass
         self.database_connection.execute(
             """DELETE FROM chapters WHERE md_chapter_id=(?)""",
-            (chapter["md_chapter_id"],),
+            (chapter.md_chapter_id,),
         )
         self.database_connection.commit()
 
     def _remove_old_chapter(
         self,
-        chapter: dict = None,
+        chapter: Chapter = None,
         to_delete_id: Optional[str] = None,
     ):
         """Check if the chapters expired and remove off mangadex if they are."""
@@ -94,14 +84,14 @@ class ChapterDeleterProcess:
         if chapter is None:
             return
 
-        md_chapter_id: Optional[str] = chapter.get("md_chapter_id", to_delete_id)
+        md_chapter_id: Optional[str] = chapter.md_chapter_id or to_delete_id
         logger.info(
             f"Moving {md_chapter_id} from chapters table to deleted_chapters table."
         )
-        manga_id = chapter.get("manga_id", None)
+        manga_id = chapter.manga_id
         if manga_id is None:
-            manga_id = chapter.get("md_manga_id", None)
-        deleted_message = f'{md_chapter_id}: {chapter.get("chapter_id", None)}, manga {manga_id}, chapter {chapter.get("chapter_number", None)}, language {chapter.get("chapter_language", None)}.'
+            manga_id = chapter.md_manga_id
+        deleted_message = f"{md_chapter_id}: {chapter.chapter_id}, manga {manga_id}, chapter {chapter.chapter_number}, language {chapter.chapter_language}."
 
         if md_chapter_id is not None:
             try:
@@ -115,10 +105,9 @@ class ChapterDeleterProcess:
             if delete_reponse.status_code == 200:
                 logger.info(f"Deleted {chapter}.")
                 print(f"----Deleted {deleted_message}")
-                if self.on_db and chapter:
-                    self._delete_from_database(chapter)
+                self._delete_from_database(chapter)
 
-                PubloaderDeleterWebhook(chapter.get("extension_name"), chapter).main()
+                PubloaderDeleterWebhook(chapter.extension_name, chapter).main()
                 return
 
         logger.error(f"Couldn't delete expired chapter {deleted_message}")
@@ -144,14 +133,13 @@ class ChapterDeleterProcess:
         if looped_all:
             del self.chapters_to_delete[:]
 
-    def add_more_chapters(self, chapters_to_add: List[dict], on_db: bool = True):
+    def add_more_chapters(self, chapters_to_add: List[Chapter]):
         """Extend the list of chapters to delete with another list."""
-        self.on_db = on_db
         chapters_to_extend = [
             chap
             for chap in chapters_to_add
-            if chap["md_chapter_id"]
-            not in [cha["md_chapter_id"] for cha in self.chapters_to_delete]
+            if chap.md_chapter_id
+            not in [cha.md_chapter_id for cha in self.chapters_to_delete]
         ]
         self.chapters_to_delete.extend(chapters_to_extend)
 

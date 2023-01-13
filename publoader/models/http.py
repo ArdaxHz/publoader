@@ -152,7 +152,7 @@ class HTTPModel:
         self._session_token = self._file_token.get("session", None)
         self._refresh_token = self._file_token.get("refresh", None)
 
-    def _calculate_sleep_time(self, status_code: int, wait: bool, headers={}):
+    def _calculate_sleep_time(self, status_code: int, wait: bool, headers):
         self.number_of_requests += 1
         self.total_requests += 1
         loop = False
@@ -215,7 +215,7 @@ class HTTPModel:
         json: dict = None,
         data=None,
         files=None,
-        successful_codes: list = [],
+        successful_codes: list = None,
     ):
         return f'"{method}": {route} {successful_codes=} {params=} {json=} {data=}'
 
@@ -227,9 +227,12 @@ class HTTPModel:
         json: dict = None,
         data=None,
         files=None,
-        successful_codes: list = [],
+        successful_codes: list = None,
         **kwargs,
     ):
+        if successful_codes is None:
+            successful_codes = []
+
         retry = self.upload_retry_total
         total_retry = self.upload_retry_total
         tries = kwargs.get("tries", self.upload_retry_total)
@@ -282,7 +285,7 @@ class HTTPModel:
                 logger.warning(error_message)
                 print(error_message)
                 try:
-                    self._login(False)
+                    self._login()
                 except Exception as e:
                     logger.error(e)
 
@@ -314,7 +317,7 @@ class HTTPModel:
 
         raise RequestError(formatted_request_string)
 
-    def _login(self, check_login: bool):
+    def _login(self):
         if self._first_login:
             logger.info("Trying to login through the .mdauth file.")
 
@@ -465,7 +468,7 @@ class HTTPClient(HTTPModel):
         json: dict = None,
         data=None,
         files=None,
-        successful_codes: list = [],
+        successful_codes: list = None,
         **kwargs,
     ):
         return self._request(
@@ -485,7 +488,7 @@ class HTTPClient(HTTPModel):
         json: dict = None,
         data=None,
         files=None,
-        successful_codes: list = [],
+        successful_codes: list = None,
         **kwargs,
     ):
         return self._request(
@@ -502,7 +505,7 @@ class HTTPClient(HTTPModel):
         self,
         route: str,
         params: dict = None,
-        successful_codes: list = [],
+        successful_codes: list = None,
         **kwargs,
     ):
         return self._request(
@@ -519,7 +522,7 @@ class HTTPClient(HTTPModel):
         json: dict = None,
         data=None,
         files=None,
-        successful_codes: list = [],
+        successful_codes: list = None,
         **kwargs,
     ):
         return self._request(
@@ -538,7 +541,7 @@ class HTTPClient(HTTPModel):
         json: dict = None,
         data=None,
         files=None,
-        successful_codes: list = [],
+        successful_codes: list = None,
         **kwargs,
     ):
         return self.put(
@@ -556,7 +559,7 @@ class HTTPClient(HTTPModel):
         params: dict = None,
         json: dict = None,
         data=None,
-        successful_codes: list = [],
+        successful_codes: list = None,
         **kwargs,
     ):
         return self._request(
@@ -569,6 +572,6 @@ class HTTPClient(HTTPModel):
             **kwargs,
         )
 
-    def login(self, check_login=True):
+    def login(self):
         """Login to MD account using details or saved token."""
-        self._login(check_login)
+        self._login()
