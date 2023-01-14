@@ -8,6 +8,7 @@ from publoader.models.http import RequestError
 from publoader.utils.config import (
     mangadex_api_url,
 )
+from publoader.utils.utils import get_current_datetime
 
 if TYPE_CHECKING:
     import sqlite3
@@ -25,12 +26,10 @@ class ChapterDeleterProcess:
     ):
         self.http_client = http_client
         self.database_connection = database_connection
-        self.chapters_to_delete = self.get_chapter_to_delete()
+        self.chapters_to_delete = []
 
         self.chapter_delete_ratelimit = 8
         self.chapter_delete_process = None
-
-        logger.info(f"Chapters to delete: {self.chapters_to_delete}")
 
     def _get_all_chapters(self) -> List[Chapter]:
         """Get all the chapters from the database."""
@@ -38,7 +37,7 @@ class ChapterDeleterProcess:
             Chapter(**k)
             for k in self.database_connection.execute(
                 "SELECT * FROM chapters WHERE chapter_expire IS NOT NULL and chapter_expire <= ?",
-                (datetime.now(),),
+                (get_current_datetime(),),
             ).fetchall()
         ]
 
@@ -49,7 +48,8 @@ class ChapterDeleterProcess:
         expired = [
             x
             for x in posted_chapters
-            if x.chapter_expire is not None and x.chapter_expire <= datetime.now()
+            if x.chapter_expire is not None
+            and x.chapter_expire <= get_current_datetime()
         ]
 
         return [
@@ -145,6 +145,9 @@ class ChapterDeleterProcess:
 
     def delete(self):
         """Start the chapter deleter process."""
+        self.chapters_to_delete.extend(self.get_chapter_to_delete())
+        logger.info(f"Chapters to delete: {self.chapters_to_delete}")
+
         if self.chapters_to_delete:
             self.http_client.login()
             self._delete_expired_chapters()

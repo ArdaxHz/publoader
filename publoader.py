@@ -11,7 +11,7 @@ from publoader import __version__
 from publoader.chapter_deleter import ChapterDeleterProcess
 from publoader.dupes_checker import DeleteDuplicatesMD
 from publoader.extension_uploader import ExtensionUploader
-from publoader.load_extensions import load_extensions
+from publoader.load_extensions import load_extensions, run_extensions
 from publoader.webhook import webhook
 from publoader.models.http import HTTPClient
 from publoader.utils.config import config, components_path
@@ -24,13 +24,21 @@ logger = logging.getLogger("publoader")
 
 def main(clean_db=False, general_run=False):
     """Main function for getting the updates."""
+    extensions_data = load_extensions(clean_db, general_run)
+    if not extensions_data:
+        return
+
     database_connection, fill_backlog = open_database(database_path)
+    if fill_backlog:
+        clean_db = True
+
+    extensions = run_extensions(extensions_data, database_connection, clean_db)
+    if not extensions:
+        return
+
     manga_data_local = open_manga_data(
         components_path.joinpath(config["Paths"]["manga_data_path"])
     )
-
-    if fill_backlog:
-        clean_db = True
 
     http_client = HTTPClient(config, __version__)
 
@@ -40,7 +48,6 @@ def main(clean_db=False, general_run=False):
         database_connection=database_connection,
     )
 
-    extensions = load_extensions(database_connection, clean_db, general_run)
     for site in extensions:
         logger.info(f"Getting updates for {site}")
 

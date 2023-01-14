@@ -89,7 +89,6 @@ class ChapterUploaderProcess:
                 self.remove_upload_session(existing_session.data["data"]["id"])
                 return
             elif existing_session.status_code == 404:
-                logger.debug("No existing upload session found.")
                 return
 
         logger.error("Exising upload session not deleted.")
@@ -154,7 +153,7 @@ class ChapterUploaderProcess:
 
         if self.chapter.chapter_expire is not None:
             payload["chapterDraft"]["publishAt"] = self.chapter.chapter_expire.strftime(
-                "%Y-%m-%dT%H:%M:%S%z"
+                "%Y-%m-%dT%H:%M:%S"
             )
 
         logger.info(f"Commit payload: {payload}")

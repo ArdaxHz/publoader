@@ -1,6 +1,7 @@
 import logging
 import sqlite3
 from copy import copy
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional, Union
 
@@ -36,8 +37,8 @@ def make_tables(database_connection: sqlite3.Connection):
     database_connection.execute(
         """CREATE TABLE IF NOT EXISTS chapters
         (chapter_id         TEXT,
-        chapter_timestamp   TIMESTAMP NOT NULL,
-        chapter_expire      TIMESTAMP,
+        chapter_timestamp   DATETIME NOT NULL,
+        chapter_expire      DATETIME,
         chapter_language    TEXT NOT NULL,
         chapter_title       TEXT,
         chapter_number      TEXT,
@@ -53,8 +54,8 @@ def make_tables(database_connection: sqlite3.Connection):
     database_connection.execute(
         """CREATE TABLE IF NOT EXISTS deleted_chapters
         (chapter_id         TEXT,
-        chapter_timestamp   TIMESTAMP NOT NULL,
-        chapter_expire      TIMESTAMP,
+        chapter_timestamp   DATETIME NOT NULL,
+        chapter_expire      DATETIME,
         chapter_language    TEXT NOT NULL,
         chapter_title       TEXT,
         chapter_number      TEXT,
@@ -95,8 +96,19 @@ database_name = config["Paths"]["database_path"]
 database_path = components_path.joinpath(database_name)
 
 
+def adapt_datetime_iso(val: datetime):
+    """Adapt datetime.datetime to timezone-naive ISO 8601 date."""
+    return val.astimezone(tz=timezone.utc).isoformat()
+
+
+def convert_datetime(val: bytes):
+    """Convert ISO 8601 datetime to datetime.datetime object."""
+    return datetime.fromisoformat(val.decode()).astimezone(tz=timezone.utc)
+
+
 def open_database(db_path: Path) -> tuple[sqlite3.Connection, bool]:
-    database_connection = sqlite3.connect(db_path)
+    sqlite3.register_converter("datetime", convert_datetime)
+    database_connection = sqlite3.connect(db_path, detect_types=sqlite3.PARSE_DECLTYPES)
     database_connection.row_factory = sqlite3.Row
     logger.info("Opened database.")
     logger_debug.info("Opened database.")

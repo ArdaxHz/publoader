@@ -7,7 +7,7 @@ from typing import Dict, List, Optional, Union
 
 from publoader.models.dataclasses import Chapter
 from publoader.utils.config import config
-from publoader.utils.utils import EXPIRE_TIME
+from publoader.utils.utils import EXPIRE_TIME, get_current_datetime
 
 from discord_webhook import DiscordEmbed, DiscordWebhook
 
@@ -241,7 +241,7 @@ class PubloaderUpdatesWebhook(WebhookBase):
             f"Failed: {failed}\n"
             f"Skipped: {skipped}\n"
             f"Edited: {edited}",
-            "timestamp": datetime.datetime.now().isoformat(),
+            "timestamp": get_current_datetime().isoformat(),
             "color": self.colour,
         }
 
@@ -338,7 +338,7 @@ class PubloaderDupesWebhook(WebhookBase):
         return {
             "title": f"Dupes in: {self.manga_title}",
             "description": f"""MangaDex manga link: [here]({self.mangadex_manga_url})""",
-            "timestamp": datetime.datetime.now().isoformat(),
+            "timestamp": get_current_datetime().isoformat(),
             "color": self.colour,
         }
 
@@ -381,7 +381,7 @@ class PubloaderDeleterWebhook(WebhookHelper):
             description=f"{self.normalised_chapter['name']}\n{self.normalised_chapter['value']}",
             **{
                 "color": self.colour,
-                "timestamp": datetime.datetime.now().isoformat(),
+                "timestamp": get_current_datetime().isoformat(),
             },
         )
 
@@ -406,7 +406,7 @@ class PubloaderNotIndexedWebhook(WebhookHelper):
             description=embed_data["description"],
             **{
                 "color": self.colour,
-                "timestamp": datetime.datetime.now().isoformat(),
+                "timestamp": get_current_datetime().isoformat(),
             },
         )
 
@@ -440,7 +440,7 @@ class PubloaderWebhook(WebhookHelper):
         self.embed = DiscordEmbed(
             title=self.embed_title,
             description=self.embed_description,
-            timestamp=datetime.datetime.now().isoformat(),
+            timestamp=get_current_datetime().isoformat(),
             color=self.embed_colour or self.colour,
         )
         webhook.add_embed(self.embed)

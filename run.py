@@ -101,8 +101,10 @@ if __name__ == "__main__":
 
     if vargs["clean"]:
         clean_db()
-    else:
+    elif vargs["general"]:
         main(True)
+    else:
+        main()
 
     print("End of initial run, starting scheduler.")
     schedule = Scheduler(tzinfo=timezone.utc, max_exec=1)

@@ -10,6 +10,7 @@ from publoader.models.database import update_expired_chapter_database
 from publoader.models.dataclasses import Chapter, Manga
 from publoader.utils.config import ratelimit_time, components_path
 from publoader.utils.misc import get_md_api, format_title
+from publoader.utils.utils import get_current_datetime
 
 if TYPE_CHECKING:
     import sqlite3
@@ -226,7 +227,7 @@ class ExtensionUploader:
         #             chapter.md_chapter_id
         #             for chapter in self.chapters_on_db
         #             if chapter.chapter_expire
-        #             >= datetime.now()
+        #             >= get_current_datetime()
         #             and chapter.md_chapter_id. is not None
         #         ]
         #     )

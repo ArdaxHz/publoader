@@ -1,13 +1,14 @@
+import datetime
 import importlib.util
 import logging
 import sys
 import traceback
-from datetime import time, datetime, timezone
+from datetime import time, timezone, timedelta
 from typing import TYPE_CHECKING, List
 
 from publoader.models.dataclasses import Chapter, Manga
 from publoader.utils.config import DEFAULT_TIME, DEFAULT_CLEAN_DAY, ALL_DAYS, CLEAN_TIME
-from publoader.utils.utils import root_path
+from publoader.utils.utils import root_path, get_current_datetime
 
 if TYPE_CHECKING:
     import sqlite3
@@ -16,6 +17,7 @@ logger = logging.getLogger("publoader")
 
 
 def validate_list_chapters(list_to_validate, list_elements_type):
+    """Check if variable is a list and the contents of the list are of the specified type."""
     if not isinstance(list_to_validate, list):
         raise TypeError("Specified list is not a list.")
 
@@ -29,9 +31,11 @@ def validate_list_chapters(list_to_validate, list_elements_type):
     length_correct_elements = len(list_elements_correct)
     total_list_elements = len(list_to_validate)
 
-    logger.debug(
-        f"{length_correct_elements} out of {total_list_elements} elements in the correct format."
-    )
+    if length_correct_elements != total_list_elements:
+        logger.debug(
+            f"{length_correct_elements} out of {total_list_elements} elements in the correct format."
+        )
+
     if list_elements_wrong:
         logger.warning(f"Skipping wrong type elements: {list_elements_wrong}")
     return list_elements_correct
@@ -40,6 +44,7 @@ def validate_list_chapters(list_to_validate, list_elements_type):
 def check_class_has_attribute(
     extension_name: str, extension_class, attribute: str, default=None
 ):
+    """Check if the class has the attribute and return default if not."""
     attribute_class = getattr(extension_class, attribute, None)
     if attribute_class is not None:
         return attribute_class
@@ -53,6 +58,7 @@ def check_class_has_attribute(
 def check_class_has_method(
     extension_name: str, extension_class, method: str, default=None, run=True, **kwargs
 ):
+    """Check if the class has the method and return default if not."""
     method_class = getattr(extension_class, method, None)
     if method_class is not None:
         if callable(method_class):
@@ -68,6 +74,7 @@ def check_class_has_method(
 
 
 def convert_chapters_datetimes(chapters: List[Chapter]):
+    """Convert all the chapter objects to be timezone-aware."""
     for chapter in chapters:
         chapter.chapter_timestamp = chapter.chapter_timestamp.astimezone(
             tz=timezone.utc
@@ -76,9 +83,7 @@ def convert_chapters_datetimes(chapters: List[Chapter]):
             chapter.chapter_expire = chapter.chapter_expire.astimezone(tz=timezone.utc)
 
 
-def load_extensions(
-    database_connection: "sqlite3.Connection", clean_db: bool, general_run: bool
-):
+def load_extensions(clean_db: bool, general_run: bool):
     updates = {}
 
     extensions_folder = root_path.joinpath("publoader", "extensions")
@@ -113,13 +118,37 @@ def load_extensions(
                 extension_name, extension_class, clean_db, general_run
             )
             if not run_extension:
-                logger.info(
-                    f"{extension_name} is not scheduled to run now: {datetime.now().isoformat()}."
-                )
-                print(
-                    f"{extension_name} is not scheduled to run now: {datetime.now().isoformat()}."
-                )
+                print(f"{extension_name} is not scheduled to run now: {datetime.datetime.now()}")
                 continue
+
+            updates[extension_name] = {
+                "extension": extension_class,
+                "clean_db": clean_db,
+                "extension_name": extension_name,
+            }
+        except Exception:
+            traceback.print_exc()
+            logger.exception(f"------{extension_name} raised an error.")
+            continue
+    return updates
+
+
+def run_extensions(
+    extensions: dict, database_connection: "sqlite3.Connection", clean_db_override: bool
+):
+    """Run the extensions to get the updates."""
+    updates = {}
+    for site in extensions:
+        extension = extensions[site]
+        extension_class = extension["extension"]
+        clean_db = extension["clean_db"]
+        extension_name = extension["extension_name"]
+
+        if clean_db_override:
+            clean_db = True
+
+        try:
+            logger.info(f"Running {extension_name}.")
 
             name = check_class_has_attribute(extension_name, extension_class, "name")
             if name is None:
@@ -241,15 +270,22 @@ def load_extensions(
             traceback.print_exc()
             logger.exception(f"------{extension_name} raised an error.")
             continue
-
     return updates
+
+
+def check_run_in_range(time_to_run):
+    """Return true if time_to_run is in the range +- 5 minutes from now."""
+    now = get_current_datetime()
+    start = (now - timedelta(minutes=5)).time()
+    end = (now + timedelta(minutes=5)).time()
+    return (time_to_run.hour == now.hour) and (start <= time_to_run <= end)
 
 
 def check_extension_run(
     extension_name, extension_class, clean_db: bool, general_run: bool
 ):
-    current_time = datetime.now()
-    current_day = datetime.now().weekday()
+    current_time = get_current_datetime()
+    current_day = get_current_datetime().weekday()
     days_to_run = []
     time_to_run = check_class_has_method(extension_name, extension_class, "run_at")
 
@@ -288,18 +324,18 @@ def check_extension_run(
     else:
         days_to_run.extend(cleaned_list)
 
-    run_extension = current_time.hour == time_to_run.hour
+    run_extension = check_run_in_range(time_to_run)
     day_to_run = current_day in days_to_run
-    clean = (current_time.hour == CLEAN_TIME.hour) and day_to_run
+    clean = check_run_in_range(CLEAN_TIME) and day_to_run
 
     if clean:
-        run_extension = clean
+        run_extension = True
 
     if general_run:
-        run_extension = general_run
+        run_extension = True
 
     if clean_db:
-        run_extension = clean_db
-        clean = clean_db
+        run_extension = True
+        clean = True
 
     return run_extension, clean

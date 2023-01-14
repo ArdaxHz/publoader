@@ -15,7 +15,6 @@ def open_manga_id_map(manga_map_path: Path) -> dict:
     try:
         with open(manga_map_path, "r") as manga_map_fp:
             manga_map = json.load(manga_map_fp)
-        logger.info("Opened manga id map file.")
     except json.JSONDecodeError as e:
         logger.critical("Manga map file is corrupted.")
         raise json.JSONDecodeError(
@@ -32,7 +31,6 @@ def open_title_regex(custom_regexes_path: Path) -> dict:
     try:
         with open(custom_regexes_path, "r") as title_regex_fp:
             custom_regexes = json.load(title_regex_fp)
-        logger.info("Opened title regex file.")
     except json.JSONDecodeError as e:
         logger.critical("Title regex file is corrupted.")
         return {}
@@ -48,7 +46,6 @@ def open_manga_data(manga_data_path: Path) -> Dict[str, dict]:
     try:
         with open(manga_data_path, "r") as manga_data_fp:
             manga_data = json.load(manga_data_fp)
-        logger.info("Opened manga data file.")
     except json.JSONDecodeError as e:
         logger.error("Manga data file is corrupted.")
     except FileNotFoundError:
@@ -56,5 +53,10 @@ def open_manga_data(manga_data_path: Path) -> Dict[str, dict]:
     return manga_data
 
 
+def get_current_datetime():
+    """Get current datetime as timezone-aware."""
+    return datetime.datetime.now(tz=datetime.timezone.utc)
+
+
 chapter_number_regex = re.compile(r"^(0|[1-9]\d*)((\.\d+){1,2})?[a-z]?$", re.I)
-EXPIRE_TIME = datetime.datetime(year=1990, month=1, day=1)
+EXPIRE_TIME = datetime.datetime(year=1990, month=1, day=1, tzinfo=datetime.timezone.utc)

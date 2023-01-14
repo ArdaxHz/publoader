@@ -92,7 +92,7 @@ class Extension:
         self._get_mplus_updates()
 
     def run_at(self) -> time:
-        return time(hour=19, minute=0, tzinfo=timezone.utc)
+        return time(hour=15, minute=1, tzinfo=timezone.utc)
 
     def clean_at(self) -> Optional[list]:
         return []

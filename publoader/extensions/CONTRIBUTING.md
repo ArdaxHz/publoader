@@ -94,8 +94,8 @@ class Extension:
 - `get_updated_chapters(self) -> List[Chapter]` Returns a list of newly released chapters.
 - `get_all_chapters(self) -> List[Chapter]` Returns all the chapters available for a series, uploaded or not uploaded. *If the site does not support retrieving all the available chapters for a series, this should return an empty array.*
 - `get_updated_manga(self) -> List[Manga]` Returns a list of untracked newly added series.
-- `run_at(self) -> datetime.time` A time object of when you want the extension to be run.
-- `clean_at(self) -> Optional[List[int]]` The days you want to run the extension as if it is a fresh install. This allows the bot to check for duplicate chapters, chapters not uploaded and chapters needing to be deleted. Allowed values: `None` for the default day, `[]` for everyday, `[0]` for mondays. Use an int value in the range 0-6 (inclusive) for the day of the week.
+- `run_at(self) -> datetime.time` A time object of when you want the extension to be run. As the bot is run hourly, having the minute set as anything other than zero will not run the extension. 
+- `clean_at(self) -> Optional[List[int]]` The days you want to run the extension as if it is a fresh install. This allows the bot to check for duplicate chapters, chapters not uploaded and chapters needing to be deleted. Allowed values: `None` for the default day (wednesday), `[]` for everyday, e.g. `[0, 3]` for mondays and thursdays. Use an int value in the range 0-6 (inclusive) for the day of the week.
 
 ***If these methods return anything other than a list of the `Chapter` class or the `Manga` class, they will be skipped.***
 
@@ -108,8 +108,8 @@ The chapter class contains the following fields:
 
 Fields with `Optional[]` can be left as null, fields without must be populated.
 
-- `chapter_timestamp: datetime.datetime`. Datetime object of when the chapter was published.
-- `chapter_expire: Optional[datetime.datetime]`. Datetime object of when the chapter expires, if the chapter does not expire, this can be null.
+- `chapter_timestamp: datetime.datetime`. Datetime object of when the chapter was published. This is updated to be timezone-aware.
+- `chapter_expire: Optional[datetime.datetime]`. Datetime object of when the chapter expires, if the chapter does not expire, this can be null. This is updated to be timezone-aware.
 - `chapter_title: Optional[str]`. Chapter title.
 - `chapter_number: Optional[str]`. Chapter number, must follow the MangaDex chapter number regex.
 - `chapter_language: str`. ISO-639-2 code.
