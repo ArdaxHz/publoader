@@ -60,7 +60,7 @@ def clean_db():
     check_for_update(root_path)
     install_requirements()
     print("Running the clean database function.")
-    subprocess.call([RUNNER, "publoader.py", "-c"])
+    subprocess.call([RUNNER, "publoader.py", "-g"])
 
 
 if __name__ == "__main__":

@@ -118,8 +118,14 @@ def load_extensions(clean_db: bool, general_run: bool):
                 extension_name, extension_class, clean_db, general_run
             )
             if not run_extension:
-                print(f"{extension_name} is not scheduled to run now: {datetime.datetime.now()}")
+                print(
+                    f"{extension_name} is not scheduled to run now: {datetime.datetime.now()}"
+                )
                 continue
+
+            if clean_db:
+                print(f"Running clean_db for {extension_name}")
+                logger.info(f"Running clean_db for {extension_name}")
 
             updates[extension_name] = {
                 "extension": extension_class,

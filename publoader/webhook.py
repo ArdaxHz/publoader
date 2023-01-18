@@ -54,15 +54,16 @@ class WebhookHelper:
         failed_upload: bool = False,
         inline: bool = True,
     ) -> Dict[str, str]:
-        name = (
-            f"Chapter: {chapter.chapter_number}\nLanguage: {chapter.chapter_language}"
-        )
+        name = f"Chapter: {chapter.chapter_number}\nExtension: {chapter.extension_name}"
         value = (
-            f"{self._format_link(name='MangaDex', type='chapter', url=self.mangadex_chapter_url.format(chapter.md_chapter_id), skip_chapter_id=failed_upload)}"
-            f"{self._format_link(name=self.extension_name, type='chapter', url=chapter.chapter_url)}"
+            f"Language: `{chapter.chapter_language}`\n"
             f"Chapter title: `{chapter.chapter_title}`\n"
             f"Chapter expiry: `{(chapter.chapter_expire or EXPIRE_TIME).isoformat()}`\n"
+            "\n"
+            f"{self._format_link(name='MangaDex', type='chapter', url=self.mangadex_chapter_url.format(chapter.md_chapter_id), skip_chapter_id=failed_upload)}"
             f"{self._format_link(name='MangaDex', type='manga', url=self.mangadex_manga_url.format(chapter.md_manga_id), skip_chapter_id=failed_upload)}"
+            "\n"
+            f"{self._format_link(name=self.extension_name, type='chapter', url=chapter.chapter_url)}"
             f"{self._format_link(name=self.extension_name, type='manga', url=chapter.manga_url)}"
         )
 
@@ -378,7 +379,7 @@ class PubloaderDeleterWebhook(WebhookHelper):
     def make_embed(self):
         embed = DiscordEmbed(
             title=f"Deleted chapter {self.chapter.md_chapter_id}",
-            description=f"{self.normalised_chapter['name']}\n{self.normalised_chapter['value']}",
+            description=f"{self.normalised_chapter['name']}\n\n{self.normalised_chapter['value']}",
             **{
                 "color": self.colour,
                 "timestamp": get_current_datetime().isoformat(),
@@ -435,14 +436,18 @@ class PubloaderWebhook(WebhookHelper):
         self.embed_title = kwargs.get("title")
         self.embed_description = kwargs.get("description")
         self.embed_colour = kwargs.get("colour")
+        self.timestamp = kwargs.get("timestamp", get_current_datetime().isoformat())
+        self.add_timestamp = kwargs.get("add_timestamp", True)
 
     def main(self, **kwargs):
         self.embed = DiscordEmbed(
             title=self.embed_title,
             description=self.embed_description,
-            timestamp=get_current_datetime().isoformat(),
             color=self.embed_colour or self.colour,
         )
+
+        if self.add_timestamp:
+            self.embed.timestamp = self.timestamp
         webhook.add_embed(self.embed)
 
     def send(self, **kwargs):

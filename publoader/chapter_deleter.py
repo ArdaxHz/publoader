@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, List, Optional
 
 from publoader.models.dataclasses import Chapter
-from publoader.webhook import PubloaderDeleterWebhook
+from publoader.webhook import PubloaderDeleterWebhook, PubloaderWebhook
 from publoader.models.http import RequestError
 from publoader.utils.config import (
     mangadex_api_url,
@@ -145,9 +145,21 @@ class ChapterDeleterProcess:
 
     def delete(self):
         """Start the chapter deleter process."""
-        self.chapters_to_delete.extend(self.get_chapter_to_delete())
+        self.add_more_chapters(self.get_chapter_to_delete())
         logger.info(f"Chapters to delete: {self.chapters_to_delete}")
 
         if self.chapters_to_delete:
             self.http_client.login()
             self._delete_expired_chapters()
+
+            print("Finished deleting expired chapters.")
+            PubloaderWebhook(
+                "no_extension",
+                **{"title": "Finished deleting expired chapters.", "colour": "C43542"},
+            ).send()
+        else:
+            print("No chapters to delete.")
+            PubloaderWebhook(
+                "no_extension",
+                **{"title": "No chapters to delete.", "colour": "C43542"},
+            ).send()

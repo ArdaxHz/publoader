@@ -59,6 +59,9 @@ class ExtensionUploader:
         self.mangadex_group_id = mangadex_group_id
         self.extension_languages = extension_languages
 
+        self.send_begin_extension_uploading()
+        self.send_untracked_manga_webhook()
+
         self.same_chapter_dict: Dict[str, List[str]] = self.custom_regexes.get(
             "same", {}
         )
@@ -76,6 +79,13 @@ class ExtensionUploader:
 
         logger.info(f"Manga not tracked but on mangadex: {self.manga_untracked}")
 
+    def send_begin_extension_uploading(self):
+        PubloaderWebhook(
+            self.extension_name,
+            title=f"Posting updates for publisher {self.extension_name}",
+            add_timestamp=False,
+        ).send()
+
     def send_untracked_manga_webhook(self):
         for untracked in self.untracked_manga:
             logger.info(
@@ -91,7 +101,7 @@ class ExtensionUploader:
                 title="Untracked Manga",
                 description="\n".join(
                     [
-                        f"[{manga.manga_id}]({manga.manga_url}): `{manga.manga_name}`"
+                        f"**{manga.manga_name}**: [{manga.manga_id}]({manga.manga_url})"
                         for manga in self.untracked_manga
                     ]
                 ),
@@ -270,13 +280,6 @@ class ExtensionUploader:
         # Sort each chapter by manga
         all_manga_chapters = self._sort_chapters_by_manga(self.all_chapters)
         self._delete_extra_chapters()
-
-        start_webhook = PubloaderWebhook(
-            self.extension_name,
-            title=f"Posting updates for publisher {self.extension_name}",
-        )
-        start_webhook.send()
-        self.send_untracked_manga_webhook()
 
         for index, mangadex_manga_id in enumerate(self.updated_manga_chapters, start=1):
             self.http_client.login()

@@ -129,7 +129,6 @@ def main(clean_db=False, general_run=False):
             continue
 
     deleter_process_object.delete()
-    print("Finished deleting expired chapters.")
 
     # Save and close database
     database_connection.commit()

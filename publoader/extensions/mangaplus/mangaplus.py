@@ -95,7 +95,7 @@ class Extension:
         return time(hour=15, minute=1, tzinfo=timezone.utc)
 
     def clean_at(self) -> Optional[list]:
-        return []
+        return [2, 6]
 
     def _open_manga_id_map(self):
         return open_manga_id_map(
@@ -189,6 +189,8 @@ class Extension:
                             manga_url=self._manga_url_format.format(manga_id),
                         )
                     )
+        else:
+            logger.error(f"Couldn't get the untracked manga.")
 
     def _get_mplus_updates(self):
         """Get latest chapter updates."""
