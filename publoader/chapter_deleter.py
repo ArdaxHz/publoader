@@ -159,7 +159,3 @@ class ChapterDeleterProcess:
             ).send()
         else:
             print("No chapters to delete.")
-            PubloaderWebhook(
-                "no_extension",
-                **{"title": "No chapters to delete.", "colour": "C43542"},
-            ).send()

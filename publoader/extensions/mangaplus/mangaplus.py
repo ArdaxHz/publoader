@@ -95,7 +95,7 @@ class Extension:
         return time(hour=15, minute=1, tzinfo=timezone.utc)
 
     def clean_at(self) -> Optional[list]:
-        return [2, 6]
+        return [2, 4, 6]
 
     def _open_manga_id_map(self):
         return open_manga_id_map(

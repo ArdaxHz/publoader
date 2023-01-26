@@ -55,12 +55,19 @@ def main(general_run=False):
     subprocess.call(runner)
 
 
+def daily_check_run():
+    check_for_update(root_path)
+    install_requirements()
+    print("Running the clean database function.")
+    subprocess.call([RUNNER, "publoader.py", "-g"])
+
+
 def clean_db():
     """Call the clean_db function of the publoader bot."""
     check_for_update(root_path)
     install_requirements()
     print("Running the clean database function.")
-    subprocess.call([RUNNER, "publoader.py", "-g"])
+    subprocess.call([RUNNER, "publoader.py", "-c"])
 
 
 if __name__ == "__main__":
@@ -122,7 +129,7 @@ if __name__ == "__main__":
             minute=daily_run_time_checks_minute,
             tzinfo=timezone.utc,
         ),
-        clean_db,
+        daily_check_run,
         weight=9,
     )
 

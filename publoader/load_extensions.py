@@ -99,8 +99,6 @@ def load_extensions(clean_db: bool, general_run: bool):
         print(f"------Loading {extension_name}------")
 
         try:
-            logger.info(f"------Loading {extension_name}------")
-
             spec = importlib.util.spec_from_file_location(
                 extension_name, extension_mainfile
             )
@@ -117,16 +115,13 @@ def load_extensions(clean_db: bool, general_run: bool):
             run_extension, clean_db = check_extension_run(
                 extension_name, extension_class, clean_db, general_run
             )
-            if not run_extension:
+            if not run_extension and not clean_db:
                 print(
-                    f"{extension_name} is not scheduled to run now: {datetime.datetime.now()}"
+                    f"{extension_name}  is not scheduled to run now: {datetime.datetime.now()}"
                 )
                 continue
 
-            if clean_db:
-                print(f"Running clean_db for {extension_name}")
-                logger.info(f"Running clean_db for {extension_name}")
-
+            print(f"{clean_db=} for {extension_name}")
             updates[extension_name] = {
                 "extension": extension_class,
                 "clean_db": clean_db,
@@ -331,8 +326,13 @@ def check_extension_run(
         days_to_run.extend(cleaned_list)
 
     run_extension = check_run_in_range(time_to_run)
+
     day_to_run = current_day in days_to_run
-    clean = check_run_in_range(CLEAN_TIME) and day_to_run
+    time_to_clean = check_run_in_range(CLEAN_TIME)
+    clean = time_to_clean and day_to_run
+
+    if time_to_clean:
+        logger.info(f"Time to clean: Status {clean=} for {extension_name}")
 
     if clean:
         run_extension = True

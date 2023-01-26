@@ -94,7 +94,7 @@ try:
         config["User Set"].get("bot_run_time_checks", "").split(":")[0]
     )
 except (ValueError, KeyError):
-    daily_run_time_checks_hour = 0
+    daily_run_time_checks_hour = 1
 
 try:
     daily_run_time_checks_minute = int(
