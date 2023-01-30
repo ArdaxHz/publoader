@@ -59,7 +59,7 @@ def daily_check_run():
     check_for_update(root_path)
     install_requirements()
     print("Running the clean database function.")
-    subprocess.call([RUNNER, "publoader.py", "-g"])
+    subprocess.call([RUNNER, "publoader.py"])
 
 
 def clean_db():

@@ -96,6 +96,7 @@ class Extension:
 - `get_updated_manga(self) -> List[Manga]` Returns a list of untracked newly added series.
 - `run_at(self) -> datetime.time` A time object of when you want the extension to be run. As the bot is run hourly, having the minute set as anything other than zero will not run the extension. 
 - `clean_at(self) -> Optional[List[int]]` The days you want to run the extension as if it is a fresh install. This allows the bot to check for duplicate chapters, chapters not uploaded and chapters needing to be deleted. Allowed values: `None` for the default day (wednesday), `[]` for everyday, e.g. `[0, 3]` for mondays and thursdays. Use an int value in the range 0-6 (inclusive) for the day of the week.
+- `daily_check_run(self) -> bool` If you want the bot to run daily at 1am to catch any chapters that may have not been uploaded.
 
 ***If these methods return anything other than a list of the `Chapter` class or the `Manga` class, they will be skipped.***
 

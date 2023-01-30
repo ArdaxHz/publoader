@@ -41,9 +41,7 @@ def validate_list_chapters(list_to_validate, list_elements_type):
     return list_elements_correct
 
 
-def check_class_has_attribute(
-    extension_name: str, extension_class, attribute: str, default=None
-):
+def check_class_has_attribute(extension_name: str, extension_class, attribute: str, default=None):
     """Check if the class has the attribute and return default if not."""
     attribute_class = getattr(extension_class, attribute, None)
     if attribute_class is not None:
@@ -67,18 +65,14 @@ def check_class_has_method(
             else:
                 return method_class
 
-    logger.info(
-        f"{extension_name} doesn't have the {method} method, using default return value."
-    )
+    logger.info(f"{extension_name} doesn't have the {method} method, using default return value.")
     return default
 
 
 def convert_chapters_datetimes(chapters: List[Chapter]):
     """Convert all the chapter objects to be timezone-aware."""
     for chapter in chapters:
-        chapter.chapter_timestamp = chapter.chapter_timestamp.astimezone(
-            tz=timezone.utc
-        )
+        chapter.chapter_timestamp = chapter.chapter_timestamp.astimezone(tz=timezone.utc)
         if chapter.chapter_expire is not None:
             chapter.chapter_expire = chapter.chapter_expire.astimezone(tz=timezone.utc)
 
@@ -99,9 +93,7 @@ def load_extensions(clean_db: bool, general_run: bool):
         print(f"------Loading {extension_name}------")
 
         try:
-            spec = importlib.util.spec_from_file_location(
-                extension_name, extension_mainfile
-            )
+            spec = importlib.util.spec_from_file_location(extension_name, extension_mainfile)
             foo = importlib.util.module_from_spec(spec)
             sys.modules[extension_name] = foo
             spec.loader.exec_module(foo)
@@ -116,9 +108,7 @@ def load_extensions(clean_db: bool, general_run: bool):
                 extension_name, extension_class, clean_db, general_run
             )
             if not run_extension and not clean_db:
-                print(
-                    f"{extension_name}  is not scheduled to run now: {datetime.datetime.now()}"
-                )
+                print(f"{extension_name} is not scheduled to run now: {datetime.datetime.now()}")
                 continue
 
             print(f"{clean_db=} for {extension_name}")
@@ -162,9 +152,7 @@ def run_extensions(
                 (name,),
             )
             posted_chapters_ids = (
-                [str(job["chapter_id"]) for job in posted_chapters_ids_data]
-                if not clean_db
-                else []
+                [str(job["chapter_id"]) for job in posted_chapters_ids_data] if not clean_db else []
             )
 
             update_posted_chapter_ids = check_class_has_method(
@@ -282,13 +270,14 @@ def check_run_in_range(time_to_run):
     return (time_to_run.hour == now.hour) and (start <= time_to_run <= end)
 
 
-def check_extension_run(
-    extension_name, extension_class, clean_db: bool, general_run: bool
-):
+def check_extension_run(extension_name, extension_class, clean_db: bool, general_run: bool):
     current_time = get_current_datetime()
     current_day = get_current_datetime().weekday()
     days_to_run = []
     time_to_run = check_class_has_method(extension_name, extension_class, "run_at")
+    daily_check_run = check_class_has_method(
+        extension_name, extension_class, "daily_check_run", default=False
+    )
 
     if not isinstance(time_to_run, time):
         time_to_run = DEFAULT_TIME
@@ -299,9 +288,7 @@ def check_extension_run(
     time_to_run_datetime.astimezone(tz=timezone.utc)
     time_to_run = time_to_run_datetime.time()
 
-    days_to_clean_unsanitised = check_class_has_method(
-        extension_name, extension_class, "clean_at"
-    )
+    days_to_clean_unsanitised = check_class_has_method(extension_name, extension_class, "clean_at")
 
     if not isinstance(days_to_clean_unsanitised, (list, type(None))):
         days_to_clean_unsanitised = None
@@ -332,7 +319,9 @@ def check_extension_run(
     clean = time_to_clean and day_to_run
 
     if time_to_clean:
-        logger.info(f"Time to clean: Status {clean=} for {extension_name}")
+        logger.info(f"Time to clean: Status {clean=} and {daily_check_run=} for {extension_name}")
+        if daily_check_run:
+            run_extension = True
 
     if clean:
         run_extension = True
