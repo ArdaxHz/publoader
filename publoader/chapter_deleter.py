@@ -28,9 +28,6 @@ class ChapterDeleterProcess:
         self.database_connection = database_connection
         self.chapters_to_delete = []
 
-        self.chapter_delete_ratelimit = 8
-        self.chapter_delete_process = None
-
     def _get_all_chapters(self) -> List[Chapter]:
         """Get all the chapters from the database."""
         return [
