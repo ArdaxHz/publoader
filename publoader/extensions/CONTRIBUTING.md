@@ -17,14 +17,14 @@ The quickest way to get started is to copy an existing extension's folder struct
 
 ## Setting up your extension directory
 
-Each extension should reside in `publoader/extensions/<extension_name>`.
+Each extension should reside in `/publoader/extensions/<extension_name>`.
 
 ## Extension directory structure
 
 The simplest extension structure looks like this:
 
 ```
-publoader/extensions/<extension_name>
+/publoader/extensions/<extension_name>
 ├── <extension_name>.py
 ├── manga_id_map.json
 ├── custom_regexes.json
@@ -64,6 +64,19 @@ If you want to include this file, use the structure as follows:
 ## Dependencies
 
 You can use whatever modules you want to, but remember to include a `requirements.txt` in your extension directory.
+
+## Scheduling the extension for running
+Add the time to run the extension in the file `/components/schedule.json`.
+The dict should extend to the current file and should follow the format:
+```json
+<extension_name>: {
+  "hour": <24_hour_clock_int>,
+  "minute": <int>,
+}
+```
+The extension's name should be the same as the extension directory name and mainfile.
+
+***This timings defined here ignore the `run_at` method defined in the extension.***
 
 ## Extension main class
 The class that is used to read the chapter data from. This class **must** be named `Extension` and your extension will not run if this class is not available.

@@ -64,7 +64,9 @@ def run_updates(
                 f"title: {update.chapter_title!r}."
             )
 
-        print(f"Found {len(updated_chapters)} new chapters for {normalised_extension_name}")
+        print(
+            f"Found {len(updated_chapters)} new chapters for {normalised_extension_name}"
+        )
 
         # Get already posted chapters for the extension
         posted_chapters_data = database_connection.execute(
@@ -127,7 +129,9 @@ def open_extensions(names=None, clean_db: bool = False, general_run: bool = Fals
     if not extensions:
         return
 
-    manga_data_local = open_manga_data(components_path.joinpath(config["Paths"]["manga_data_path"]))
+    manga_data_local = open_manga_data(
+        components_path.joinpath(config["Paths"]["manga_data_path"])
+    )
     http_client = HTTPClient(config, __version__)
 
     # Start deleting expired chapters
@@ -145,7 +149,10 @@ def open_extensions(names=None, clean_db: bool = False, general_run: bool = Fals
             manga_data_local=manga_data_local,
         )
 
-    save(deleter_process_object=deleter_process_object, database_connection=database_connection)
+    save(
+        deleter_process_object=deleter_process_object,
+        database_connection=database_connection,
+    )
 
 
 def open_extension(name: str, clean_db: bool = False):
@@ -159,12 +166,16 @@ def open_extension(name: str, clean_db: bool = False):
         clean_db = True
 
     extension_data = run_extension(
-        loaded_extension, database_connection=database_connection, clean_db_override=clean_db
+        loaded_extension,
+        database_connection=database_connection,
+        clean_db_override=clean_db,
     )
     if not extension_data:
         return
 
-    manga_data_local = open_manga_data(components_path.joinpath(config["Paths"]["manga_data_path"]))
+    manga_data_local = open_manga_data(
+        components_path.joinpath(config["Paths"]["manga_data_path"])
+    )
     http_client = HTTPClient(config, __version__)
 
     # Start deleting expired chapters
@@ -181,11 +192,15 @@ def open_extension(name: str, clean_db: bool = False):
         manga_data_local=manga_data_local,
     )
 
-    save(deleter_process_object=deleter_process_object, database_connection=database_connection)
+    save(
+        deleter_process_object=deleter_process_object,
+        database_connection=database_connection,
+    )
 
 
 def save(
-    deleter_process_object: "ChapterDeleterProcess", database_connection: "sqlite3.Connection"
+    deleter_process_object: "ChapterDeleterProcess",
+    database_connection: "sqlite3.Connection",
 ):
     deleter_process_object.delete()
 
@@ -221,7 +236,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--extension",
         "-e",
-        action='append',
+        action="append",
         required=False,
         help="Run a specific extension.",
     )
@@ -233,7 +248,9 @@ if __name__ == "__main__":
     else:
         extension_to_run = [str(extension).strip() for extension in vargs["extension"]]
 
-    open_extensions(names=extension_to_run, clean_db=vargs["clean"], general_run=vargs["general"])
+    open_extensions(
+        names=extension_to_run, clean_db=vargs["clean"], general_run=vargs["general"]
+    )
 
     if webhook.embeds:
         webhook.execute(remove_embeds=True)

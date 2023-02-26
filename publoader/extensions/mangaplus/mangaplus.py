@@ -90,7 +90,9 @@ class Extension:
         self._manga_id_map = self._open_manga_id_map()
         self.tracked_mangadex_ids = list(self._manga_id_map.keys())
         self.tracked_manga = [
-            mplus_id for md_id in self._manga_id_map for mplus_id in self._manga_id_map[md_id]
+            mplus_id
+            for md_id in self._manga_id_map
+            for mplus_id in self._manga_id_map[md_id]
         ]
         self.custom_regexes = self._open_custom_regexes()
         self._num2words: Optional[str] = self._get_num2words_string()
@@ -99,10 +101,14 @@ class Extension:
         self._get_mplus_updates()
 
     def _open_manga_id_map(self):
-        return open_manga_id_map(self.extension_dirpath.joinpath(self.manga_id_map_filename))
+        return open_manga_id_map(
+            self.extension_dirpath.joinpath(self.manga_id_map_filename)
+        )
 
     def _open_custom_regexes(self):
-        return open_title_regex(self.extension_dirpath.joinpath(self.custom_regexes_filename))
+        return open_title_regex(
+            self.extension_dirpath.joinpath(self.custom_regexes_filename)
+        )
 
     def _get_language(self, manga_id: str, language: str):
         manga_id = str(manga_id)
@@ -165,14 +171,18 @@ class Extension:
         updated_manga_response = loop.run_until_complete(task)
 
         if updated_manga_response is not None:
-            updated_manga_response_parsed = self._get_proto_response(updated_manga_response)
+            updated_manga_response_parsed = self._get_proto_response(
+                updated_manga_response
+            )
             updated_manga_details = updated_manga_response_parsed.success.updated
 
             for manga in updated_manga_details.updated_manga_detail:
                 if str(manga.updated_manga.manga_id) not in self.tracked_manga:
                     manga_id = str(manga.updated_manga.manga_id)
                     manga_name = manga.updated_manga.manga_name
-                    language = self._get_language(manga_id, manga.updated_manga.language)
+                    language = self._get_language(
+                        manga_id, manga.updated_manga.language
+                    )
 
                     self._untracked_manga.append(
                         Manga(
@@ -192,7 +202,8 @@ class Extension:
         tasks = []
 
         spliced_manga = [
-            self.tracked_manga[elem : elem + 3] for elem in range(0, len(self.tracked_manga), 3)
+            self.tracked_manga[elem : elem + 3]
+            for elem in range(0, len(self.tracked_manga), 3)
         ]
 
         loop = asyncio.get_event_loop()
@@ -202,7 +213,9 @@ class Extension:
 
         loop.run_until_complete(asyncio.gather(*tasks))
 
-    def _normalise_chapter_object(self, chapter_list, manga_object: Manga) -> List[Chapter]:
+    def _normalise_chapter_object(
+        self, chapter_list, manga_object: Manga
+    ) -> List[Chapter]:
         """Return a list of chapter objects made from the api chapter lists."""
         return [
             Chapter(
@@ -216,7 +229,9 @@ class Extension:
                     manga_object.manga_id, manga_object.manga_language
                 ),
                 manga_id=manga_object.manga_id,
-                md_manga_id=find_key_from_list_value(self._manga_id_map, manga_object.manga_id),
+                md_manga_id=find_key_from_list_value(
+                    self._manga_id_map, manga_object.manga_id
+                ),
                 manga_name=manga_object.manga_name,
                 manga_url=self._manga_url_format.format(manga_object.manga_id),
             )
@@ -285,7 +300,9 @@ class Extension:
             index_search = chapters[chapters.index(current_chapter) :]
 
         for chapter in index_search:
-            number_match = re.match(pattern=r"^#?(\d+)", string=chapter.chapter_number, flags=re.I)
+            number_match = re.match(
+                pattern=r"^#?(\d+)", string=chapter.chapter_number, flags=re.I
+            )
 
             if bool(number_match):
                 number = number_match.group(1)
@@ -337,8 +354,12 @@ class Extension:
                 if next_chapter is None:
                     chapter_number = None
                 else:
-                    next_chapter_number = self._strip_chapter_number(next_chapter.chapter_number)
-                    chapter_number = int(re.split(r"\.|\-|\,", next_chapter_number)[0]) - 1
+                    next_chapter_number = self._strip_chapter_number(
+                        next_chapter.chapter_number
+                    )
+                    chapter_number = (
+                        int(re.split(r"\.|\-|\,", next_chapter_number)[0]) - 1
+                    )
                     first_index = next_chapter
                     second_index = chapter
             else:
@@ -368,12 +389,16 @@ class Extension:
                 # Use index difference as decimal to avoid not uploading
                 # non-dupes
                 try:
-                    chapter_difference = chapters.index(first_index) - chapters.index(second_index)
+                    chapter_difference = chapters.index(first_index) - chapters.index(
+                        second_index
+                    )
                     if chapter_difference > 1:
                         second_index_number = second_index.chapter_number
                         if "." in second_index_number:
                             try:
-                                second_index_decimal = int(second_index_number.rsplit(".")[-1])
+                                second_index_decimal = int(
+                                    second_index_number.rsplit(".")[-1]
+                                )
                             except ValueError:
                                 pass
                             else:
@@ -400,7 +425,8 @@ class Extension:
             chapter_number_split = [chapter_number]
         else:
             chapter_number_split = [
-                self._strip_chapter_number(chap_number) for chap_number in chapter_number.split(",")
+                self._strip_chapter_number(chap_number)
+                for chap_number in chapter_number.split(",")
             ]
 
         returned_chapter_numbers = []
@@ -416,7 +442,9 @@ class Extension:
         self, chapter: Chapter, chapter_number: List[Optional[str]]
     ) -> Optional[str]:
         """Strip away the title prefix."""
-        colon_regex = re.compile(r"^(?:\S+\s?)?\d+(?:(?:[\,\-\.])\d{0,2})?\s?[\:]\s?", re.I)
+        colon_regex = re.compile(
+            r"^(?:\S+\s?)?\d+(?:(?:[\,\-\.])\d{0,2})?\s?[\:]\s?", re.I
+        )
         no_title_regex = re.compile(r"^\S+\s?\d+(?:(?:[\,\-\.])\d{0,2})?$", re.I)
         hashtag_regex = re.compile(r"^(?:\S+\s?)?#\d+(?:(?:[\,\-\.])\d{0,2})?\s?", re.I)
         period_dash_regex = re.compile(
@@ -450,12 +478,16 @@ class Extension:
             normalised_title = original_title
             custom_regex = "Original Title"
         elif str(chapter.manga_id) in self.custom_regexes.get("custom", {}):
-            pattern_to_use = re.compile(self.custom_regexes["custom"][str(chapter.manga_id)], re.I)
+            pattern_to_use = re.compile(
+                self.custom_regexes["custom"][str(chapter.manga_id)], re.I
+            )
             custom_regex = "Custom Regex"
         elif final_chapter_regex.match(original_title):
             pattern_to_use = final_chapter_regex
             custom_regex = "Final Chapter Regex"
-        elif word_numbers_regex is not None and word_numbers_regex.match(original_title):
+        elif word_numbers_regex is not None and word_numbers_regex.match(
+            original_title
+        ):
             pattern_to_use = word_numbers_regex
             custom_regex = "Word Numbers Regex"
         elif colon_regex.match(original_title):
@@ -486,7 +518,9 @@ class Extension:
         # )
         return normalised_title
 
-    def normalise_chapter_fields(self, manga_chapters_lists: List[List[Chapter]]) -> List[Chapter]:
+    def normalise_chapter_fields(
+        self, manga_chapters_lists: List[List[Chapter]]
+    ) -> List[Chapter]:
         """Normalise the chapter fields for MangaDex."""
         updated_chapters = []
 
@@ -494,7 +528,9 @@ class Extension:
             # Go through the last three chapters
             for chapter in chapters:
                 chapter_number_split = self._normalise_chapter_number(chapters, chapter)
-                chapter_title = self._normalise_chapter_title(chapter, chapter_number_split)
+                chapter_title = self._normalise_chapter_title(
+                    chapter, chapter_number_split
+                )
 
                 # MPlus sometimes joins two chapters as one, upload to md as
                 # two different chapters
