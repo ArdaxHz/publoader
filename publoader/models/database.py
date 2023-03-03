@@ -216,14 +216,15 @@ def update_expired_chapter_database(
     found = False
     chapter_to_delete = None
 
-    for db_chapter in chapters_on_db:
-        if (
-            md_chapter_id == db_chapter.md_chapter_id
-            or str(db_chapter.chapter_id) in external_chapter_url
-        ):
-            found = True
-            chapter_to_delete = copy(vars(db_chapter))
-            break
+    if chapters_on_db is not None:
+        for db_chapter in chapters_on_db:
+            if (
+                md_chapter_id == db_chapter.md_chapter_id
+                or str(db_chapter.chapter_id) in external_chapter_url
+            ):
+                found = True
+                chapter_to_delete = copy(vars(db_chapter))
+                break
 
     if found and chapter_to_delete is not None:
         logger.info(

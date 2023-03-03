@@ -6,7 +6,7 @@ import subprocess
 import sys
 import time
 from datetime import time as dtTime
-from datetime import timezone
+from datetime import timezone, timedelta
 from pathlib import Path
 
 from scheduler import Scheduler
@@ -15,11 +15,6 @@ from updater import check_for_update
 
 root_path = Path(".")
 config_file_path = root_path.joinpath("config").with_suffix(".ini")
-
-if sys.platform.startswith("linux"):
-    RUNNER = "python3"
-else:
-    RUNNER = "python"
 
 
 def open_timings():
@@ -67,7 +62,7 @@ def update():
 
 def main(extension_names: list[str] = None, general_run=False):
     """Call the main function of the publoader bot."""
-    runner = [RUNNER, "publoader.py"]
+    runner = [sys.executable, "publoader.py"]
     if general_run:
         runner.append("-g")
 
@@ -81,14 +76,14 @@ def main(extension_names: list[str] = None, general_run=False):
 def daily_check_run():
     update()
     print("Running the daily checker function.")
-    subprocess.call([RUNNER, "publoader.py", "-g"])
+    subprocess.call([sys.executable, "publoader.py", "-g"])
 
 
 def clean_db():
     """Call the clean_db function of the publoader bot."""
     update()
     print("Running the clean database function.")
-    subprocess.call([RUNNER, "publoader.py", "-c"])
+    subprocess.call([sys.executable, "publoader.py", "-c"])
 
 
 def schedule_extensions():
@@ -135,6 +130,10 @@ def restart():
     update()
     print(f"Restarting with args {sys.executable=} {sys.argv=}")
     os.execv(sys.executable, [sys.executable] + sys.argv)
+
+
+def print_schedule():
+    print(schedule)
 
 
 if __name__ == "__main__":
@@ -211,6 +210,13 @@ if __name__ == "__main__":
         weight=8,
         alias="daily_checker",
         tags={"daily_checker"},
+    )
+    schedule.cyclic(
+        timedelta(minutes=10),
+        print_schedule,
+        weight=5,
+        alias="print_schedule",
+        tags={"print_schedule"},
     )
     schedule_extensions()
     print(schedule)
