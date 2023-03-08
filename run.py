@@ -212,7 +212,7 @@ if __name__ == "__main__":
         tags={"daily_checker"},
     )
     schedule.cyclic(
-        timedelta(minutes=10),
+        timedelta(minutes=30),
         print_schedule,
         weight=5,
         alias="print_schedule",
