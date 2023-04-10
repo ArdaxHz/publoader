@@ -30,6 +30,7 @@ def setup_logs(
     path: Path = bot_logs_folder_path,
     logger_filename: str = None,
 ):
+    """Setup the logger with the specified name."""
     path.mkdir(exist_ok=True, parents=True)
     if logger_filename is None:
         logger_filename = logger_name
@@ -49,6 +50,22 @@ def setup_logs(
     #         log.removeHandler(hdlr)
     log.addHandler(fileh)
     log.setLevel(logging.DEBUG)
+
+
+def setup_extension_logs(
+    logger_name: str,
+    logger_filename: str = None,
+):
+    """Setup the logger for an extension.
+    The extension folder name will be the same as the logger_name.
+
+    logger_filename must not contain an extension.
+    """
+    setup_logs(
+        logger_name=logger_name,
+        path=extensions_logs_folder_path.joinpath(logger_name),
+        logger_filename=logger_filename,
+    )
 
 
 setup_logs(

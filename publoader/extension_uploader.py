@@ -306,5 +306,5 @@ class ExtensionUploader:
             )
             time.sleep(0.5)
 
-        if self.current_uploaded_chapters or self.clean_db:
+        if self.current_uploaded_chapters:
             self._check_all_chapters_uploaded()
