@@ -20,7 +20,7 @@ from publoader.utils.utils import (
 )
 
 
-__version__ = "0.1.11"
+__version__ = "0.1.12"
 
 setup_logs(
     logger_name="mangaplus",
@@ -81,7 +81,7 @@ class Extension:
         return time(hour=15, minute=1, tzinfo=timezone.utc)
 
     def clean_at(self) -> Optional[list]:
-        return [2, 4, 6]
+        return [2]
 
     def daily_check_run(self) -> bool:
         return True
