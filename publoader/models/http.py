@@ -7,11 +7,14 @@ from datetime import datetime
 from typing import Optional
 
 from publoader.utils.config import (
+    config,
     max_requests,
     upload_retry,
     components_path,
     mangadex_api_url,
 )
+
+from publoader import __version__
 
 import requests
 
@@ -575,3 +578,6 @@ class HTTPClient(HTTPModel):
     def login(self):
         """Login to MD account using details or saved token."""
         self._login()
+
+
+http_client = HTTPClient(config, __version__)

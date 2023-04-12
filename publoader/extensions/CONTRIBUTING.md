@@ -91,13 +91,13 @@ class Extension:
 
 ### Main class key variables
 
-| Field                  | Type        | Description                                                                                   |
-|------------------------|-------------|-----------------------------------------------------------------------------------------------|
-| `name`                 | `str`       | Name used in the database and in the logs. *This name should not be changed.*                 |
-| `mangadex_group_id`    | `str`       | MangaDex id of the group to upload to.                                                        |
-| `custom_regexes`       | `dict`      | Your custom regexes file after being opened and read. If not used, return an empty dict `{}`. |
-| `extension_languages`  | `List[str]` | A list of languages supported by the extension.                                               |
-| `tracked_mangadex_ids` | `List[str]` | A list of MangaDex manga ids the extension uploads to.                                        |
+| Field                  | Type        | Description                                                                                                                |
+|------------------------|-------------|----------------------------------------------------------------------------------------------------------------------------|
+| `name`                 | `str`       | Name used in the database and in the logs. *This name should not be changed and should not contain spaces or punctuation.* |
+| `mangadex_group_id`    | `str`       | MangaDex id of the group to upload to.                                                                                     |
+| `custom_regexes`       | `dict`      | Your custom regexes file after being opened and read. If not used, return an empty dict `{}`.                              |
+| `extension_languages`  | `List[str]` | A list of languages supported by the extension.                                                                            |
+| `tracked_mangadex_ids` | `List[str]` | A list of MangaDex manga ids the extension uploads to.                                                                     |
 
 ---
 
@@ -128,7 +128,7 @@ Fields with `Optional[]` can be left as null, fields without must be populated.
 - `chapter_number: Optional[str]`. Chapter number, must follow the MangaDex chapter number regex.
 - `chapter_language: str`. ISO-639-2 code.
 - `chapter_volume: Optional[str]`. Chapter volume. If the series uses seasons, use this field. Keep empty if the chapter does not have a volume.
-- `chapter_id: str`. Chapter id.
+- `chapter_id: str`. Chapter id, if the chapter doesn't have a specific id, use the chapter link.
 - `chapter_url: str`. Chapter link.
 - `manga_id: str`. The publisher's series id.
 - `md_manga_id: str`. The MangaDex manga id to upload the chapter to.

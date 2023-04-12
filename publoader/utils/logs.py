@@ -51,6 +51,21 @@ def setup_logs(
     log.setLevel(logging.DEBUG)
 
 
+def setup_extension_logs(
+    logger_name: str,
+    logger_filename: str = None,
+):
+    """Setup the logger for an extension.
+    The extension folder name will be the same as the logger_name.
+    logger_filename must not contain an extension.
+    """
+    setup_logs(
+        logger_name=logger_name,
+        path=extensions_logs_folder_path.joinpath(logger_name),
+        logger_filename=logger_filename,
+    )
+
+
 setup_logs(
     logger_name="publoader",
     path=bot_logs_folder_path,

@@ -1,23 +1,40 @@
 import argparse
-import configparser
+import asyncio
 import json
+import logging
+import multiprocessing
 import os
 import subprocess
 import sys
 import time
-from datetime import time as dtTime
-from datetime import timezone, timedelta
-from pathlib import Path
+from datetime import time as dtTime, timedelta
+from datetime import timezone
+from importlib import reload
 
 from scheduler import Scheduler
 
-from updater import check_for_update
+from publoader import uploader
+from publoader.utils.logs import bot_logs_folder_path
+from publoader.updater import check_for_update
+from publoader.utils.utils import root_path
+from publoader.utils.config import config
 
-root_path = Path(".")
-config_file_path = root_path.joinpath("config").with_suffix(".ini")
+
+logger = logging.getLogger("publoader")
+
+
+def main(extension_names: list[str] = None, general_run=False, clean_db=False):
+    """Call the main function of the publoader bot."""
+    from publoader import publoader
+
+    reload(publoader)
+    publoader.open_extensions(
+        names=extension_names, general_run=general_run, clean_db=clean_db
+    )
 
 
 def open_timings():
+    """Open the timings file."""
     timings_path = root_path.joinpath("components", "schedule").with_suffix(".json")
     if not timings_path.exists():
         return {}
@@ -26,64 +43,6 @@ def open_timings():
         return json.loads(timings_path.read_bytes())
     except json.JSONDecodeError:
         return {}
-
-
-def open_config_file() -> configparser.RawConfigParser:
-    """Open config file and read values"""
-    if config_file_path.exists():
-        config = configparser.RawConfigParser()
-        config.read(config_file_path)
-    else:
-        raise FileNotFoundError("Config file not found.")
-
-    return config
-
-
-config = open_config_file()
-
-
-def install_requirements():
-    for file in root_path.rglob("requirements.txt"):
-        print(f"Installing requirements from {file.resolve()}")
-        try:
-            successful_install = subprocess.run(f'pip install -r "{file.resolve()}"')
-        except FileNotFoundError:
-            continue
-        print(
-            f"Requirements installation completed with error code {successful_install.returncode} for file {file.resolve()}"
-        )
-
-
-def update():
-    """Update local repo."""
-    check_for_update(root_path)
-    install_requirements()
-
-
-def main(extension_names: list[str] = None, general_run=False):
-    """Call the main function of the publoader bot."""
-    runner = [sys.executable, "publoader.py"]
-    if general_run:
-        runner.append("-g")
-
-    if extension_names is not None and extension_names:
-        for name in extension_names:
-            runner.append(f"-e {name}")
-
-    subprocess.call(runner)
-
-
-def daily_check_run():
-    update()
-    print("Running the daily checker function.")
-    subprocess.call([sys.executable, "publoader.py", "-g"])
-
-
-def clean_db():
-    """Call the clean_db function of the publoader bot."""
-    update()
-    print("Running the clean database function.")
-    subprocess.call([sys.executable, "publoader.py", "-c"])
 
 
 def schedule_extensions():
@@ -96,10 +55,11 @@ def schedule_extensions():
         hour = extension_timings.get("hour", daily_run_time_daily_hour)
         minute = extension_timings.get("minute", daily_run_time_daily_minute)
 
+        # Join extensions to run together if they are scheduled to run within seven minutes of each other
         for in_same in same:
             if (
                 hour == in_same["hour"]
-                and in_same["minute"] - 3 <= minute <= in_same["minute"] + 3
+                and in_same["minute"] - 7 <= minute <= in_same["minute"] + 7
                 and timing not in in_same["extensions"]
             ):
                 in_same["extensions"].append(timing)
@@ -125,15 +85,27 @@ def schedule_extensions():
         )
 
 
+def install_requirements():
+    """Install requirements for the extensions."""
+    for file in root_path.rglob("requirements.txt"):
+        print(f"Installing requirements from {file.resolve()}")
+        try:
+            successful_install = subprocess.run(f'pip install -r "{file.resolve()}"')
+        except FileNotFoundError:
+            continue
+        print(
+            "Requirements installation completed with error code",
+            f"{successful_install.returncode} for file {file.resolve()}",
+        )
+
+
 def restart():
     """Restart the script."""
-    update()
+    check_for_update(root_path)
+    install_requirements()
+
     print(f"Restarting with args {sys.executable=} {sys.argv=}")
     os.execv(sys.executable, [sys.executable] + sys.argv)
-
-
-def print_schedule():
-    print(schedule)
 
 
 if __name__ == "__main__":
@@ -177,18 +149,25 @@ if __name__ == "__main__":
         config["User Set"]["bot_run_time_checks"].split(":")[1]
     )
 
+    process = multiprocessing.Process(target=uploader.main)
+    process.start()
+
     if vargs["extension"] is None:
         extension_to_run = None
     else:
         extension_to_run = [str(extension).strip() for extension in vargs["extension"]]
 
-    if vargs["clean"]:
-        clean_db()
-    elif vargs["general"]:
-        main(extension_names=extension_to_run, general_run=True)
+    if vargs["general"] or vargs["clean"]:
+        main(
+            extension_names=extension_to_run,
+            general_run=vargs["general"],
+            clean_db=vargs["clean"],
+        )
 
-    print("Starting scheduler.")
-    schedule = Scheduler(tzinfo=timezone.utc)
+    print(
+        "--------------------------------------------------Starting scheduler.--------------------------------------------------"
+    )
+    schedule = Scheduler(tzinfo=timezone.utc, max_exec=1)
     schedule.daily(
         dtTime(
             hour=0,
@@ -206,20 +185,12 @@ if __name__ == "__main__":
             minute=daily_run_time_checks_minute,
             tzinfo=timezone.utc,
         ),
-        daily_check_run,
+        main,
         weight=8,
         alias="daily_checker",
         tags={"daily_checker"},
     )
-    schedule.cyclic(
-        timedelta(minutes=30),
-        print_schedule,
-        weight=5,
-        alias="print_schedule",
-        tags={"print_schedule"},
-    )
     schedule_extensions()
-    print(schedule)
 
     try:
         while True:

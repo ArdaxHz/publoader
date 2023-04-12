@@ -11,7 +11,7 @@ from typing import List, Optional, Union
 
 from publoader.extensions.mangaplus import response_pb2 as response_pb
 from publoader.models.dataclasses import Chapter, Manga
-from publoader.utils.logs import setup_logs, extensions_logs_folder_path
+from publoader.utils.logs import setup_extension_logs
 from publoader.utils.misc import find_key_from_list_value
 from publoader.utils.utils import (
     chapter_number_regex,
@@ -20,11 +20,10 @@ from publoader.utils.utils import (
 )
 
 
-__version__ = "0.1.11"
+__version__ = "0.1.12"
 
-setup_logs(
+setup_extension_logs(
     logger_name="mangaplus",
-    path=extensions_logs_folder_path.joinpath("mangaplus"),
     logger_filename="mangaplus",
 )
 
@@ -81,7 +80,7 @@ class Extension:
         return time(hour=15, minute=1, tzinfo=timezone.utc)
 
     def clean_at(self) -> Optional[list]:
-        return [2, 4, 6]
+        return [2]
 
     def daily_check_run(self) -> bool:
         return True

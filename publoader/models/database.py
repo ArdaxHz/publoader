@@ -5,6 +5,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional, Union
 
+import pymongo
+from motor import motor_asyncio
+
 from publoader.models.dataclasses import Chapter
 from publoader.utils.config import config, components_path
 from publoader.utils.utils import EXPIRE_TIME
@@ -12,6 +15,21 @@ from publoader.utils.utils import EXPIRE_TIME
 
 logger = logging.getLogger("publoader")
 logger_debug = logging.getLogger("debug")
+
+
+class DatabaseConnector:
+    def __init__(self):
+        self.database_uri = config["MangaDex Credentials"]["mongodb_uri"]
+        self.database_name = config["MangaDex Credentials"]["mongodb_db_name"]
+        self.database_connection = self.connect_db()
+
+    def connect_db(self):
+        client = pymongo.MongoClient(self.database_uri)
+
+        if self.database_name is None:
+            logger.critical(f"Database name is missing from settings.json.")
+        return client[self.database_name]
+
 
 column_names = [
     "chapter_id",
@@ -106,7 +124,11 @@ def convert_datetime(val: bytes):
     return datetime.fromisoformat(val.decode()).astimezone(tz=timezone.utc)
 
 
+database_connection = DatabaseConnector().database_connection
+
+
 def open_database(db_path: Path) -> tuple[sqlite3.Connection, bool]:
+    return DatabaseConnector()
     sqlite3.register_converter("datetime", convert_datetime)
     database_connection = sqlite3.connect(db_path, detect_types=sqlite3.PARSE_DECLTYPES)
     database_connection.row_factory = sqlite3.Row

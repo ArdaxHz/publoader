@@ -3,8 +3,6 @@ from pathlib import Path
 
 import git
 
-import publoader.utils.logs
-
 logger = logging.getLogger("debug")
 
 
@@ -25,4 +23,4 @@ def check_for_update(root_path: Path) -> bool:
 
 
 if __name__ == "__main__":
-    check_for_update(Path("."))
+    check_for_update(Path(".."))

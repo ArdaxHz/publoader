@@ -21,7 +21,12 @@ from publoader.load_extensions import (
 from publoader.webhook import webhook
 from publoader.models.http import HTTPClient
 from publoader.utils.config import config, components_path
-from publoader.models.database import database_name, database_path, open_database
+from publoader.models.database import (
+    database_connection,
+    database_name,
+    database_path,
+    open_database,
+)
 from publoader.models.dataclasses import Chapter
 from publoader.utils.utils import open_manga_data
 
@@ -30,7 +35,6 @@ logger = logging.getLogger("publoader")
 
 def run_updates(
     extension_data: dict,
-    database_connection: "sqlite3.Connection",
     http_client: "HTTPClient",
     deleter_process_object: "ChapterDeleterProcess",
     manga_data_local: dict,
@@ -69,9 +73,10 @@ def run_updates(
         )
 
         # Get already posted chapters for the extension
-        posted_chapters_data = database_connection.execute(
-            "SELECT * FROM chapters WHERE extension_name=?", (extension_name,)
-        ).fetchall()
+        posted_chapters_data = database_connection[f"uploaded"].find(
+            {"extension": {"$eq": extension_name}}
+        )
+
         posted_chapters_data = [Chapter(**data) for data in posted_chapters_data]
         logger.info("Retrieved posted chapters from database.")
 
@@ -121,9 +126,9 @@ def open_extensions(names=None, clean_db: bool = False, general_run: bool = Fals
     if not extensions_data:
         return
 
-    database_connection, fill_backlog = open_database(database_path)
-    if fill_backlog:
-        clean_db = True
+    # database_connection, fill_backlog = open_database(database_path)
+    # if fill_backlog:
+    #     clean_db = True
 
     extensions = run_extensions(extensions_data, database_connection, clean_db)
     if not extensions:
@@ -143,7 +148,6 @@ def open_extensions(names=None, clean_db: bool = False, general_run: bool = Fals
     for site in extensions:
         run_updates(
             extensions[site],
-            database_connection=database_connection,
             http_client=http_client,
             deleter_process_object=deleter_process_object,
             manga_data_local=manga_data_local,
@@ -186,7 +190,6 @@ def open_extension(name: str, clean_db: bool = False):
 
     run_updates(
         extension_data,
-        database_connection=database_connection,
         http_client=http_client,
         deleter_process_object=deleter_process_object,
         manga_data_local=manga_data_local,
@@ -204,15 +207,15 @@ def save(
 ):
     deleter_process_object.delete()
 
-    # Save and close database
-    database_connection.commit()
-    backup_database_connection, _ = open_database(
-        components_path.joinpath(database_name).with_suffix(".bak")
-    )
-    database_connection.backup(backup_database_connection)
-    backup_database_connection.close()
-    database_connection.close()
-    logger.info("Saved and closed database.")
+    # # Save and close database
+    # database_connection.commit()
+    # backup_database_connection, _ = open_database(
+    #     components_path.joinpath(database_name).with_suffix(".bak")
+    # )
+    # database_connection.backup(backup_database_connection)
+    # backup_database_connection.close()
+    # database_connection.close()
+    # logger.info("Saved and closed database.")
 
 
 if __name__ == "__main__":

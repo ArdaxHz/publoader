@@ -68,8 +68,13 @@ class ExtensionUploader:
 
         self.current_uploaded_chapters: List[Chapter] = []
         self._get_manga_data_md()
+
+        for chapter in self.updates:
+            chapter.extension_name = self.extension_name
+
         self.updated_manga_chapters = self._sort_chapters_by_manga(self.updates)
-        self.chapters_on_md = self._get_external_chapters_md()
+        # self.chapters_on_md = self._get_external_chapters_md()
+        self.chapters_on_md = {}
 
         self.manga_untracked = [
             m
@@ -279,7 +284,7 @@ class ExtensionUploader:
         """Go through each new chapter and upload it to mangadex."""
         # Sort each chapter by manga
         all_manga_chapters = self._sort_chapters_by_manga(self.all_chapters)
-        self._delete_extra_chapters()
+        # self._delete_extra_chapters()
 
         for index, mangadex_manga_id in enumerate(self.updated_manga_chapters, start=1):
             self.http_client.login()

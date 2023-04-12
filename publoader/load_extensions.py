@@ -1,6 +1,7 @@
 import datetime
 import importlib.util
 import logging
+import string
 import sys
 import traceback
 from datetime import time, timezone, timedelta
@@ -121,8 +122,8 @@ def check_extension_run(
     if not isinstance(days_to_clean_unsanitised, (list, type(None))):
         days_to_clean_unsanitised = None
 
-    if days_to_clean_unsanitised is None:
-        days_to_run.append(DEFAULT_CLEAN_DAY)
+    # if days_to_clean_unsanitised is None:
+    #     days_to_run.append(DEFAULT_CLEAN_DAY)
 
     cleaned_list = []
     if isinstance(days_to_clean_unsanitised, list):
@@ -133,10 +134,7 @@ def check_extension_run(
                 pass
 
     if not cleaned_list:
-        if days_to_clean_unsanitised:
-            days_to_run.append(DEFAULT_CLEAN_DAY)
-        else:
-            days_to_run.extend(ALL_DAYS)
+        days_to_run.append(DEFAULT_CLEAN_DAY)
     else:
         days_to_run.extend(cleaned_list)
 
@@ -262,15 +260,16 @@ def run_extension(
         else:
             name = str(name)
 
-        posted_chapters_ids_data = database_connection.execute(
-            "SELECT chapter_id FROM posted_ids  WHERE chapter_id IS NOT NULL AND extension_name = ?",
-            (name,),
+        if any(x in string.punctuation for x in name) or " " in name:
+            logger.error(f"{name} contains either punctuation or a space.")
+            print(f"{name} contains either punctuation or a space.")
+            return
+
+        posted_chapters_ids = database_connection[f"uploaded"].find(
+            {"extension": {"$eq": name}}, ["chapter_id"]
         )
-        posted_chapters_ids = (
-            [str(job["chapter_id"]) for job in posted_chapters_ids_data]
-            if not clean_db
-            else []
-        )
+
+        # posted_chapters_ids = posted_chapters_ids_data.to_list(length=None)
 
         update_posted_chapter_ids = check_class_has_method(
             extension_name, extension_class, "update_posted_chapter_ids", run=False

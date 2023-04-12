@@ -1,8 +1,17 @@
+import asyncio
+import time
+
+from motor import motor_asyncio
+import pymongo
+
+from publoader.models.database import database_connection
+
+
 import logging
 import re
 from typing import TYPE_CHECKING, Dict, List, Optional
 
-from publoader.models.database import database_connection, update_database
+from publoader.models.database import update_database
 from publoader.models.dataclasses import Chapter
 from publoader.models.http import RequestError
 from publoader.utils.config import (
@@ -20,7 +29,10 @@ if TYPE_CHECKING:
 logger = logging.getLogger("publoader")
 
 
-class ChapterUploaderProcess:
+upload_queue = []
+
+
+class UploaderProcess:
     def __init__(
         self,
         extension_name: str,
@@ -252,26 +264,30 @@ class ChapterUploaderProcess:
             logger.info(f"Nothing to edit for chapter {md_id}")
         return False
 
-    def _check_for_duplicate_chapter_md_list(self, chapter) -> str:
+    def _check_for_duplicate_chapter_md_list(self, manga_chapters: List[dict]) -> str:
         """Check for duplicate chapters on mangadex."""
-
-        non_dupes = [chapter for chapter in manga_chapters if not ()]
-
-        dupes = []
-
         for md_chapter in manga_chapters:
             if (
-                chapter["attributes"]["chapter"] == self.chapter.chapter_number
-                and chapter["attributes"]["translatedLanguage"]
+                md_chapter["attributes"]["chapter"] == self.chapter.chapter_number
+                and md_chapter["attributes"]["translatedLanguage"]
                 == self.chapter.chapter_language
-                and chapter["attributes"]["externalUrl"] is not None
-                and re.search(
-                    self.chapter.chapter_id, chapter["attributes"]["externalUrl"]
-                )
+                and md_chapter["attributes"]["externalUrl"] is not None
+                and self.chapter.chapter_id in md_chapter["attributes"]["externalUrl"]
                 and self.chapter.chapter_id
                 not in flatten(list(self.same_chapter_dict.values()))
             ):
-                return True
+                self.chapter.md_chapter_id = md_chapter["id"]
+                logger.info(f"Chapter already on MangaDex: {self.chapter}")
+                print(
+                    f"{self.manga_generic_error_message} already exists on mangadex, skipping."
+                )
+
+                edited = self.edit_chapter(md_chapter)
+                # Add duplicate chapter to database to avoid checking it again
+                # in the future
+                update_database(self.database_connection, self.chapter)
+                return "edited" if edited else "on_md"
+        return "new"
 
     def _check_already_uploaded_internal_list(self) -> bool:
         """Check if chapter to upload is already in the internal list of uploaded chapters."""
@@ -284,24 +300,36 @@ class ChapterUploaderProcess:
                 return True
         return False
 
-    def start_upload(self, manga_chapters: list) -> str:
-        database_connection.to_upload.insert_one(
-            {
-                "route": md_upload_api_url,
-                "method": "POST",
-                "payload": {
-                    "chapterDraft": {
-                        "volume": self.chapter.chapter_volume,
-                        "chapter": self.chapter.chapter_number,
-                        "title": self.chapter.chapter_title,
-                        "translatedLanguage": self.chapter.chapter_language,
-                        "externalUrl": self.chapter.chapter_url,
-                    },
-                    "pageOrder": [],
-                },
-            }
-        )
+    def _check_uploaded_different_id(self, manga_chapters: List[dict]) -> bool:
+        """Check if chapter id to upload has been uploaded already under a different id."""
+        same_chapter_list_md = [
+            c["attributes"]["externalUrl"]
+            for c in manga_chapters
+            if c["attributes"]["chapter"] == self.chapter.chapter_number
+            and c["attributes"]["translatedLanguage"] == self.chapter.chapter_language
+        ]
+        same_chapter_list_posted_ids = [
+            str(c.chapter_id) for c in self.posted_md_updates
+        ]
 
+        if self.chapter.chapter_id in flatten(list(self.same_chapter_dict.values())):
+            master_id = find_key_from_list_value(
+                self.same_chapter_dict, self.chapter.chapter_id
+            )
+            if master_id is not None:
+                if (
+                    any(
+                        [
+                            re.search(master_id, search)
+                            for search in same_chapter_list_md
+                        ]
+                    )
+                    or master_id in same_chapter_list_posted_ids
+                ):
+                    return True
+        return False
+
+    def start_upload(self, manga_chapters: list) -> str:
         upload_session_response_json = self._create_upload_session()
         if upload_session_response_json is None:
             return "session_error"
@@ -317,3 +345,38 @@ class ChapterUploaderProcess:
 
         self.posted_md_updates.append(self.chapter)
         return "uploaded"
+
+
+import threading
+import queue
+
+q = queue.Queue()
+
+
+def worker():
+    while True:
+        item = q.get()
+        print(f"Working on {item}")
+        print(f"Finished")
+        q.task_done()
+
+
+def main():
+    # Turn-on the worker thread.
+    threading.Thread(target=worker, daemon=True).start()
+
+    print("starting watcher")
+
+    while True:
+        try:
+            with database_connection["to_upload"].watch(
+                [{"$match": {"operationType": "insert"}}]
+            ) as stream:
+                for change in stream:
+                    q.put(change["fullDocument"])
+        except pymongo.errors.PyMongoError as e:
+            print(e)
+
+    # Block until all tasks are done.
+    q.join()
+    print("All work completed")

@@ -1,7 +1,10 @@
 # Official Publisher MangaDex Uploader
 ## Works by reading new updates provided by the extensions. Extensions can be of any free-to-read chapters publisher.
-#### Tested on Python 3.9+
+### Tested on Python 3.9+
 
+---
+
+#### To run the scheduler:
 
 ```bash
 virtualenv venv
@@ -9,6 +12,15 @@ source venv/bin/activate
 pip install -r requirements.txt
 
 python3 run.py
+```
+
+To run the bot by itself:
+```bash
+virtualenv venv
+source venv/bin/activate
+pip install -r requirements.txt
+
+python3 -m publoader.publoader
 ```
 
 ## Contributing

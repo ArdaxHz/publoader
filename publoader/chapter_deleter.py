@@ -131,6 +131,7 @@ class ChapterDeleterProcess:
             del self.chapters_to_delete[:]
 
     def add_more_chapters(self, chapters_to_add: List[Chapter]):
+        return
         """Extend the list of chapters to delete with another list."""
         chapters_to_extend = [
             chap
@@ -141,6 +142,7 @@ class ChapterDeleterProcess:
         self.chapters_to_delete.extend(chapters_to_extend)
 
     def delete(self):
+        return
         """Start the chapter deleter process."""
         self.add_more_chapters(self.get_chapter_to_delete())
         logger.info(f"Chapters to delete: {self.chapters_to_delete}")
