@@ -1,25 +1,20 @@
-import itertools
 import logging
 import re
-import time
-from typing import Optional, TYPE_CHECKING, Dict, List
+import traceback
+from typing import Optional, Dict, List
 
-from pymongo import InsertOne, UpdateOne
+import pymongo
+from pymongo import UpdateOne
 
-from publoader.chapter_uploader import ChapterUploaderProcess
-from publoader.utils.config import mangadex_api_url, md_upload_api_url
-from publoader.webhook import PubloaderUpdatesWebhook
+from publoader.utils.config import mangadex_api_url
 from publoader.models.database import (
     database_connection,
+    update_database,
     update_expired_chapter_database,
 )
 from publoader.models.dataclasses import Chapter
-from publoader.utils.misc import fetch_aggregate, flatten
-
-if TYPE_CHECKING:
-    import sqlite3
-    from publoader.chapter_deleter import ChapterDeleterProcess
-    from publoader.models.http import HTTPClient
+from publoader.utils.misc import fetch_aggregate, find_key_from_list_value, flatten
+from publoader.models.http import http_client
 
 
 logger = logging.getLogger("publoader")
@@ -29,13 +24,11 @@ class MangaUploaderProcess:
     def __init__(
         self,
         extension_name: str,
-        http_client: "HTTPClient",
         clean_db: bool,
         updated_chapters: List[Chapter],
         all_manga_chapters: List[Chapter],
         mangadex_manga_id: str,
         mangadex_group_id: str,
-        deleter_process_object: "ChapterDeleterProcess",
         chapters_on_md: List[dict],
         current_uploaded_chapters: List[Chapter],
         same_chapter_dict: Dict[str, List[str]],
@@ -46,14 +39,12 @@ class MangaUploaderProcess:
         **kwargs,
     ):
         self.extension_name = extension_name
-        self.http_client = http_client
         self.clean_db = clean_db
         self.updated_chapters = updated_chapters
         self.all_manga_chapters = all_manga_chapters
         self.mangadex_manga_id = mangadex_manga_id
         self.mangadex_group_id = mangadex_group_id
         self.chapters_on_md = chapters_on_md
-        self.deleter_process_object = deleter_process_object
         self.posted_md_updates = current_uploaded_chapters
         self.same_chapter_dict = same_chapter_dict
         self.mangadex_manga_data = mangadex_manga_data
@@ -69,10 +60,10 @@ class MangaUploaderProcess:
 
         self.get_chapter_volumes()
 
-        # if self.chapters_on_md:
-        #     self._delete_extra_chapters()
+        if self.chapters_on_md:
+            self._delete_extra_chapters()
 
-    def _remove_chapters_not_external(self) -> List[Chapter]:
+    def _remove_chapters_not_external(self):
         """Find chapters on MangaDex not on external."""
         md_chapters_not_external = [
             c
@@ -87,29 +78,21 @@ class MangaUploaderProcess:
             f"{self.__class__.__name__} deleter finder for extensions.{self.extension_name} found: {md_chapters_not_external}"
         )
 
-        chapters_to_delete = []
-        for expired in md_chapters_not_external:
-            expired_chapter_object = update_expired_chapter_database(
-                extension_name=self.extension_name,
-                md_chapter_obj=expired,
-                chapters_on_db=self.chapters_on_db,
-                md_manga_id=self.mangadex_manga_id,
-            )
-            chapters_to_delete.append(expired_chapter_object)
-
-        return chapters_to_delete
+        # update_expired_chapter_database(
+        #     extension_name=self.extension_name,
+        #     md_chapter=md_chapters_not_external,
+        #     md_manga_id=self.mangadex_manga_id,
+        # )
 
     def _delete_extra_chapters(self):
         if not self.all_manga_chapters:
             return
 
-        chapters_to_delete = self._remove_chapters_not_external()
-        if chapters_to_delete:
-            self.deleter_process_object.add_more_chapters(chapters_to_delete)
+        self._remove_chapters_not_external()
 
     def get_chapter_volumes(self):
         aggregate_chapters = fetch_aggregate(
-            self.http_client,
+            http_client,
             self.mangadex_manga_id,
             # **{"translatedLanguage[]": ["en"]},
         )
@@ -152,9 +135,29 @@ class MangaUploaderProcess:
                 and chapter.chapter_id
                 not in flatten(list(self.same_chapter_dict.values()))
             ):
-
+                chapter.md_chapter_id = md_chapter["id"]
                 return {"md_chapter": md_chapter, "chapter": chapter}
         return
+
+    def _check_uploaded_different_id(self, chapter) -> bool:
+        """Check if chapter id to upload has been uploaded already under a different
+        id."""
+        same_chapter_list_md = [c["attributes"]["externalUrl"] for c in self.chapters_on_md
+            if c["attributes"]["chapter"] == chapter.chapter_number and
+               c["attributes"]["translatedLanguage"] == chapter.chapter_language]
+        same_chapter_list_posted_ids = [str(c.chapter_id) for c in
+            self.posted_md_updates]
+
+        if chapter.chapter_id in flatten(list(self.same_chapter_dict.values())):
+            master_id = find_key_from_list_value(
+                self.same_chapter_dict, chapter.chapter_id
+            )
+            if master_id is not None:
+                if (any(
+                    [re.search(master_id, search) for search in same_chapter_list_md]
+                ) or master_id in same_chapter_list_posted_ids):
+                    return True
+        return False
 
     def edit_chapter(self, dupe_chapter: dict):
         """Update the chapter on mangadex if it is different."""
@@ -203,9 +206,7 @@ class MangaUploaderProcess:
             logger.info(f"Editing chapter {md_id} with new info {data_to_post}")
 
             return {
-                "route": f"{mangadex_api_url}/chapter/{md_id}",
-                "method": "PUT",
-                "type": "edit",
+                "md_chapter_id":md_id,"md_group_id":md_id,
                 "chapter": vars(chapter),
                 "payload": data_to_post,
             }
@@ -217,7 +218,7 @@ class MangaUploaderProcess:
         chapters_to_upload = [
             chapter
             for chapter in self.updated_chapters
-            if not bool(self._check_for_duplicate_chapter_md_list(chapter))
+            if not bool(self._check_for_duplicate_chapter_md_list(chapter)) and not self._check_uploaded_different_id(chapter)
         ]
         dupes = [
             dupe
@@ -234,66 +235,69 @@ class MangaUploaderProcess:
 
         chapters_to_insert = [
             {
-                "route": md_upload_api_url,
-                "method": "POST",
-                "type": "upload",
-                "chapter": vars(chapter),
-                "payload": {
-                    "chapterDraft": {
-                        "volume": chapter.chapter_volume,
-                        "chapter": chapter.chapter_number,
-                        "title": chapter.chapter_title,
-                        "translatedLanguage": chapter.chapter_language,
-                        "externalUrl": chapter.chapter_url,
-                    },
-                    "pageOrder": [],
+                **{
+                    "mangadex_manga_id": self.mangadex_manga_id,
+                    "mangadex_group_id": self.mangadex_group_id,
                 },
+                **vars(chapter),
             }
             for chapter in chapters_to_upload
         ]
 
+        print(f"Inserting chapters for manga {self.mangadex_manga_id}")
+
         if chapters_to_insert:
-            upload_insertion = database_connection["to_upload"].insert_many(
-                chapters_to_insert
-            )
-            print(upload_insertion.inserted_ids)
+            try:
+                upload_insertion = database_connection["to_upload"].bulk_write(
+                    [
+                        UpdateOne(
+                            {
+                                "chapter_number": {"$eq": chap["chapter_number"]},
+                                "chapter_language": {"$eq": chap["chapter_language"]},
+                                "chapter_id": {"$eq": chap["chapter_id"]},
+                            },
+                            {
+                                "$setOnInsert": chap,
+                            },
+                            upsert=True,
+                        )
+                        for chap in chapters_to_insert
+                    ]
+                )
+            except pymongo.errors.BulkWriteError as e:
+                traceback.print_exc()
+                logger.exception(e)
 
         if chapters_to_edit:
-            edit_insertion = database_connection["to_edit"].insert_many(
-                chapters_to_edit
-            )
-            print(edit_insertion.inserted_ids)
-
-        database_connection["uploaded"].insert_many(
-            [vars(chapter) for chapter in chapters_to_upload]
-        )
-
-        if chapters_to_update:
-            database_connection["uploaded"].bulk_write(
+            try:
+                edit_insertion = database_connection["to_edit"].bulk_write(
                 [
                     UpdateOne(
-                        {"md_chapter_id": {"$eq": chapter["md_chapter_id"]}},
-                        chapter,
+                        {"md_chapter_id": {"$eq": chap["md_chapter_id"]}},
+                        {
+                            "$setOnInsert": chap,
+                        },
                         upsert=True,
                     )
-                    for chapter in chapters_to_update
+                    for chap in chapters_to_edit
                 ]
             )
+            except pymongo.errors.BulkWriteError as e:
+                traceback.print_exc()
+                logger.exception(e)
 
-        # {"$or": [{"md_chapter_id": {"$eq": chapter["md_chapter_id"]}},
-        #          {"chapter_id": {"$regex": chapter["chapter_url"]}}]}
-
+        update_database(chapter=chapters_to_upload + chapters_to_update)
         return
 
         # for count, chapter in enumerate(chapters_to_upload, start=1):
         #     chapter.md_manga_id = self.mangadex_manga_id
         #     chapter.extension_name = self.extension_name
-        #     self.http_client.login()
+        #     http_client.login()
         #
         #     chapter_to_upload_process = ChapterUploaderProcess(
         #         extension_name=self.extension_name,
         #         database_connection=self.database_connection,
-        #         http_client=self.http_client,
+        #         http_client=http_client,
         #         mangadex_manga_id=self.mangadex_manga_id,
         #         mangadex_group_id=self.mangadex_group_id,
         #         chapter=chapter,

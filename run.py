@@ -1,5 +1,4 @@
 import argparse
-import asyncio
 import json
 import logging
 import multiprocessing
@@ -7,14 +6,13 @@ import os
 import subprocess
 import sys
 import time
-from datetime import time as dtTime, timedelta
+from datetime import time as dtTime
 from datetime import timezone
 from importlib import reload
 
 from scheduler import Scheduler
 
-from publoader import uploader
-from publoader.utils.logs import bot_logs_folder_path
+from publoader.workers import deleter, editor, uploader
 from publoader.updater import check_for_update
 from publoader.utils.utils import root_path
 from publoader.utils.config import config
@@ -150,6 +148,12 @@ if __name__ == "__main__":
     )
 
     process = multiprocessing.Process(target=uploader.main)
+    process.start()
+
+    process = multiprocessing.Process(target=editor.main)
+    process.start()
+
+    process = multiprocessing.Process(target=deleter.main)
     process.start()
 
     if vargs["extension"] is None:

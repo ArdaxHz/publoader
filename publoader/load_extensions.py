@@ -8,6 +8,7 @@ from datetime import time, timezone, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, List
 
+from publoader.models.database import database_connection, database_engine
 from publoader.models.dataclasses import Chapter, Manga
 from publoader.utils.config import DEFAULT_TIME, DEFAULT_CLEAN_DAY, ALL_DAYS, CLEAN_TIME
 from publoader.utils.utils import root_path, get_current_datetime
@@ -238,11 +239,7 @@ def read_extension(name: str, clean_db: bool = False):
     return load_extension(extension_folder, clean_db=clean_db, general_run=True)
 
 
-def run_extension(
-    extension: dict,
-    database_connection: "sqlite3.Connection",
-    clean_db_override: bool = False,
-):
+def run_extension(extension: dict, clean_db_override: bool = False):
     """Run a single extension."""
     extension_class = extension["extension"]
     clean_db = extension["clean_db"]
@@ -265,11 +262,9 @@ def run_extension(
             print(f"{name} contains either punctuation or a space.")
             return
 
-        posted_chapters_ids = database_connection[f"uploaded"].find(
-            {"extension": {"$eq": name}}, ["chapter_id"]
-        )
+        posted_chapters_ids = list(database_connection["uploaded_ids"].find({"extension_name": {"$eq": name}}        ))
 
-        # posted_chapters_ids = posted_chapters_ids_data.to_list(length=None)
+        posted_chapters_ids = [chap["chapter_id"] for chap in posted_chapters_ids]
 
         update_posted_chapter_ids = check_class_has_method(
             extension_name, extension_class, "update_posted_chapter_ids", run=False
@@ -377,18 +372,12 @@ def run_extension(
         return
 
 
-def run_extensions(
-    extensions: dict, database_connection: "sqlite3.Connection", clean_db_override: bool
-):
+def run_extensions(extensions: dict, clean_db_override: bool):
     """Run the extensions to get the updates."""
     updates = {}
     for site in extensions:
         extension = extensions[site]
-        data = run_extension(
-            extension,
-            database_connection=database_connection,
-            clean_db_override=clean_db_override,
-        )
+        data = run_extension(extension, clean_db_override=clean_db_override)
 
         if data is not None and data:
             updates[site] = data

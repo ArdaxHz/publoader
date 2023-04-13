@@ -1,18 +1,14 @@
 import logging
 import math
-from typing import TYPE_CHECKING, List, Optional, Dict
+from typing import List, Optional, Dict
 
-from publoader.models.http import RequestError
+from publoader.models.http import RequestError, http_client
 from publoader.utils.config import mangadex_api_url, upload_retry
-
-if TYPE_CHECKING:
-    from publoader.models.http import HTTPClient
-
 
 logger = logging.getLogger("publoader")
 
 
-def get_md_api(http_client: "HTTPClient", route: str, **params: dict) -> List[dict]:
+def get_md_api(route: str, **params: dict) -> List[dict]:
     """Go through each page in the api to get all the chapters/manga."""
     chapters = []
     limit = 100
