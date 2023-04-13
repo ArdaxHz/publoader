@@ -36,6 +36,9 @@ class MangaUploaderProcess:
         custom_language: Dict[str, str],
         chapters_on_db: List[Chapter],
         languages: List[str],
+        chapters_for_upload: List[Chapter],
+        chapters_for_skipping: List[Chapter],
+        chapters_for_editing: List[Chapter],
         **kwargs,
     ):
         self.extension_name = extension_name
@@ -51,13 +54,9 @@ class MangaUploaderProcess:
         self.custom_language = custom_language
         self.chapters_on_db = chapters_on_db
         self.languages = languages
-
-        self.skipped = 0
-        self.edited = 0
-
-        self.posted_chapters: List[Chapter] = []
-        self.failed_uploads: List[Chapter] = []
-
+        self.chapters_for_upload = chapters_for_upload
+        self.chapters_for_skipping = chapters_for_skipping
+        self.chapters_for_editing = chapters_for_editing
         self.get_chapter_volumes()
 
         if self.chapters_on_md:
@@ -78,11 +77,11 @@ class MangaUploaderProcess:
             f"{self.__class__.__name__} deleter finder for extensions.{self.extension_name} found: {md_chapters_not_external}"
         )
 
-        # update_expired_chapter_database(
-        #     extension_name=self.extension_name,
-        #     md_chapter=md_chapters_not_external,
-        #     md_manga_id=self.mangadex_manga_id,
-        # )
+        update_expired_chapter_database(
+            extension_name=self.extension_name,
+            md_chapter=md_chapters_not_external,
+            md_manga_id=self.mangadex_manga_id,
+        )
 
     def _delete_extra_chapters(self):
         if not self.all_manga_chapters:
@@ -142,20 +141,30 @@ class MangaUploaderProcess:
     def _check_uploaded_different_id(self, chapter) -> bool:
         """Check if chapter id to upload has been uploaded already under a different
         id."""
-        same_chapter_list_md = [c["attributes"]["externalUrl"] for c in self.chapters_on_md
-            if c["attributes"]["chapter"] == chapter.chapter_number and
-               c["attributes"]["translatedLanguage"] == chapter.chapter_language]
-        same_chapter_list_posted_ids = [str(c.chapter_id) for c in
-            self.posted_md_updates]
+        same_chapter_list_md = [
+            c["attributes"]["externalUrl"]
+            for c in self.chapters_on_md
+            if c["attributes"]["chapter"] == chapter.chapter_number
+            and c["attributes"]["translatedLanguage"] == chapter.chapter_language
+        ]
+        same_chapter_list_posted_ids = [
+            str(c.chapter_id) for c in self.posted_md_updates
+        ]
 
         if chapter.chapter_id in flatten(list(self.same_chapter_dict.values())):
             master_id = find_key_from_list_value(
                 self.same_chapter_dict, chapter.chapter_id
             )
             if master_id is not None:
-                if (any(
-                    [re.search(master_id, search) for search in same_chapter_list_md]
-                ) or master_id in same_chapter_list_posted_ids):
+                if (
+                    any(
+                        [
+                            re.search(master_id, search)
+                            for search in same_chapter_list_md
+                        ]
+                    )
+                    or master_id in same_chapter_list_posted_ids
+                ):
                     return True
         return False
 
@@ -206,7 +215,8 @@ class MangaUploaderProcess:
             logger.info(f"Editing chapter {md_id} with new info {data_to_post}")
 
             return {
-                "md_chapter_id":md_id,"md_group_id":md_id,
+                "md_chapter_id": md_id,
+                "md_group_id": self.mangadex_group_id,
                 "chapter": vars(chapter),
                 "payload": data_to_post,
             }
@@ -218,7 +228,8 @@ class MangaUploaderProcess:
         chapters_to_upload = [
             chapter
             for chapter in self.updated_chapters
-            if not bool(self._check_for_duplicate_chapter_md_list(chapter)) and not self._check_uploaded_different_id(chapter)
+            if not bool(self._check_for_duplicate_chapter_md_list(chapter))
+            and not self._check_uploaded_different_id(chapter)
         ]
         dupes = [
             dupe
@@ -227,8 +238,15 @@ class MangaUploaderProcess:
             )
             if dupe is not None
         ]
-        chapters_to_update = [vars(dupe["chapter"]) for dupe in dupes]
+        dupes_for_editing = [dupe["chapter"] for dupe in dupes]
 
+        chapters_skipped = [
+            chapter
+            for chapter in self.updated_chapters
+            if chapter not in chapters_to_upload and chapter not in dupes_for_editing
+        ]
+
+        chapters_to_update = [vars(dupe) for dupe in dupes_for_editing]
         chapters_to_edit = [
             dupe for dupe in map(self.edit_chapter, dupes) if dupe is not None
         ]
@@ -264,27 +282,59 @@ class MangaUploaderProcess:
                         for chap in chapters_to_insert
                     ]
                 )
+                logger.info(
+                    f"Inserted manga {self.mangadex_manga_id} chapters to upload "
+                    f"{upload_insertion.upserted_ids}"
+                )
             except pymongo.errors.BulkWriteError as e:
                 traceback.print_exc()
-                logger.exception(e)
+                logger.exception(f"{self.start_manga_uploading_process.__name__} raised an error when bulk writing to 'to_upload'.")
 
         if chapters_to_edit:
             try:
                 edit_insertion = database_connection["to_edit"].bulk_write(
-                [
-                    UpdateOne(
-                        {"md_chapter_id": {"$eq": chap["md_chapter_id"]}},
-                        {
-                            "$setOnInsert": chap,
-                        },
-                        upsert=True,
-                    )
-                    for chap in chapters_to_edit
-                ]
-            )
+                    [
+                        UpdateOne(
+                            {"md_chapter_id": {"$eq": chap["md_chapter_id"]}},
+                            {
+                                "$setOnInsert": chap,
+                            },
+                            upsert=True,
+                        )
+                        for chap in chapters_to_edit
+                    ]
+                )
+                logger.info(
+                    f"Inserted manga {self.mangadex_manga_id} chapters to upload "
+                    f"{edit_insertion.upserted_ids}"
+                )
             except pymongo.errors.BulkWriteError as e:
                 traceback.print_exc()
-                logger.exception(e)
+                logger.exception(f"{self.start_manga_uploading_process.__name__} raised an error when bulk writing to 'to_edit'.")
+
+        self.chapters_for_upload.extend(chapters_to_upload)
+        self.chapters_for_editing.extend(dupes_for_editing)
+        self.chapters_for_skipping.extend(chapters_skipped)
+
+        if len(chapters_skipped) != 0:
+            skipped_chapters_message = (
+                f"Skipped {len(chapters_skipped)} chapters out of "
+            )
+            f"{len(self.updated_chapters)} for extensions.{self.extension_name} manga "
+            f"{self.mangadex_manga_data['title']}: {self.mangadex_manga_id}."
+            logger.info(skipped_chapters_message)
+            logger.debug(f"Chapters skipped: {chapters_skipped}")
+            print(skipped_chapters_message)
+
+        if len(dupes_for_editing) != 0:
+            edited_chapters_message = (
+                f"Edited {len(dupes_for_editing)} chapters out of "
+            )
+            f"{len(self.updated_chapters)} for extensions.{self.extension_name} manga "
+            f"{self.mangadex_manga_data['title']}: {self.mangadex_manga_id}."
+            logger.info(edited_chapters_message)
+            logger.debug(f"Chapters to edit: {dupes_for_editing}")
+            print(edited_chapters_message)
 
         update_database(chapter=chapters_to_upload + chapters_to_update)
         return

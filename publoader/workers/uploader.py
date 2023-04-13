@@ -182,7 +182,6 @@ class UploaderProcess:
         return False
 
     def start_upload(self) -> bool:
-        return False
         upload_session_response_json = self._create_upload_session()
         if upload_session_response_json is None:
             return False
@@ -225,8 +224,7 @@ def main():
 
     # Turn-on the worker thread.
     threading.Thread(target=worker, daemon=True).start()
-
-    print("starting watcher")
+    print(f"Starting Uploader watcher.")
 
     while True:
         try:

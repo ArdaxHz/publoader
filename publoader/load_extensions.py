@@ -6,15 +6,13 @@ import sys
 import traceback
 from datetime import time, timezone, timedelta
 from pathlib import Path
-from typing import TYPE_CHECKING, List
+from typing import List
 
-from publoader.models.database import database_connection, database_engine
+from publoader.models.database import database_connection
 from publoader.models.dataclasses import Chapter, Manga
-from publoader.utils.config import DEFAULT_TIME, DEFAULT_CLEAN_DAY, ALL_DAYS, CLEAN_TIME
+from publoader.utils.config import DEFAULT_TIME, DEFAULT_CLEAN_DAY, CLEAN_TIME
 from publoader.utils.utils import root_path, get_current_datetime
 
-if TYPE_CHECKING:
-    import sqlite3
 
 logger = logging.getLogger("publoader")
 extensions_folder = root_path.joinpath("publoader", "extensions")
@@ -262,7 +260,9 @@ def run_extension(extension: dict, clean_db_override: bool = False):
             print(f"{name} contains either punctuation or a space.")
             return
 
-        posted_chapters_ids = list(database_connection["uploaded_ids"].find({"extension_name": {"$eq": name}}        ))
+        posted_chapters_ids = list(
+            database_connection["uploaded_ids"].find({"extension_name": {"$eq": name}})
+        )
 
         posted_chapters_ids = [chap["chapter_id"] for chap in posted_chapters_ids]
 

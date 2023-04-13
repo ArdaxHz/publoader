@@ -26,9 +26,9 @@ class DatabaseConnector:
         return client
 
 
-
 database = DatabaseConnector()
 database_connection = database.database_connection
+
 
 def convert_model_dict(chapter):
     if isinstance(chapter, Chapter):
@@ -52,18 +52,18 @@ def update_database(chapter: Union[list, Union[Chapter, dict]], **kwargs):
 
     try:
         result = database_connection["uploaded"].bulk_write(
-        [
-            UpdateOne(
-                {"md_chapter_id": {"$eq": chap["md_chapter_id"]}},
-                {"$set": chap},
-                upsert=True,
-            )
-            for chap in chapters
-        ]
-    )
+            [
+                UpdateOne(
+                    {"md_chapter_id": {"$eq": chap["md_chapter_id"]}},
+                    {"$set": chap},
+                    upsert=True,
+                )
+                for chap in chapters
+            ]
+        )
     except pymongo.errors.BulkWriteError as e:
         traceback.print_exc()
-        logger.exception(e)
+        logger.exception(f"{update_database.__name__} raised an error when bulk writing to 'uploaded'.")
         return
 
     logger.info(f"Updated {result.modified_count} chapters on the database.")
@@ -75,23 +75,23 @@ def update_database(chapter: Union[list, Union[Chapter, dict]], **kwargs):
 
     try:
         database_connection["uploaded_ids"].bulk_write(
-        [
-            UpdateOne(
-                {"chapter_id": {"$eq": chap["chapter_id"]}},
-                {
-                    "$setOnInsert": {
-                        "chapter_id": chap["chapter_id"],
-                        "extension_name": chap["extension_name"],
+            [
+                UpdateOne(
+                    {"chapter_id": {"$eq": chap["chapter_id"]}},
+                    {
+                        "$setOnInsert": {
+                            "chapter_id": chap["chapter_id"],
+                            "extension_name": chap["extension_name"],
+                        },
                     },
-                },
-                upsert=True,
-            )
-            for chap in chapters
-        ]
-    )
+                    upsert=True,
+                )
+                for chap in chapters
+            ]
+        )
     except pymongo.errors.BulkWriteError as e:
         traceback.print_exc()
-        logger.exception(e)
+        logger.exception(f"{update_database.__name__} raised an error when bulk writing to 'uploaded_ids'.")
         return
 
 
@@ -164,7 +164,7 @@ def update_expired_chapter_database(
         )
     except pymongo.errors.BulkWriteError as e:
         traceback.print_exc()
-        logger.exception(e)
+        logger.exception(f"{update_expired_chapter_database.__name__} raised an error when bulk writing to 'to_delete'.")
         return
 
     logger.info(f"Updated {result.modified_count} chapters to delete on the database.")
@@ -185,7 +185,7 @@ def update_expired_chapter_database(
         )
     except pymongo.errors.BulkWriteError as e:
         traceback.print_exc()
-        logger.exception(e)
+        logger.exception(f"{update_expired_chapter_database.__name__} raised an error when bulk writing to 'uploaded'.")
         return
 
     logger.info(f"Deleted {deleted_result.deleted_count} from 'uploaded' collection.")

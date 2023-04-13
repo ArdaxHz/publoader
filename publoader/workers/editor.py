@@ -8,7 +8,11 @@ import pymongo
 from publoader.models.database import update_database, database_connection
 from publoader.models.dataclasses import Chapter
 from publoader.models.http import RequestError
-from publoader.utils.config import (mangadex_api_url, md_upload_api_url, upload_retry, )
+from publoader.utils.config import (
+    mangadex_api_url,
+    md_upload_api_url,
+    upload_retry,
+)
 from publoader.models.http import http_client
 
 
@@ -28,20 +32,24 @@ class EditorProcess:
         self.payload = self.upload_chapter["payload"]
         self.md_chapter_id = self.upload_chapter["md_chapter_id"]
 
-        self.manga_generic_error_message = (f"Extension: {self.chapter.extension_name}, "
-                                            f"Manga: {self.chapter.manga_name}, "
-                                            f"{self.chapter.md_manga_id} - "
-                                            f"{self.chapter.manga_id}, "
-                                            f"chapter: {self.chapter.chapter_id}, "
-                                            f"number: {self.chapter.chapter_number!r}, "
-                                            f"volume: {self.chapter.chapter_volume!r}, "
-                                            f"language: {self.chapter.chapter_language!r}, "
-                                            f"title: {self.chapter.chapter_title!r}")
+        self.manga_generic_error_message = (
+            f"Extension: {self.chapter.extension_name}, "
+            f"Manga: {self.chapter.manga_name}, "
+            f"{self.chapter.md_manga_id} - "
+            f"{self.chapter.manga_id}, "
+            f"chapter: {self.chapter.chapter_id}, "
+            f"number: {self.chapter.chapter_number!r}, "
+            f"volume: {self.chapter.chapter_volume!r}, "
+            f"language: {self.chapter.chapter_language!r}, "
+            f"title: {self.chapter.chapter_title!r}"
+        )
 
     def start_edit(self) -> bool:
         try:
             update_response = http_client.put(
-                f"{mangadex_api_url}/chapter/{self.md_chapter_id}", json=self.payload, )
+                f"{mangadex_api_url}/chapter/{self.md_chapter_id}",
+                json=self.payload,
+            )
         except RequestError as e:
             logger.error(e)
             return False
@@ -75,8 +83,7 @@ def main():
 
     # Turn-on the worker thread.
     threading.Thread(target=worker, daemon=True).start()
-
-    print("starting watcher")
+    print(f"Starting Editor watcher.")
 
     while True:
         try:

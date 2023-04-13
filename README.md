@@ -14,7 +14,7 @@ pip install -r requirements.txt
 python3 run.py
 ```
 
-To run the bot by itself:
+#### To run the bot by itself:
 ```bash
 virtualenv venv
 source venv/bin/activate

@@ -279,23 +279,6 @@ class PubloaderUpdatesWebhook(WebhookBase):
             embed = self.make_embed(self.normalised_manga)
             webhook.add_embed(embed)
 
-        # if not self.chapters and not self.failed_chapters:
-        #     if PubloaderUpdatesWebhook.no_new_chapters_embed is None:
-        #         PubloaderUpdatesWebhook.no_new_chapters_embed = (
-        #             PubloaderUpdatesWebhook.make_static_method()
-        #         )
-
-        #     PubloaderUpdatesWebhook.no_new_chapters_embed.add_embed_field(
-        #         name=self.normalised_manga["title"],
-        #         value=self.normalised_manga["description"],
-        #     )
-
-        #     if len(PubloaderUpdatesWebhook.no_new_chapters_embed.fields) >= 10:
-        #         webhook.add_embed(PubloaderUpdatesWebhook.no_new_chapters_embed)
-        #         self.send_webhook()
-        #         PubloaderUpdatesWebhook.no_new_chapters_embed.fields[:] = []
-        #         return
-
         if last_manga:
             embed = self.make_embed(
                 {"title": "Finished Getting all chapter updates.", "color": self.colour}
@@ -317,6 +300,102 @@ class PubloaderUpdatesWebhook(WebhookBase):
 
             if last_manga:
                 self.send_webhook()
+
+
+# class PubloaderExtensionUpdatesWebhook(WebhookBase):
+#     def __init__(
+#         self,
+#         extension_name: str,
+#         clean_db: bool,
+#         **kwargs
+#     ) -> None:
+#         super().__init__(extension_name, manga)
+#
+#         self.chapters: List["Chapter"] = chapters
+#         self.failed_chapters = failed_chapters
+#
+#         self.uploaded = len(chapters)
+#         self.failed = len(self.failed_chapters)
+#         self.skipped = skipped
+#         self.edited = edited
+#         self.clean_db = clean_db
+#
+#         self.normalised_manga = self.normalise_manga(
+#             self.uploaded, self.failed, self.skipped, self.edited
+#         )
+#         self.normalised_chapters = self.normalise_chapters(self.chapters)
+#         self.normalised_failed_chapters = self.normalise_chapters(
+#             self.failed_chapters, failed_upload=True
+#         )
+#
+#     def normalise_manga(
+#         self, chapter_count: int, failed: int, skipped: int, edited: int
+#     ) -> Dict[str, str]:
+#         return {
+#             "title": f"{self.manga_title}",
+#             "description": f"MangaDex manga link: [here]({self.mangadex_manga_url})\n"
+#             f"Uploaded: {chapter_count}\n"
+#             f"Failed: {failed}\n"
+#             f"Skipped: {skipped}\n"
+#             f"Edited: {edited}",
+#             "timestamp": get_current_datetime().isoformat(),
+#             "color": self.colour,
+#         }
+#
+#     def format_embed(self, chapters_to_use: List[List[dict]]):
+#         for chapter_list in chapters_to_use:
+#             embed = self.make_embed(self.normalised_manga)
+#             self.add_fields_to_embed(embed, chapter_list)
+#
+#             if chapter_list:
+#                 webhook.add_embed(embed)
+#
+#             if len(webhook.embeds) >= 10 or len(embed.fields) >= 5:
+#                 self.send_webhook()
+#
+#     def send_first_manga_external_name(self, external_name):
+#         embed = self.make_embed(
+#             {"title": f"Posting updates for {external_name}.", "color": self.colour}
+#         )
+#         webhook.add_embed(embed)
+#         self.send_webhook()
+#
+#     def main(self, last_manga: bool = True):
+#         if self.uploaded > 0 or self.failed > 0:
+#             self.send_webhook()
+#
+#         if self.chapters:
+#             self.format_embed(self.normalised_chapters)
+#         if self.failed_chapters:
+#             self.format_embed(self.normalised_failed_chapters)
+#         if self.edited > 0:
+#             embed = self.make_embed(self.normalised_manga)
+#             webhook.add_embed(embed)
+#         if self.skipped > 0 and not self.clean_db:
+#             embed = self.make_embed(self.normalised_manga)
+#             webhook.add_embed(embed)
+#
+#         if last_manga:
+#             embed = self.make_embed(
+#                 {"title": "Finished Getting all chapter updates.", "color": self.colour}
+#             )
+#             webhook.add_embed(embed)
+#
+#         if self.uploaded > 0 or self.failed > 0:
+#             self.send_webhook()
+#         else:
+#             if len(webhook.embeds) >= 10:
+#                 webhook_embeds = [
+#                     webhook.embeds[elem : elem + 10]
+#                     for elem in range(0, len(webhook.embeds), 10)
+#                 ]
+#                 for embed_list in webhook_embeds:
+#                     webhook.embeds = embed_list
+#                     if len(webhook.embeds) >= 10:
+#                         self.send_webhook()
+#
+#             if last_manga:
+#                 self.send_webhook()
 
 
 class PubloaderDupesWebhook(WebhookBase):

@@ -2,7 +2,7 @@ import configparser
 import json
 import logging
 import time
-from typing import TYPE_CHECKING, Dict, List
+from typing import Dict, List
 
 from publoader.manga_uploader import MangaUploaderProcess
 from publoader.webhook import PubloaderNotIndexedWebhook, PubloaderWebhook
@@ -10,7 +10,6 @@ from publoader.models.database import update_expired_chapter_database
 from publoader.models.dataclasses import Chapter, Manga
 from publoader.utils.config import ratelimit_time, components_path
 from publoader.utils.misc import get_md_api, format_title
-from publoader.models.http import http_client
 
 
 logger = logging.getLogger("publoader")
@@ -64,6 +63,10 @@ class ExtensionUploader:
         self.updated_manga_chapters = self._sort_chapters_by_manga(self.updates)
         self.chapters_on_md = self._get_external_chapters_md()
         # self.chapters_on_md = {}
+
+        self.chapters_for_upload: List[Chapter] = []
+        self.chapters_for_skipping: List[Chapter] = []
+        self.chapters_for_editing: List[Chapter] = []
 
         self.manga_untracked = [
             m
@@ -120,10 +123,14 @@ class ExtensionUploader:
         print(f"Getting the {self.extension_name} chapters on mangadex.")
         chapters_sorted = {}
         for manga_id in set(self.updated_manga_chapters.keys()):
-            chapters_sorted[manga_id] = get_md_api("chapter",
-                **{"groups[]": [self.mangadex_group_id], "order[createdAt]": "desc",
-                    "manga": manga_id, }
-                )
+            chapters_sorted[manga_id] = get_md_api(
+                "chapter",
+                **{
+                    "groups[]": [self.mangadex_group_id],
+                    "order[createdAt]": "desc",
+                    "manga": manga_id,
+                },
+            )
         return chapters_sorted
 
     def _get_manga_data_md(self) -> Dict[str, dict]:
@@ -146,8 +153,12 @@ class ExtensionUploader:
             for manga_splice in tracked_manga_splice:
                 tracked_manga_data.extend(
                     get_md_api(
-                        "manga", **{"ids[]": manga_splice, "order[createdAt]": "desc", }
-                        )
+                        "manga",
+                        **{
+                            "ids[]": manga_splice,
+                            "order[createdAt]": "desc",
+                        },
+                    )
                 )
 
             for manga in tracked_manga_data:
@@ -225,9 +236,13 @@ class ExtensionUploader:
             for uploaded_ids in uploaded_chapter_ids_split:
                 chapters_on_md.extend(
                     get_md_api(
-                        "chapter", **{"ids[]": uploaded_ids, "order[createdAt]": "desc",
-                            "includes[]": ["manga"], }
-                        )
+                        "chapter",
+                        **{
+                            "ids[]": uploaded_ids,
+                            "order[createdAt]": "desc",
+                            "includes[]": ["manga"],
+                        },
+                    )
                 )
 
             chapters_not_on_md = [
@@ -262,11 +277,21 @@ class ExtensionUploader:
                 custom_language=self.custom_regexes.get("custom_language", {}),
                 chapters_on_db=self.chapters_on_db,
                 languages=self.extension_languages,
+                chapters_for_upload=self.chapters_for_upload,
+                chapters_for_skipping=self.chapters_for_skipping,
+                chapters_for_editing=self.chapters_for_editing,
             )
             manga_uploader.start_manga_uploading_process(
                 index == len(self.updated_manga_chapters)
             )
             time.sleep(0.5)
 
-        if self.current_uploaded_chapters or self.clean_db:
+        if self.current_uploaded_chapters:
             self._check_all_chapters_uploaded()
+
+        # PubloaderExtensionUpdatesWebhook(
+        #     self.extension_name,
+        #     manga_data_local=self.manga_data_local,
+        #     chapters_for_skipping=self.chapters_for_skipping,
+        #     clean_db=self.clean_db,
+        # ).main()

@@ -65,7 +65,6 @@ class DeleteProcess:
                 return True
 
         logger.error(f"Couldn't delete expired chapter {deleted_message}")
-
         return False
 
 
@@ -97,8 +96,7 @@ def main():
 
     # Turn-on the worker thread.
     threading.Thread(target=worker, daemon=True).start()
-
-    print("starting watcher")
+    print(f"Starting Deleter watcher.")
 
     while True:
         try:

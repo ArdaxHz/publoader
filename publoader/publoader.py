@@ -64,9 +64,11 @@ def run_updates(
         )
 
         # Get already posted chapters for the extension
-        posted_chapters_data = list(database_connection["uploaded"].find(
-            {"extension_name": {"$eq": extension_name}}
-        ))
+        posted_chapters_data = list(
+            database_connection["uploaded"].find(
+                {"extension_name": {"$eq": extension_name}}
+            )
+        )
 
         posted_chapters_data = [Chapter(**data) for data in posted_chapters_data]
         logger.info("Retrieved posted chapters from database.")
@@ -143,7 +145,6 @@ def open_extension(name: str, clean_db: bool = False):
         extension_data,
         manga_data_local=manga_data_local,
     )
-
 
 
 if __name__ == "__main__":

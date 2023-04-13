@@ -194,7 +194,7 @@ class DeleteDuplicatesMD:
                 chapters_md_unsorted.extend(
                     get_md_api(
                         "chapter", **{"ids[]": chapter_chunk, "includes[]": ["manga"]}
-                        )
+                    )
                 )
 
             chapters_md_sorted = self.sort_chapters(chapters_md_unsorted)
@@ -213,11 +213,11 @@ class DeleteDuplicatesMD:
 
                 logger.debug(f"Found dupes in manga {manga_id} for language {language}")
 
-                # update_expired_chapter_database(
-                #     extension_name=self.extension_name,
-                #     md_chapter=chapters_to_delete,
-                #     md_manga_id=manga_id,
-                # )
+                update_expired_chapter_database(
+                    extension_name=self.extension_name,
+                    md_chapter=chapters_to_delete,
+                    md_manga_id=manga_id,
+                )
 
             if not dupes_found:
                 print(f"Didn't find any dupes in manga: {manga_id}")
