@@ -288,7 +288,9 @@ class MangaUploaderProcess:
                 )
             except pymongo.errors.BulkWriteError as e:
                 traceback.print_exc()
-                logger.exception(f"{self.start_manga_uploading_process.__name__} raised an error when bulk writing to 'to_upload'.")
+                logger.exception(
+                    f"{self.start_manga_uploading_process.__name__} raised an error when bulk writing to 'to_upload'."
+                )
 
         if chapters_to_edit:
             try:
@@ -310,7 +312,9 @@ class MangaUploaderProcess:
                 )
             except pymongo.errors.BulkWriteError as e:
                 traceback.print_exc()
-                logger.exception(f"{self.start_manga_uploading_process.__name__} raised an error when bulk writing to 'to_edit'.")
+                logger.exception(
+                    f"{self.start_manga_uploading_process.__name__} raised an error when bulk writing to 'to_edit'."
+                )
 
         self.chapters_for_upload.extend(chapters_to_upload)
         self.chapters_for_editing.extend(dupes_for_editing)

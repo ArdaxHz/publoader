@@ -63,7 +63,9 @@ def update_database(chapter: Union[list, Union[Chapter, dict]], **kwargs):
         )
     except pymongo.errors.BulkWriteError as e:
         traceback.print_exc()
-        logger.exception(f"{update_database.__name__} raised an error when bulk writing to 'uploaded'.")
+        logger.exception(
+            f"{update_database.__name__} raised an error when bulk writing to 'uploaded'."
+        )
         return
 
     logger.info(f"Updated {result.modified_count} chapters on the database.")
@@ -91,7 +93,9 @@ def update_database(chapter: Union[list, Union[Chapter, dict]], **kwargs):
         )
     except pymongo.errors.BulkWriteError as e:
         traceback.print_exc()
-        logger.exception(f"{update_database.__name__} raised an error when bulk writing to 'uploaded_ids'.")
+        logger.exception(
+            f"{update_database.__name__} raised an error when bulk writing to 'uploaded_ids'."
+        )
         return
 
 
@@ -124,6 +128,10 @@ def update_expired_chapter_database(
     if isinstance(md_chapter, dict):
         md_chapter = [md_chapter]
 
+    for chap in chapters:
+        chap["chapter_expire"] = EXPIRE_TIME
+        chap["extension_name"] = extension_name
+
     if isinstance(md_chapter, list):
         chapters.extend(
             [
@@ -142,20 +150,11 @@ def update_expired_chapter_database(
             ]
         )
 
-    for chap in chapters:
-        chap["chapter_expire"] = EXPIRE_TIME
-        chap["extension_name"] = extension_name
-
     try:
         result = database_connection["to_delete"].bulk_write(
             [
                 UpdateOne(
-                    {
-                        "$or": [
-                            {"md_chapter_id": {"$eq": chap["md_chapter_id"]}},
-                            {"chapter_id": {"$regex": chap["chapter_url"]}},
-                        ]
-                    },
+                    {"md_chapter_id": {"$eq": chap["md_chapter_id"]}},
                     {"$set": chap},
                     upsert=True,
                 )
@@ -164,7 +163,9 @@ def update_expired_chapter_database(
         )
     except pymongo.errors.BulkWriteError as e:
         traceback.print_exc()
-        logger.exception(f"{update_expired_chapter_database.__name__} raised an error when bulk writing to 'to_delete'.")
+        logger.exception(
+            f"{update_expired_chapter_database.__name__} raised an error when bulk writing to 'to_delete'."
+        )
         return
 
     logger.info(f"Updated {result.modified_count} chapters to delete on the database.")
@@ -185,7 +186,9 @@ def update_expired_chapter_database(
         )
     except pymongo.errors.BulkWriteError as e:
         traceback.print_exc()
-        logger.exception(f"{update_expired_chapter_database.__name__} raised an error when bulk writing to 'uploaded'.")
+        logger.exception(
+            f"{update_expired_chapter_database.__name__} raised an error when bulk writing to 'uploaded'."
+        )
         return
 
     logger.info(f"Deleted {deleted_result.deleted_count} from 'uploaded' collection.")

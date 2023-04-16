@@ -158,12 +158,12 @@ if __name__ == "__main__":
         help="Clean the database.",
     )
     parser.add_argument(
-        "--general",
-        "-g",
+        "--force",
+        "-f",
         default=False,
         const=True,
         nargs="?",
-        help="General run of the bot.",
+        help="Force run the bot, if extensions is unspecified, run all.",
     )
     parser.add_argument(
         "--extension",
@@ -190,5 +190,5 @@ if __name__ == "__main__":
         extension_to_run = [str(extension).strip() for extension in vargs["extension"]]
 
     open_extensions(
-        names=extension_to_run, clean_db=vargs["clean"], general_run=vargs["general"]
+        names=extension_to_run, clean_db=vargs["clean"], general_run=vargs["force"]
     )

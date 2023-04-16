@@ -1,18 +1,17 @@
 import logging
 from datetime import datetime
-from typing import TYPE_CHECKING, Dict, List, Optional
+from typing import Dict, List, Optional
 
-from publoader.webhook import PubloaderDupesWebhook
 from publoader.models.database import update_expired_chapter_database
 from publoader.models.http import RequestError, http_client
 from publoader.utils.config import mangadex_api_url
 from publoader.utils.misc import (
     fetch_aggregate,
+    format_title,
     get_md_api,
     iter_aggregate_chapters,
-    format_title,
 )
-
+from publoader.webhook import PubloaderDupesWebhook
 
 logger = logging.getLogger("publoader")
 

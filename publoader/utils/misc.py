@@ -1,6 +1,6 @@
 import logging
 import math
-from typing import List, Optional, Dict
+from typing import Dict, List, Optional
 
 from publoader.models.http import RequestError, http_client
 from publoader.utils.config import mangadex_api_url, upload_retry
@@ -103,9 +103,7 @@ def iter_aggregate_chapters(aggregate_chapters: dict):
             yield chapter_iter
 
 
-def fetch_aggregate(
-    http_client: "HTTPClient", manga_id: str, **params
-) -> Optional[dict]:
+def fetch_aggregate(http_client, manga_id: str, **params) -> Optional[dict]:
     """Call the mangadex api to get the volumes of each chapter."""
     try:
         aggregate_response = http_client.get(

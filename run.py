@@ -6,17 +6,15 @@ import os
 import subprocess
 import sys
 import time
-from datetime import time as dtTime
-from datetime import timezone
+from datetime import time as dtTime, timezone
 from importlib import reload
 
 from scheduler import Scheduler
 
-from publoader.workers import deleter, editor, uploader
 from publoader.updater import check_for_update
-from publoader.utils.utils import root_path
 from publoader.utils.config import config
-
+from publoader.utils.utils import root_path
+from publoader.workers import deleter, editor, uploader
 
 logger = logging.getLogger("publoader")
 
@@ -117,12 +115,12 @@ if __name__ == "__main__":
         help="Clean the database.",
     )
     parser.add_argument(
-        "--general",
-        "-g",
+        "--force",
+        "-f",
         default=False,
         const=True,
         nargs="?",
-        help="General run of the bot.",
+        help="Force run the bot, if extensions is unspecified, run all.",
     )
     parser.add_argument(
         "--extension",
@@ -161,10 +159,10 @@ if __name__ == "__main__":
     else:
         extension_to_run = [str(extension).strip() for extension in vargs["extension"]]
 
-    if vargs["general"] or vargs["clean"]:
+    if vargs["force"] or vargs["clean"]:
         main(
             extension_names=extension_to_run,
-            general_run=vargs["general"],
+            general_run=vargs["force"],
             clean_db=vargs["clean"],
         )
 

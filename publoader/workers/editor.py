@@ -1,20 +1,15 @@
 import logging
 import queue
 import threading
-from typing import Optional
 
 import pymongo
 
-from publoader.models.database import update_database, database_connection
+from publoader.models.database import database_connection, update_database
 from publoader.models.dataclasses import Chapter
-from publoader.models.http import RequestError
+from publoader.models.http import RequestError, http_client
 from publoader.utils.config import (
     mangadex_api_url,
-    md_upload_api_url,
-    upload_retry,
 )
-from publoader.models.http import http_client
-
 
 logger = logging.getLogger("publoader")
 
@@ -76,13 +71,19 @@ def worker():
         edit_queue.task_done()
 
 
+def setup_thread():
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+    return thread
+
+
 def main():
     chapters = database_connection["to_edit"].find()
     for chapter in chapters:
         edit_queue.put(chapter)
 
     # Turn-on the worker thread.
-    threading.Thread(target=worker, daemon=True).start()
+    thread = setup_thread()
     print(f"Starting Editor watcher.")
 
     while True:
@@ -92,6 +93,9 @@ def main():
             ) as stream:
                 for change in stream:
                     edit_queue.put(change["fullDocument"])
+
+                if not thread.is_alive():
+                    thread = setup_thread()
         except pymongo.errors.PyMongoError as e:
             print(e)
 
