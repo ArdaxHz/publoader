@@ -59,14 +59,14 @@ class EditorProcess:
 def worker():
     while True:
         item = edit_queue.get()
-        print(f"----Working on editing {item['_id']}----")
+        print(f"----Editor: Working on {item['_id']}----")
 
         chapter_editor = EditorProcess(item)
         edited = chapter_editor.start_edit()
 
         if edited:
             database_connection["to_edit"].delete_one({"_id": {"$eq": item["_id"]}})
-            update_database(item)
+            update_database(item["chapter"])
 
         edit_queue.task_done()
 

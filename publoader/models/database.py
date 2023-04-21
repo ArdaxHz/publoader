@@ -3,12 +3,11 @@ import traceback
 from typing import List, Union
 
 import pymongo
-from pymongo import DeleteOne, UpdateOne
+from pymongo import DeleteOne, InsertOne, UpdateOne
 
 from publoader.models.dataclasses import Chapter
 from publoader.utils.config import config
 from publoader.utils.utils import EXPIRE_TIME
-
 
 logger = logging.getLogger("publoader")
 logger_debug = logging.getLogger("debug")
@@ -50,6 +49,10 @@ def update_database(chapter: Union[list, Union[Chapter, dict]], **kwargs):
         print(f"No chapters to update: {chapters}")
         return
 
+    for chap in chapters:
+        if "_id" in chap:
+            chap.pop("_id")
+
     try:
         result = database_connection["uploaded"].bulk_write(
             [
@@ -58,6 +61,8 @@ def update_database(chapter: Union[list, Union[Chapter, dict]], **kwargs):
                     {"$set": chap},
                     upsert=True,
                 )
+                if chap["md_chapter_id"] is not None
+                else InsertOne(chap)
                 for chap in chapters
             ]
         )
@@ -179,7 +184,6 @@ def update_expired_chapter_database(
             [
                 DeleteOne(
                     {"md_chapter_id": {"$eq": chap["md_chapter_id"]}},
-                    chap,
                 )
                 for chap in chapters
             ]

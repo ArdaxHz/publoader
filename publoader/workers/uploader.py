@@ -74,6 +74,7 @@ class UploaderProcess:
                 existing_session.status_code == 200
                 and existing_session.data is not None
             ):
+                logger.debug(f"Existing upload session data: {existing_session.data}")
                 self.remove_upload_session(existing_session.data["data"]["id"])
                 return
             elif existing_session.status_code == 404:
@@ -122,9 +123,7 @@ class UploaderProcess:
             f"Couldn't create an upload session for {self.manga_generic_error_message}."
         )
         logger.error(f"{upload_session_response_json_message} {self.chapter}")
-        print(
-            f"{upload_session_response_json_message} {self.manga_generic_error_message}."
-        )
+        print(f"{upload_session_response_json_message}")
 
     def _commit_chapter(self) -> bool:
         """Try commit the chapter to mangadex."""
@@ -198,7 +197,7 @@ class UploaderProcess:
 def worker():
     while True:
         item = upload_queue.get()
-        print(f"----Working on uploading {item['_id']}----")
+        print(f"----Uploader: Working on {item['_id']}----")
 
         chapter_uploader = UploaderProcess(item)
         uploaded = chapter_uploader.start_upload()

@@ -1,22 +1,21 @@
-import datetime
 import logging
 import math
 import time
 from json import JSONDecodeError
 from typing import Dict, List, Optional, Union
 
+from discord_webhook import DiscordEmbed, DiscordWebhook
+
 from publoader.models.dataclasses import Chapter
 from publoader.utils.config import config
 from publoader.utils.utils import EXPIRE_TIME, get_current_datetime
 
-from discord_webhook import DiscordEmbed, DiscordWebhook
-
-
 logger = logging.getLogger("webhook")
+webhook_url = config["Paths"].get("webhook_url")
 
 
 def make_webhook():
-    return DiscordWebhook(url=config["Paths"]["webhook_url"], rate_limit_retry=True)
+    return DiscordWebhook(url=webhook_url, rate_limit_retry=True)
 
 
 webhook = make_webhook()
@@ -137,6 +136,9 @@ class WebhookHelper:
                 local_webhook.embeds[index:index] = split_embeds
 
     def send_webhook(self, local_webhook: DiscordWebhook = webhook):
+        if webhook_url is None:
+            return
+
         if local_webhook.embeds:
             self.check_embeds_size(local_webhook)
 

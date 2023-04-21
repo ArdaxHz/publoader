@@ -29,23 +29,17 @@ class DeleteProcess:
 
     def delete_chapter(
         self,
-        chapter: Chapter = None,
         to_delete_id: Optional[str] = None,
-    ):
+    ) -> bool:
         """Check if the chapters expired and remove off mangadex if they are."""
-        # If the expiry date of the chapter is less than the current time and
-        # the md chapter id is available, try delete
-        if chapter is None:
-            return False
-
-        md_chapter_id: Optional[str] = chapter.md_chapter_id or to_delete_id
+        md_chapter_id: Optional[str] = self.chapter.md_chapter_id or to_delete_id
         logger.info(
             f"Moving {md_chapter_id} from chapters table to deleted_chapters table."
         )
-        manga_id = chapter.manga_id
+        manga_id = self.chapter.manga_id
         if manga_id is None:
-            manga_id = chapter.md_manga_id
-        deleted_message = f"{md_chapter_id}: {chapter.chapter_id}, manga {manga_id}, chapter {chapter.chapter_number}, language {chapter.chapter_language}."
+            manga_id = self.chapter.md_manga_id
+        deleted_message = f"{md_chapter_id}: {self.chapter.chapter_id}, manga {manga_id}, chapter {self.chapter.chapter_number}, language {self.chapter.chapter_language}."
 
         if md_chapter_id is not None:
             try:
@@ -57,10 +51,12 @@ class DeleteProcess:
                 return False
 
             if delete_reponse.status_code == 200:
-                logger.info(f"Deleted {chapter}.")
-                print(f"----Deleted {deleted_message}")
+                logger.info(f"Deleted {self.chapter}.")
+                print(f"--Deleted {deleted_message}")
 
-                PubloaderDeleterWebhook(chapter.extension_name, chapter).main()
+                PubloaderDeleterWebhook(
+                    self.chapter.extension_name, self.chapter
+                ).main()
                 return True
 
         logger.error(f"Couldn't delete expired chapter {deleted_message}")
@@ -70,13 +66,14 @@ class DeleteProcess:
 def worker():
     while True:
         item = delete_queue.get()
-        print(f"----Working on deleting {item['_id']}----")
+        print(f"----Deleter: Working on {item['_id']}----")
 
         chapter_deleter = DeleteProcess(item)
         deleted = chapter_deleter.delete_chapter()
 
         if deleted:
             database_connection["to_delete"].delete_one({"_id": {"$eq": item["_id"]}})
+            item.pop("_id")
             database_connection["deleted"].insert_one(item)
 
         delete_queue.task_done()

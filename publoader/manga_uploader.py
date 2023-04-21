@@ -1,21 +1,19 @@
 import logging
 import re
 import traceback
-from typing import Optional, Dict, List
+from typing import Dict, List, Optional
 
 import pymongo
 from pymongo import UpdateOne
 
-from publoader.utils.config import mangadex_api_url
 from publoader.models.database import (
     database_connection,
     update_database,
     update_expired_chapter_database,
 )
 from publoader.models.dataclasses import Chapter
-from publoader.utils.misc import fetch_aggregate, find_key_from_list_value, flatten
 from publoader.models.http import http_client
-
+from publoader.utils.misc import fetch_aggregate, find_key_from_list_value, flatten
 
 logger = logging.getLogger("publoader")
 
@@ -246,7 +244,6 @@ class MangaUploaderProcess:
             if chapter not in chapters_to_upload and chapter not in dupes_for_editing
         ]
 
-        chapters_to_update = [vars(dupe) for dupe in dupes_for_editing]
         chapters_to_edit = [
             dupe for dupe in map(self.edit_chapter, dupes) if dupe is not None
         ]
@@ -340,7 +337,9 @@ class MangaUploaderProcess:
             logger.debug(f"Chapters to edit: {dupes_for_editing}")
             print(edited_chapters_message)
 
-        update_database(chapter=chapters_to_upload + chapters_to_update)
+        update_database(
+            chapter=chapters_to_upload + dupes_for_editing + chapters_skipped
+        )
         return
 
         # for count, chapter in enumerate(chapters_to_upload, start=1):
