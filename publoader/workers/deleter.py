@@ -1,4 +1,3 @@
-import datetime
 import logging
 import queue
 import threading
@@ -10,6 +9,7 @@ from publoader.models.database import database_connection
 from publoader.models.dataclasses import Chapter
 from publoader.models.http import RequestError, http_client
 from publoader.utils.config import mangadex_api_url
+from publoader.utils.utils import get_current_datetime
 from publoader.webhook import PubloaderDeleterWebhook
 
 logger = logging.getLogger("publoader")
@@ -21,29 +21,24 @@ class DeleteProcess:
     def __init__(
         self,
         upload_chapter: dict,
+        http_client,
         **kwargs,
     ):
         self.upload_chapter = upload_chapter
+        self.http_client = http_client
         self.chapter = Chapter(**self.upload_chapter)
         self.extension_name = self.chapter.extension_name
 
     def delete_chapter(
         self,
-        to_delete_id: Optional[str] = None,
     ) -> bool:
         """Check if the chapters expired and remove off mangadex if they are."""
-        md_chapter_id: Optional[str] = self.chapter.md_chapter_id or to_delete_id
-        logger.info(
-            f"Moving {md_chapter_id} from chapters table to deleted_chapters table."
-        )
-        manga_id = self.chapter.manga_id
-        if manga_id is None:
-            manga_id = self.chapter.md_manga_id
-        deleted_message = f"{md_chapter_id}: {self.chapter.chapter_id}, manga {manga_id}, chapter {self.chapter.chapter_number}, language {self.chapter.chapter_language}."
+        md_chapter_id: Optional[str] = self.chapter.md_chapter_id
+        deleted_message = f"{md_chapter_id}: {self.chapter.chapter_id}, manga {self.chapter.manga_id}, chapter {self.chapter.chapter_number}, language {self.chapter.chapter_language}."
 
         if md_chapter_id is not None:
             try:
-                delete_reponse = http_client.delete(
+                delete_reponse = self.http_client.delete(
                     f"{mangadex_api_url}/chapter/{md_chapter_id}"
                 )
             except RequestError as e:
@@ -60,19 +55,21 @@ class DeleteProcess:
                 return True
 
         logger.error(f"Couldn't delete expired chapter {deleted_message}")
+        print(f"Couldn't delete chapter {deleted_message}")
         return False
 
 
-def worker():
+def worker(http_client):
     while True:
         item = delete_queue.get()
         print(f"----Deleter: Working on {item['_id']}----")
 
-        chapter_deleter = DeleteProcess(item)
+        chapter_deleter = DeleteProcess(item, http_client)
         deleted = chapter_deleter.delete_chapter()
 
         if deleted:
             database_connection["to_delete"].delete_one({"_id": {"$eq": item["_id"]}})
+            database_connection["uploaded"].delete_one({"_id": {"$eq": item["_id"]}})
             item.pop("_id")
             database_connection["deleted"].insert_one(item)
 
@@ -80,7 +77,7 @@ def worker():
 
 
 def setup_thread():
-    thread = threading.Thread(target=worker, daemon=True)
+    thread = threading.Thread(target=worker, daemon=True, args=(http_client,))
     thread.start()
     return thread
 
@@ -91,7 +88,7 @@ def main():
         delete_queue.put(chapter)
 
     chapters = database_connection["uploaded"].find(
-        {"chapter_expire": {"$lt": datetime.datetime.now(tz=datetime.timezone.utc)}}
+        {"chapter_expire": {"$lt": get_current_datetime()}}
     )
     for chapter in chapters:
         delete_queue.put(chapter)

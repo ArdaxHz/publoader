@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import math
 from typing import Dict, List, Optional
@@ -137,6 +138,7 @@ def find_key_from_list_value(
 
 
 def format_title(manga_data: dict) -> str:
+    """Get the MD title from the manga data."""
     attributes = manga_data.get("attributes", None)
     if attributes is None:
         return manga_data["id"]
@@ -148,3 +150,16 @@ def format_title(manga_data: dict) -> str:
             attributes["originalLanguage"], attributes["title"][key]
         )
     return manga_title
+
+
+def create_new_event_loop():
+    """Return the event loop, create one if not there is not one running."""
+    try:
+        return asyncio.get_event_loop()
+    except RuntimeError as e:
+        if str(e).startswith("There is no current event loop in thread"):
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            return loop
+        else:
+            raise

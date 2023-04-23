@@ -1,4 +1,3 @@
-import aiohttp
 import asyncio
 import logging
 import math
@@ -9,18 +8,19 @@ from datetime import datetime, time, timezone
 from pathlib import Path
 from typing import List, Optional, Union
 
+import aiohttp
+
 from publoader.extensions.mangaplus import response_pb2 as response_pb
 from publoader.models.dataclasses import Chapter, Manga
 from publoader.utils.logs import setup_extension_logs
-from publoader.utils.misc import find_key_from_list_value
+from publoader.utils.misc import create_new_event_loop, find_key_from_list_value
 from publoader.utils.utils import (
     chapter_number_regex,
     open_manga_id_map,
     open_title_regex,
 )
 
-
-__version__ = "0.1.12"
+__version__ = "0.1.13"
 
 setup_extension_logs(
     logger_name="mangaplus",
@@ -165,7 +165,7 @@ class Extension:
         logger.info("Looking for new untracked manga.")
         print("Getting new manga.")
 
-        loop = asyncio.get_event_loop()
+        loop = create_new_event_loop()
         task = self._request_from_api(updated=True)
         updated_manga_response = loop.run_until_complete(task)
 
@@ -205,7 +205,7 @@ class Extension:
             for elem in range(0, len(self.tracked_manga), 3)
         ]
 
-        loop = asyncio.get_event_loop()
+        loop = create_new_event_loop()
         for mangas in spliced_manga:
             task = self._chapter_updates(mangas)
             tasks.append(task)

@@ -223,29 +223,28 @@ class MangaUploaderProcess:
         return
 
     def start_manga_uploading_process(self, last_manga: bool):
+        chapters_dupe_checker = list(
+            map(self._check_for_duplicate_chapter_md_list, self.updated_chapters)
+        )
+
         chapters_to_upload = [
             chapter
             for chapter in self.updated_chapters
             if not bool(self._check_for_duplicate_chapter_md_list(chapter))
             and not self._check_uploaded_different_id(chapter)
         ]
-        dupes = [
-            dupe
-            for dupe in map(
-                self._check_for_duplicate_chapter_md_list, self.updated_chapters
-            )
-            if dupe is not None
-        ]
-        dupes_for_editing = [dupe["chapter"] for dupe in dupes]
-
-        chapters_skipped = [
-            chapter
-            for chapter in self.updated_chapters
-            if chapter not in chapters_to_upload and chapter not in dupes_for_editing
-        ]
+        dupes = [dupe for dupe in chapters_dupe_checker if dupe is not None]
 
         chapters_to_edit = [
             dupe for dupe in map(self.edit_chapter, dupes) if dupe is not None
+        ]
+        dupes_for_editing = [Chapter(**dupe["chapter"]) for dupe in chapters_to_edit]
+
+        chapters_skipped = [
+            chapter["chapter"]
+            for chapter in dupes
+            if chapter["chapter"] not in chapters_to_upload
+            and chapter["chapter"] not in dupes_for_editing
         ]
 
         chapters_to_insert = [
@@ -337,9 +336,7 @@ class MangaUploaderProcess:
             logger.debug(f"Chapters to edit: {dupes_for_editing}")
             print(edited_chapters_message)
 
-        update_database(
-            chapter=chapters_to_upload + dupes_for_editing + chapters_skipped
-        )
+        update_database(chapter=dupes_for_editing + chapters_skipped)
         return
 
         # for count, chapter in enumerate(chapters_to_upload, start=1):

@@ -3,7 +3,8 @@ import traceback
 from typing import List, Union
 
 import pymongo
-from pymongo import DeleteOne, InsertOne, UpdateOne
+from publoader.utils.singleton import Singleton
+from pymongo import DeleteOne, UpdateOne
 
 from publoader.models.dataclasses import Chapter
 from publoader.utils.config import config
@@ -13,7 +14,7 @@ logger = logging.getLogger("publoader")
 logger_debug = logging.getLogger("debug")
 
 
-class DatabaseConnector:
+class DatabaseConnector(metaclass=Singleton):
     def __init__(self):
         self.database_uri = config["MangaDex Credentials"]["mongodb_uri"]
         self.database_name = config["MangaDex Credentials"]["mongodb_db_name"]
@@ -53,6 +54,12 @@ def update_database(chapter: Union[list, Union[Chapter, dict]], **kwargs):
         if "_id" in chap:
             chap.pop("_id")
 
+    null_chapters = list(filter(lambda x: x.get("md_chapter_id") is None, chapters))
+    logger.debug(
+        f"Chapters to insert into database but md_chapter_id is null {null_chapters}"
+    )
+    chapters = list(filter(lambda x: x.get("md_chapter_id") is not None, chapters))
+
     try:
         result = database_connection["uploaded"].bulk_write(
             [
@@ -61,8 +68,6 @@ def update_database(chapter: Union[list, Union[Chapter, dict]], **kwargs):
                     {"$set": chap},
                     upsert=True,
                 )
-                if chap["md_chapter_id"] is not None
-                else InsertOne(chap)
                 for chap in chapters
             ]
         )
@@ -89,6 +94,7 @@ def update_database(chapter: Union[list, Union[Chapter, dict]], **kwargs):
                         "$setOnInsert": {
                             "chapter_id": chap["chapter_id"],
                             "extension_name": chap["extension_name"],
+                            "md_chapter_id": chap["md_chapter_id"],
                         },
                     },
                     upsert=True,

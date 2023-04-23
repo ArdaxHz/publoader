@@ -22,9 +22,11 @@ class UploaderProcess:
     def __init__(
         self,
         upload_chapter: dict,
+        http_client,
         **kwargs,
     ):
         self.chapter = Chapter(**upload_chapter)
+        self.http_client = http_client
         self.extension_name = self.chapter.extension_name
         self.mangadex_manga_id = upload_chapter.get("mangadex_manga_id", "")
         self.mangadex_group_id = upload_chapter.get("mangadex_group_id", "")
@@ -49,7 +51,7 @@ class UploaderProcess:
             session_id = self.upload_session_id
 
         try:
-            http_client.delete(
+            self.http_client.delete(
                 f"{md_upload_api_url}/{session_id}",
                 successful_codes=[404],
             )
@@ -64,7 +66,7 @@ class UploaderProcess:
         )
 
         try:
-            existing_session = http_client.get(
+            existing_session = self.http_client.get(
                 f"{md_upload_api_url}", successful_codes=[404]
             )
         except RequestError as e:
@@ -95,7 +97,7 @@ class UploaderProcess:
 
             # Start the upload session
             try:
-                upload_session_response = http_client.post(
+                upload_session_response = self.http_client.post(
                     f"{md_upload_api_url}/begin",
                     json={
                         "manga": self.mangadex_manga_id,
@@ -146,7 +148,7 @@ class UploaderProcess:
         logger.info(f"Commit payload: {payload}")
 
         try:
-            chapter_commit_response = http_client.post(
+            chapter_commit_response = self.http_client.post(
                 f"{md_upload_api_url}/{self.upload_session_id}/commit",
                 json=payload,
             )
@@ -194,12 +196,12 @@ class UploaderProcess:
         return True
 
 
-def worker():
+def worker(http_client):
     while True:
         item = upload_queue.get()
         print(f"----Uploader: Working on {item['_id']}----")
 
-        chapter_uploader = UploaderProcess(item)
+        chapter_uploader = UploaderProcess(item, http_client)
         uploaded = chapter_uploader.start_upload()
         successful_upload_id = chapter_uploader.successful_upload_id
 
@@ -215,7 +217,7 @@ def worker():
 
 
 def setup_thread():
-    thread = threading.Thread(target=worker, daemon=True)
+    thread = threading.Thread(target=worker, daemon=True, args=(http_client,))
     thread.start()
     return thread
 
