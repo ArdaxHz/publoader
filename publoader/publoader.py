@@ -22,7 +22,7 @@ from publoader.models.database import (
     database_connection,
 )
 from publoader.models.dataclasses import Chapter
-from publoader.utils.utils import open_manga_data
+from publoader.utils.utils import get_current_datetime, open_manga_data
 
 logger = logging.getLogger("publoader")
 
@@ -89,7 +89,9 @@ def run_updates(
             manga_data_local=manga_data_local,
         ).upload_chapters()
 
-        print("Uploaded all update(s).")
+        print(
+            f"Uploaded all chapters for {normalised_extension_name} at {get_current_datetime()}."
+        )
 
         if clean_db:
             dupes_deleter = DeleteDuplicatesMD(

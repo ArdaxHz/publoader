@@ -4,15 +4,14 @@ import logging
 import string
 import sys
 import traceback
-from datetime import time, timezone, timedelta
+from datetime import time, timedelta, timezone
 from pathlib import Path
 from typing import List
 
 from publoader.models.database import database_connection
 from publoader.models.dataclasses import Chapter, Manga
-from publoader.utils.config import DEFAULT_TIME, DEFAULT_CLEAN_DAY, CLEAN_TIME
-from publoader.utils.utils import root_path, get_current_datetime
-
+from publoader.utils.config import CLEAN_TIME, DEFAULT_CLEAN_DAY, DEFAULT_TIME
+from publoader.utils.utils import get_current_datetime, root_path
 
 logger = logging.getLogger("publoader")
 extensions_folder = root_path.joinpath("publoader", "extensions")
@@ -187,12 +186,21 @@ def load_extension(extension: Path, clean_db: bool = False, general_run: bool = 
             logger.error(f"{extension_name} doesn't have the Extension class")
             return
 
+        extension_disabled = check_class_has_attribute(
+            extension_name, extension_class, "disabled", default=True
+        )
+        if extension_disabled:
+            logger.info(f"{extension_name} is disabled: {extension_disabled}.")
+            print(f"{extension_name} is disabled.")
+            return
+
         run_extension, clean_db, run_at = check_extension_run(
             extension_name, extension_class, clean_db, general_run
         )
         if not run_extension and not clean_db:
             print(
-                f"{extension_name} is not scheduled to run now: {datetime.datetime.now()}"
+                f"{extension_name} is not scheduled to run now: "
+                f"{datetime.datetime.now()}"
             )
             return
 
@@ -255,7 +263,10 @@ def run_extension(extension: dict, clean_db_override: bool = False):
         else:
             name = str(name)
 
-        if any(x in string.punctuation for x in name) or " " in name:
+        if (
+            any(x in string.punctuation.replace("-", "").replace("_", "") for x in name)
+            or " " in name
+        ):
             logger.error(f"{name} contains either punctuation or a space.")
             print(f"{name} contains either punctuation or a space.")
             return
@@ -267,14 +278,12 @@ def run_extension(extension: dict, clean_db_override: bool = False):
         posted_chapters_ids = [chap["chapter_id"] for chap in posted_chapters_ids]
 
         update_posted_chapter_ids = check_class_has_method(
-            extension_name, extension_class, "update_posted_chapter_ids", run=False
+            extension_name, extension_class, "update_external_data", run=False
         )
         if update_posted_chapter_ids is None:
-            logger.info(
-                f"{extension_name} update_posted_chapter_ids method does not exist, not providing already, uploaded values."
-            )
+            logger.info(f"{extension_name} update_external_data method does not exist.")
         else:
-            update_posted_chapter_ids(posted_chapters_ids)
+            update_posted_chapter_ids(posted_chapters_ids, clean_db)
 
         normalised_extension_name = f"extensions.{name}"
         updated_chapters = check_class_has_method(

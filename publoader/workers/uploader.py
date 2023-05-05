@@ -1,17 +1,24 @@
 import logging
 import queue
 import threading
-from typing import Optional
+from typing import Dict, List, Optional
 
+import natsort
 import pymongo
+from gridfs import GridOut
 
-from publoader.models.database import database_connection, update_database
+from publoader.models.database import (
+    database_connection,
+    image_filestream,
+    update_database,
+)
 from publoader.models.dataclasses import Chapter
 from publoader.models.http import RequestError, http_client
 from publoader.utils.config import (
     md_upload_api_url,
     upload_retry,
 )
+from publoader.utils.misc import flatten
 
 logger = logging.getLogger("publoader")
 
@@ -23,6 +30,7 @@ class UploaderProcess:
         self,
         upload_chapter: dict,
         http_client,
+        images: list,
         **kwargs,
     ):
         self.chapter = Chapter(**upload_chapter)
@@ -30,6 +38,11 @@ class UploaderProcess:
         self.extension_name = self.chapter.extension_name
         self.mangadex_manga_id = upload_chapter.get("mangadex_manga_id", "")
         self.mangadex_group_id = upload_chapter.get("mangadex_group_id", "")
+
+        if upload_chapter.get("images") is not None:
+            self.image_ids = images
+        else:
+            self.image_ids = []
 
         self.manga_generic_error_message = (
             f"Extension: {self.extension_name}, "
@@ -41,9 +54,113 @@ class UploaderProcess:
             f"language: {self.chapter.chapter_language!r}, "
             f"title: {self.chapter.chapter_title!r}"
         )
+
         self.upload_retry_total = upload_retry
+        self.images_upload_session = 10
+        self.images_to_upload_ids: List[str] = []
+        self.images_to_upload_names = {}
         self.upload_session_id: Optional[str] = None
+        self.failed_image_upload = False
         self.successful_upload_id: Optional[str] = None
+
+    def _images_upload(self, image_batch: Dict[str, bytes]):
+        """Upload the images"""
+        try:
+            image_upload_response = self.http_client.post(
+                f"{md_upload_api_url}/{self.upload_session_id}",
+                files=image_batch,
+            )
+        except (RequestError,) as e:
+            logger.error(e)
+            return
+
+        # Some images returned errors
+        uploaded_image_data = image_upload_response.data
+        successful_upload_data = uploaded_image_data["data"]
+        if uploaded_image_data["errors"] or uploaded_image_data["result"] == "error":
+            logger.warning(f"Some images errored out.")
+            return
+        return successful_upload_data
+
+    def _upload_images(self, image_batch: Dict[str, bytes]) -> bool:
+        """Try to upload every 10 (default) images to the upload session."""
+        # No images to upload
+        if not image_batch:
+            return True
+
+        successful_upload_message = "Success: Uploaded page {}, size: {} bytes."
+
+        image_batch_list = list(image_batch.keys())
+        print(
+            f"Uploading images {int(image_batch_list[0]) + 1} to "
+            f"{int(image_batch_list[-1]) + 1}."
+        )
+        logger.debug(
+            f"Uploading images {int(image_batch_list[0]) + 1} to "
+            f"{int(image_batch_list[-1]) + 1}."
+        )
+
+        for retry in range(upload_retry):
+            successful_upload_data = self._images_upload(image_batch)
+
+            # Add successful image uploads to the image ids array
+            for uploaded_image in successful_upload_data:
+                if successful_upload_data.index(uploaded_image) == 0:
+                    logger.info(f"Success: Uploaded images {successful_upload_data}")
+
+                uploaded_image_attributes = uploaded_image["attributes"]
+                uploaded_filename = uploaded_image_attributes["originalFileName"]
+                file_size = uploaded_image_attributes["fileSize"]
+
+                self.images_to_upload_ids.insert(
+                    int(uploaded_filename), uploaded_image["id"]
+                )
+                original_filename = self.images_to_upload_names[uploaded_filename]
+
+                print(successful_upload_message.format(original_filename, file_size))
+
+            # Length of images array returned from the api is the same as the array
+            # sent to the api
+            if len(successful_upload_data) == len(image_batch):
+                logger.info(
+                    f"Uploaded images {int(image_batch_list[0]) + 1} to "
+                    f"{int(image_batch_list[-1]) + 1}."
+                )
+                self.failed_image_upload = False
+                break
+            else:
+                # Update the images to upload dictionary with the images that failed
+                image_batch = {
+                    k: v
+                    for (k, v) in image_batch.items()
+                    if k
+                    not in [
+                        i["attributes"]["originalFileName"]
+                        for i in successful_upload_data
+                    ]
+                }
+                logger.warning(
+                    f"Some images didn't upload, retrying. Failed images: {image_batch}"
+                )
+                self.failed_image_upload = True
+                continue
+
+        return self.failed_image_upload
+
+    def get_images_to_upload(self, images_to_read: List[GridOut]) -> Dict[str, bytes]:
+        """Read the image data from the zip as list."""
+        logger.info(
+            f"Reading data for images: {[img.filename for img in images_to_read]}"
+        )
+        # Dictionary to store the image index to the image bytes
+        files: Dict[str, bytes] = {}
+        for array_index, image in enumerate(images_to_read, start=1):
+            # Get index of the image in the images array
+            renamed_file = str(self.image_ids.index(image._id))
+            # Keeps track of which image index belongs to which image name
+            self.images_to_upload_names.update({renamed_file: image.filename})
+            files.update({renamed_file: image.read()})
+        return files
 
     def remove_upload_session(self, session_id: Optional[str] = None):
         """Delete the upload session."""
@@ -87,14 +204,11 @@ class UploaderProcess:
 
     def _create_upload_session(self) -> Optional[dict]:
         """Try to create an upload session 3 times."""
-        for chapter_upload_session_retry in range(self.upload_retry_total):
-            # Delete existing upload session if exists
-            try:
-                self._delete_exising_upload_session()
-            except Exception as e:
-                logger.error(e)
-                continue
-
+        try:
+            self._delete_exising_upload_session()
+        except Exception as e:
+            logger.error(e)
+        else:
             # Start the upload session
             try:
                 upload_session_response = self.http_client.post(
@@ -105,27 +219,20 @@ class UploaderProcess:
                     },
                     tries=1,
                 )
-            except RequestError as e:
+            except (RequestError,) as e:
                 logger.error(e)
-                continue
-
-            if upload_session_response.status_code == 200:
-                if upload_session_response.data is not None:
+            else:
+                if upload_session_response.ok:
                     return upload_session_response.data
-
-                upload_session_response_json_message = f"Couldn't convert successful upload session creation into a json, retrying."
-                logger.error(f"{upload_session_response_json_message} {self.chapter}")
-                print(
-                    f"{upload_session_response_json_message} {self.manga_generic_error_message}."
-                )
-                continue
 
         # Couldn't create an upload session, skip the chapter
         upload_session_response_json_message = (
-            f"Couldn't create an upload session for {self.manga_generic_error_message}."
+            f"Couldn't create an upload session for "
+            f"{self.manga_generic_error_message}."
         )
         logger.error(f"{upload_session_response_json_message} {self.chapter}")
         print(f"{upload_session_response_json_message}")
+        return
 
     def _commit_chapter(self) -> bool:
         """Try commit the chapter to mangadex."""
@@ -137,13 +244,15 @@ class UploaderProcess:
                 "translatedLanguage": self.chapter.chapter_language,
                 "externalUrl": self.chapter.chapter_url,
             },
-            "pageOrder": [],
+            "pageOrder": self.images_to_upload_ids
+            if not self.failed_image_upload
+            else [],
         }
 
-        if self.chapter.chapter_expire is not None:
-            payload["chapterDraft"]["publishAt"] = self.chapter.chapter_expire.strftime(
-                "%Y-%m-%dT%H:%M:%S"
-            )
+        # if self.chapter.chapter_expire is not None:
+        #     payload["chapterDraft"]["publishAt"] = self.chapter.chapter_expire.strftime(
+        #         "%Y-%m-%dT%H:%M:%S"
+        #     )
 
         logger.info(f"Commit payload: {payload}")
 
@@ -175,7 +284,7 @@ class UploaderProcess:
 
         logger.error(f"Couldn't commit {self.chapter}")
         print(
-            f"Couldn't commit {self.upload_session_id}, manga {self.mangadex_manga_id} - {self.chapter.manga_id} chapter {self.chapter.chapter_number!r} language {self.chapter.chapter_language}."
+            f"Couldn't commit {self.upload_session_id}: {self.manga_generic_error_message}."
         )
         self.remove_upload_session()
         return False
@@ -189,6 +298,28 @@ class UploaderProcess:
         logger.info(
             f"Created upload session: {self.upload_session_id} - {self.chapter}"
         )
+
+        if self.image_ids is not None and self.image_ids:
+            valid_images_to_upload_names = [
+                self.image_ids[l : l + self.images_upload_session]
+                for l in range(0, len(self.image_ids), self.images_upload_session)
+            ]
+            print(f"{len(flatten(valid_images_to_upload_names))} images to upload.")
+
+            for images_array in valid_images_to_upload_names:
+                images_to_upload = self.get_images_to_upload(images_array)
+                self._upload_images(images_to_upload)
+
+                # Don't upload rest of the chapter's images if the images before failed
+                if self.failed_image_upload:
+                    break
+
+        # Skip chapter upload and delete upload session
+        if self.failed_image_upload:
+            failed_image_upload_message = f"Couldn't upload images for {self.upload_session_id}: {self.manga_generic_error_message}."
+            print(failed_image_upload_message)
+            logger.error(f"{failed_image_upload_message} {self.chapter}")
+
         chapter_committed = self._commit_chapter()
         if not chapter_committed:
             self.remove_upload_session()
@@ -201,14 +332,30 @@ def worker(http_client):
         item = upload_queue.get()
         print(f"----Uploader: Working on {item['_id']}----")
 
-        chapter_uploader = UploaderProcess(item, http_client)
-        uploaded = chapter_uploader.start_upload()
-        successful_upload_id = chapter_uploader.successful_upload_id
+        if "images" in item:
+            images = image_filestream.find({"_id": {"$in": item["images"]}})
+            image_ids = natsort.natsorted(images, key=lambda x: x["filename"])
+        else:
+            images = []
+            image_ids = []
 
+        chapter_uploader = UploaderProcess(item, http_client, image_ids)
+        uploaded = chapter_uploader.start_upload()
+
+        successful_upload_id = chapter_uploader.successful_upload_id
         item["md_chapter_id"] = successful_upload_id
 
         if uploaded:
             database_connection["to_upload"].delete_one({"_id": {"$eq": item["_id"]}})
+
+            if images:
+                database_connection["images.files"].delete_many(
+                    {"_id": {"$in": [img["id"] for img in image_ids]}}
+                )
+                database_connection["images.chunks"].delete_many(
+                    {"files_id": {"$in": [img["id"] for img in image_ids]}}
+                )
+
             if successful_upload_id is not None:
                 print(successful_upload_id)
                 update_database(item)
@@ -239,6 +386,7 @@ def main():
                 for change in stream:
                     upload_queue.put(change["fullDocument"])
 
+                print("Restarting Uploader Thread")
                 if not thread.is_alive():
                     thread = setup_thread()
         except pymongo.errors.PyMongoError as e:

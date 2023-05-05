@@ -3,11 +3,13 @@ import re
 import traceback
 from typing import Dict, List, Optional
 
+import gridfs.errors
 import pymongo
 from pymongo import UpdateOne
 
 from publoader.models.database import (
     database_connection,
+    image_filestream,
     update_database,
     update_expired_chapter_database,
 )
@@ -262,6 +264,27 @@ class MangaUploaderProcess:
 
         if chapters_to_insert:
             try:
+                for chap in chapters_to_insert:
+                    images = []
+                    images_length = 0
+                    if chap["images"] is not None and chap["images"]:
+                        images_length = chap["images"]
+                        for index, img in enumerate(chap["images"]):
+                            try:
+                                img_insert_id = image_filestream.put(
+                                    img, filename=index
+                                )
+                                images.append(img_insert_id)
+                            except gridfs.errors.GridFSError as e:
+                                traceback.print_exc()
+                                logger.exception(
+                                    f"{self.start_manga_uploading_process.__name__} raised an error when uploading image for chapter {chap}."
+                                )
+                                break
+
+                    chap.pop("images")
+                    chap["images"] = images if images_length == len(images) else []
+
                 upload_insertion = database_connection["to_upload"].bulk_write(
                     [
                         UpdateOne(
@@ -338,53 +361,3 @@ class MangaUploaderProcess:
 
         update_database(chapter=dupes_for_editing + chapters_skipped)
         return
-
-        # for count, chapter in enumerate(chapters_to_upload, start=1):
-        #     chapter.md_manga_id = self.mangadex_manga_id
-        #     chapter.extension_name = self.extension_name
-        #     http_client.login()
-        #
-        #     chapter_to_upload_process = ChapterUploaderProcess(
-        #         extension_name=self.extension_name,
-        #         database_connection=self.database_connection,
-        #         http_client=http_client,
-        #         mangadex_manga_id=self.mangadex_manga_id,
-        #         mangadex_group_id=self.mangadex_group_id,
-        #         chapter=chapter,
-        #         posted_md_updates=self.posted_md_updates,
-        #         same_chapter_dict=self.same_chapter_dict,
-        #     )
-        #
-        #     uploaded = chapter_to_upload_process.start_upload(self.chapters_on_md)
-        #     if uploaded in ("on_md", "session_error", "edited"):
-        #         if uploaded in ("on_md",):
-        #             self.skipped += 1
-        #         elif uploaded in ("edited",):
-        #             self.edited += 1
-        #         elif uploaded in ("session_error",):
-        #             self.skipped += 1
-        #             self.failed_uploads.append(chapter)
-        #         continue
-        #
-        #     self.posted_chapters.append(chapter)
-        #     time.sleep(1)
-        #
-        # if self.skipped != 0:
-        #     skipped_chapters_message = f"Skipped {self.skipped} chapters out of {len(self.updated_chapters)} for extensions.{self.extension_name} manga {self.mangadex_manga_data['title']}: {self.mangadex_manga_id}."
-        #     logger.info(skipped_chapters_message)
-        #     print(skipped_chapters_message)
-        #
-        # if self.edited != 0:
-        #     edited_chapters_message = f"Edited {self.edited} chapters out of {len(self.updated_chapters)} for extensions.{self.extension_name} manga {self.mangadex_manga_data['title']}: {self.mangadex_manga_id}."
-        #     logger.info(edited_chapters_message)
-        #     print(edited_chapters_message)
-        #
-        # PubloaderUpdatesWebhook(
-        #     self.extension_name,
-        #     self.mangadex_manga_data,
-        #     self.posted_chapters,
-        #     self.failed_uploads,
-        #     self.skipped,
-        #     self.edited,
-        #     self.clean_db,
-        # ).main(last_manga)

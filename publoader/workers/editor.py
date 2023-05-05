@@ -97,6 +97,7 @@ def main():
                 for change in stream:
                     edit_queue.put(change["fullDocument"])
 
+                print("Restarting Editor Thread")
                 if not thread.is_alive():
                     thread = setup_thread()
         except pymongo.errors.PyMongoError as e:

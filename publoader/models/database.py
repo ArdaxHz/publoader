@@ -2,12 +2,13 @@ import logging
 import traceback
 from typing import List, Union
 
+import gridfs
 import pymongo
-from publoader.utils.singleton import Singleton
 from pymongo import DeleteOne, UpdateOne
 
 from publoader.models.dataclasses import Chapter
 from publoader.utils.config import config
+from publoader.utils.singleton import Singleton
 from publoader.utils.utils import EXPIRE_TIME
 
 logger = logging.getLogger("publoader")
@@ -28,6 +29,7 @@ class DatabaseConnector(metaclass=Singleton):
 
 database = DatabaseConnector()
 database_connection = database.database_connection
+image_filestream = gridfs.GridFS(database_connection, "images")
 
 
 def convert_model_dict(chapter):

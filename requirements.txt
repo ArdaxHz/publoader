@@ -3,3 +3,4 @@ scheduler
 discord-webhook
 GitPython
 pydantic
+natsort

@@ -3,14 +3,17 @@ import logging
 import math
 import re
 import string
+import traceback
 from copy import copy
 from datetime import datetime, time, timezone
 from pathlib import Path
 from typing import List, Optional, Union
 
 import aiohttp
+import requests
 
-from publoader.extensions.mangaplus import response_pb2 as response_pb
+from publoader.extensions.mangaplus import response_updates_pb2 as response_pb
+from publoader.extensions.mangaplus.response_chapter_pb2 import Response
 from publoader.models.dataclasses import Chapter, Manga
 from publoader.utils.logs import setup_extension_logs
 from publoader.utils.misc import create_new_event_loop, find_key_from_list_value
@@ -20,7 +23,7 @@ from publoader.utils.utils import (
     open_title_regex,
 )
 
-__version__ = "0.1.13"
+__version__ = "0.1.20"
 
 setup_extension_logs(
     logger_name="mangaplus",
@@ -38,6 +41,7 @@ class Extension:
         self.custom_regexes_filename = "custom_regexes.json"
         self.extension_dirpath = extension_dirpath
 
+        self.fetch_all_chapters = False
         self._posted_chapters_ids = []
         self._updated_chapters: List[Chapter] = []
         self._all_mplus_chapters: List[Chapter] = []
@@ -45,6 +49,7 @@ class Extension:
         self._mplus_base_api_url = "https://jumpg-webapi.tokyo-cdn.com"
         self._chapter_url_format = "https://mangaplus.shueisha.co.jp/viewer/{}"
         self._manga_url_format = "https://mangaplus.shueisha.co.jp/titles/{}"
+        self._images_api_url = "https://jumpg-webapi.tokyo-cdn.com/api/manga_viewer?chapter_id={}&split=no&img_quality=super_high"
 
     @property
     def extension_languages_map(self):
@@ -62,6 +67,10 @@ class Extension:
     def extension_languages(self) -> List[str]:
         return list(self.extension_languages_map.values())
 
+    @property
+    def disabled(self):
+        return False
+
     def get_updated_chapters(self) -> List[Chapter]:
         return self._updated_chapters
 
@@ -71,8 +80,11 @@ class Extension:
     def get_updated_manga(self) -> List[Manga]:
         return self._untracked_manga
 
-    def update_posted_chapter_ids(self, posted_chapter_ids: List[str]) -> None:
+    def update_external_data(
+        self, posted_chapter_ids: List[str], fetch_all_chapters: bool, **kwargs
+    ) -> None:
         self._posted_chapters_ids = posted_chapter_ids
+        self.fetch_all_chapters = fetch_all_chapters
 
         self.fetch_updates()
 
@@ -211,6 +223,53 @@ class Extension:
             tasks.append(task)
 
         loop.run_until_complete(asyncio.gather(*tasks))
+
+    def _decrypt_image(self, url: str, encryption_hex: str) -> bytes:
+        """Decrypt the image so it can be saved.
+        Args:
+            url (str): The image link.
+            encryption_hex (str): The key to decrypt the image.
+        Returns:
+            bytearray: The image data.
+        """
+        res = requests.get(url)
+        data = bytearray(res.content)
+        key = bytes.fromhex(encryption_hex)
+        a = len(key)
+        for s in range(len(data)):
+            data[s] ^= key[s % a]
+        return bytes(data)
+
+    def _fetch_chapter_images(self, chapter_id):
+        """Fetch the images."""
+        if self.fetch_all_chapters:
+            return
+
+        try:
+            response = requests.get(self._images_api_url.format(chapter_id))
+        except requests.RequestException as e:
+            traceback.print_exc()
+            logger.exception(f"Error fetching images data for chapter {chapter_id}.")
+
+        viewer = Response.FromString(response.content).success.manga_viewer
+        pages = [p.manga_page for p in viewer.pages if p.manga_page.image_url]
+        images = []
+
+        logger.debug(f"{len(pages)} images for chapter {chapter_id}.")
+
+        for page in pages:
+            try:
+                image = self._decrypt_image(page.image_url, page.encryption_key)
+                if image is not None:
+                    images.append(image)
+            except requests.RequestException as e:
+                traceback.print_exc()
+                logger.exception(f"Error fetching image data for chapter {chapter_id}.")
+                break
+
+        if len(pages) == len(images):
+            return images
+        return
 
     def _normalise_chapter_object(
         self, chapter_list, manga_object: Manga

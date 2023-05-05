@@ -105,6 +105,7 @@ def main():
                 for change in stream:
                     delete_queue.put(change["fullDocument"])
 
+                print("Restarting Deleter Thread")
                 if not thread.is_alive():
                     thread = setup_thread()
         except pymongo.errors.PyMongoError as e:
