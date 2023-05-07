@@ -1,5 +1,4 @@
 import logging
-import math
 import time
 from json import JSONDecodeError
 from typing import Dict, List, Optional, Union
@@ -57,7 +56,7 @@ class WebhookHelper:
         if isinstance(chapter, Chapter):
             chapter = vars(chapter)
 
-        name = f"Success: {success}\n\nChapter: {chapter.get('chapter_number')}\nExtension: {chapter.get('extension_name')}"
+        name = f"Success: {success}\nManga: {chapter.get('manga_name')}\nChapter: {chapter.get('chapter_number')}\nExtension: {chapter.get('extension_name')}"
         value = (
             f"Language: `{chapter.get('chapter_language')}`\n"
             f"Chapter title: `{chapter.get('chapter_title')}`\n"
@@ -133,7 +132,8 @@ class WebhookHelper:
     def _check_embed_length(self, embed, embed_len):
         if embed_len >= 6000:
             num_fields = embed["fields"]
-            splitter = math.cail(len(num_fields) / 2)
+            splitter = 6
+
             fields_split = [
                 num_fields[elem : elem + splitter]
                 for elem in range(0, len(num_fields), splitter)

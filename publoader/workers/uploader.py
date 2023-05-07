@@ -2,6 +2,7 @@ import logging
 import queue
 import threading
 import traceback
+from datetime import datetime
 from typing import Dict, List, Optional
 
 import natsort
@@ -251,7 +252,10 @@ class UploaderProcess:
             else [],
         }
 
-        if self.chapter.chapter_expire is not None:
+        if (
+            self.chapter.chapter_expire is not None
+            and self.chapter.chapter_expire > datetime.now()
+        ):
             payload["chapterDraft"]["publishAt"] = self.chapter.chapter_expire.strftime(
                 "%Y-%m-%dT%H:%M:%S"
             )

@@ -78,7 +78,6 @@ class ExtensionUploader:
         PubloaderWebhook(
             self.extension_name,
             title=f"Posting updates for extension {self.extension_name}",
-            add_timestamp=False,
         ).send()
 
     def send_untracked_manga_webhook(self):
