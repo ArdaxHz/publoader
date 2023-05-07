@@ -143,7 +143,8 @@ def check_extension_run(
                 pass
 
     if not cleaned_list:
-        days_to_run.append(DEFAULT_CLEAN_DAY)
+        if isinstance(days_to_clean_unsanitised, list):
+            days_to_run.append(DEFAULT_CLEAN_DAY)
     else:
         days_to_run.extend(cleaned_list)
 
