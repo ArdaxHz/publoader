@@ -5,12 +5,11 @@ import time
 from typing import Dict, List
 
 from publoader.manga_uploader import MangaUploaderProcess
-from publoader.webhook import PubloaderNotIndexedWebhook, PubloaderWebhook
 from publoader.models.database import update_expired_chapter_database
 from publoader.models.dataclasses import Chapter, Manga
-from publoader.utils.config import ratelimit_time, components_path
-from publoader.utils.misc import get_md_api, format_title
-
+from publoader.utils.config import components_path, ratelimit_time
+from publoader.utils.misc import format_title, get_md_api
+from publoader.webhook import PubloaderNotIndexedWebhook, PubloaderWebhook
 
 logger = logging.getLogger("publoader")
 
@@ -62,7 +61,6 @@ class ExtensionUploader:
 
         self.updated_manga_chapters = self._sort_chapters_by_manga(self.updates)
         self.chapters_on_md = self._get_external_chapters_md()
-        # self.chapters_on_md = {}
 
         self.chapters_for_upload: List[Chapter] = []
         self.chapters_for_skipping: List[Chapter] = []
@@ -79,7 +77,7 @@ class ExtensionUploader:
     def send_begin_extension_uploading(self):
         PubloaderWebhook(
             self.extension_name,
-            title=f"Posting updates for publisher {self.extension_name}",
+            title=f"Posting updates for extension {self.extension_name}",
             add_timestamp=False,
         ).send()
 
@@ -289,9 +287,12 @@ class ExtensionUploader:
         if self.current_uploaded_chapters:
             self._check_all_chapters_uploaded()
 
-        # PubloaderExtensionUpdatesWebhook(
-        #     self.extension_name,
-        #     manga_data_local=self.manga_data_local,
-        #     chapters_for_skipping=self.chapters_for_skipping,
-        #     clean_db=self.clean_db,
-        # ).main()
+        PubloaderWebhook(
+            self.extension_name,
+            title=f"{self.extension_name.title()} Updates",
+            description=(
+                f"To upload: {len(self.chapters_for_upload)}\n"
+                f"To edit: {len(self.chapters_for_editing)}\n"
+                f"Skipped: {len(self.chapters_for_skipping)}"
+            ),
+        ).send()

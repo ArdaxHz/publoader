@@ -225,6 +225,7 @@ class MangaUploaderProcess:
         return
 
     def start_manga_uploading_process(self, last_manga: bool):
+        """Get the chapters to upload."""
         chapters_dupe_checker = list(
             map(self._check_for_duplicate_chapter_md_list, self.updated_chapters)
         )
@@ -260,7 +261,9 @@ class MangaUploaderProcess:
             for chapter in chapters_to_upload
         ]
 
-        print(f"Inserting chapters for manga {self.mangadex_manga_id}")
+        print(
+            f"Inserting chapters for manga {self.mangadex_manga_id}: {self.mangadex_manga_data['title']}"
+        )
 
         if chapters_to_insert:
             try:
@@ -341,20 +344,20 @@ class MangaUploaderProcess:
 
         if len(chapters_skipped) != 0:
             skipped_chapters_message = (
-                f"Skipped {len(chapters_skipped)} chapters out of "
+                f"----Skipped {len(chapters_skipped)} chapters out of "
+                f"{len(self.updated_chapters)} for extensions.{self.extension_name} manga "
+                f"{self.mangadex_manga_data['title']}: {self.mangadex_manga_id}."
             )
-            f"{len(self.updated_chapters)} for extensions.{self.extension_name} manga "
-            f"{self.mangadex_manga_data['title']}: {self.mangadex_manga_id}."
             logger.info(skipped_chapters_message)
             logger.debug(f"Chapters skipped: {chapters_skipped}")
             print(skipped_chapters_message)
 
         if len(dupes_for_editing) != 0:
             edited_chapters_message = (
-                f"Edited {len(dupes_for_editing)} chapters out of "
+                f"----Edited {len(dupes_for_editing)} chapters out of "
+                f"{len(self.updated_chapters)} for extensions.{self.extension_name} manga "
+                f"{self.mangadex_manga_data['title']}: {self.mangadex_manga_id}."
             )
-            f"{len(self.updated_chapters)} for extensions.{self.extension_name} manga "
-            f"{self.mangadex_manga_data['title']}: {self.mangadex_manga_id}."
             logger.info(edited_chapters_message)
             logger.debug(f"Chapters to edit: {dupes_for_editing}")
             print(edited_chapters_message)

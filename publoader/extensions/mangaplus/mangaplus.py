@@ -34,7 +34,7 @@ logger = logging.getLogger("mangaplus")
 
 
 class Extension:
-    def __init__(self, extension_dirpath: Path):
+    def __init__(self, extension_dirpath: Path, **kwargs):
         self.name = "mangaplus"
         self.mangadex_group_id = "4f1de6a2-f0c5-4ac5-bce5-02c7dbb67deb"
         self.manga_id_map_filename = "manga_id_map.json"

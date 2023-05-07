@@ -1,4 +1,4 @@
-# Official Publisher MangaDex Uploader
+# External Publisher MangaDex Uploader
 ## Works by reading new updates provided by the extensions. Extensions can be of any free-to-read chapters publisher.
 ### Tested on Python 3.9+
 

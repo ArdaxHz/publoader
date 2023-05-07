@@ -10,6 +10,7 @@ from publoader.models.http import RequestError, http_client
 from publoader.utils.config import (
     mangadex_api_url,
 )
+from publoader.webhook import PubloaderQueueWebhook
 
 logger = logging.getLogger("publoader")
 
@@ -59,7 +60,7 @@ class EditorProcess:
         return False
 
 
-def worker(http_client):
+def worker(http_client, queue_webhook, **kwargs):
     while True:
         item = edit_queue.get()
         print(f"----Editor: Working on {item['_id']}----")
@@ -67,26 +68,33 @@ def worker(http_client):
         chapter_editor = EditorProcess(item, http_client)
         edited = chapter_editor.start_edit()
 
+        queue_webhook.add_chapter(item["chapter"], processed=edited)
         if edited:
             database_connection["to_edit"].delete_one({"_id": {"$eq": item["_id"]}})
             update_database(item["chapter"])
 
         edit_queue.task_done()
+        if edit_queue.empty():
+            queue_webhook.send_queue_finished()
 
 
-def setup_thread():
-    thread = threading.Thread(target=worker, daemon=True, args=(http_client,))
+def setup_thread(queue_webhook, *args, **kwargs):
+    thread = threading.Thread(
+        target=worker, daemon=True, args=(http_client, queue_webhook), kwargs=kwargs
+    )
     thread.start()
     return thread
 
 
 def main():
+    queue_webhook = PubloaderQueueWebhook(worker_type="editor", colour="FFF71C")
+
     chapters = database_connection["to_edit"].find()
     for chapter in chapters:
         edit_queue.put(chapter)
 
     # Turn-on the worker thread.
-    thread = setup_thread()
+    thread = setup_thread(queue_webhook=queue_webhook)
     print(f"Starting Editor watcher.")
 
     while True:
@@ -99,7 +107,7 @@ def main():
 
                 print("Restarting Editor Thread")
                 if not thread.is_alive():
-                    thread = setup_thread()
+                    thread = setup_thread(queue_webhook=queue_webhook)
         except pymongo.errors.PyMongoError as e:
             print(e)
 

@@ -2,9 +2,12 @@ import argparse
 import logging
 import multiprocessing
 import traceback
+from typing import List
 
 import requests
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
+
+from publoader.webhook import PubloaderWebhook
 
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
@@ -14,8 +17,6 @@ from publoader.extension_uploader import ExtensionUploader
 from publoader.load_extensions import (
     load_extensions,
     run_extensions,
-    read_extension,
-    run_extension,
 )
 from publoader.utils.config import config, components_path
 from publoader.models.database import (
@@ -109,11 +110,18 @@ def run_updates(
         return False
 
 
-def open_extensions(names=None, clean_db: bool = False, general_run: bool = False):
+def open_extensions(
+    names: List[str] = None, clean_db: bool = False, general_run: bool = False
+):
     """Run multiple extensions."""
     extensions_data = load_extensions(names, clean_db, general_run)
     if not extensions_data:
         return
+
+    if clean_db:
+        PubloaderWebhook(
+            extension_name=None, title="Bot Clean Run Cycle", colour="26d454"
+        ).send()
 
     extensions = run_extensions(extensions_data, clean_db)
     if not extensions:
@@ -127,26 +135,6 @@ def open_extensions(names=None, clean_db: bool = False, general_run: bool = Fals
             extensions[site],
             manga_data_local=manga_data_local,
         )
-
-
-def open_extension(name: str, clean_db: bool = False):
-    """Run a single extension."""
-    loaded_extension = read_extension(name, clean_db=clean_db)
-    if loaded_extension is None:
-        return
-
-    extension_data = run_extension(loaded_extension, clean_db_override=clean_db)
-    if not extension_data:
-        return
-
-    manga_data_local = open_manga_data(
-        components_path.joinpath(config["Paths"]["manga_data_path"])
-    )
-
-    run_updates(
-        extension_data,
-        manga_data_local=manga_data_local,
-    )
 
 
 if __name__ == "__main__":

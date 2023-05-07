@@ -87,7 +87,7 @@ The class that is used to read the chapter data from. This class **must** be nam
 
 ```python
 class Extension:
-    def __init__(self, extension_dirpath: Path):
+    def __init__(self, extension_dirpath: Path, **kwargs):
         pass
 ```
 
@@ -120,7 +120,7 @@ class Extension:
 
 #### The following methods should accept the parameters specified. Your implementation of the parameters is to your discretion.
 
-- `update_external_data(self, posted_chapter_ids: List[str], fetch_all_chapters: bool, **kwargs) -> None` Provides data to use before starting the fetch of chapters. `posted_chapter_ids` provides the ids of chapters already uploaded. `fetch_all_chapters` is `True` if the bot is going through the clean cycle.  
+- `update_external_data(self, posted_chapter_ids: List[str], fetch_all_chapters: bool, **kwargs) -> None` Provides data to use before starting the fetch of chapters. `posted_chapter_ids` provides the ids of chapters already uploaded. `fetch_all_chapters` is `True` if the bot is going through the clean cycle. *****kwargs needs to be implemented.***  
 
 
 The list of chapters returned must be of the `Chapter` class. The chapter class is provided in the package `publoader.models.dataclasses`.

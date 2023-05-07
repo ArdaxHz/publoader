@@ -19,6 +19,7 @@ from publoader.utils.config import (
     upload_retry,
 )
 from publoader.utils.misc import flatten
+from publoader.webhook import PubloaderQueueWebhook
 
 logger = logging.getLogger("publoader")
 
@@ -327,7 +328,7 @@ class UploaderProcess:
         return True
 
 
-def worker(http_client):
+def worker(http_client, queue_webhook, **kwargs):
     while True:
         item = upload_queue.get()
         print(f"----Uploader: Working on {item['_id']}----")
@@ -345,6 +346,7 @@ def worker(http_client):
         successful_upload_id = chapter_uploader.successful_upload_id
         item["md_chapter_id"] = successful_upload_id
 
+        queue_webhook.add_chapter(item, processed=uploaded)
         if uploaded:
             database_connection["to_upload"].delete_one({"_id": {"$eq": item["_id"]}})
 
@@ -361,21 +363,27 @@ def worker(http_client):
                 update_database(item)
 
         upload_queue.task_done()
+        if upload_queue.empty():
+            queue_webhook.send_queue_finished()
 
 
-def setup_thread():
-    thread = threading.Thread(target=worker, daemon=True, args=(http_client,))
+def setup_thread(queue_webhook, *args, **kwargs):
+    thread = threading.Thread(
+        target=worker, daemon=True, args=(http_client, queue_webhook), kwargs=kwargs
+    )
     thread.start()
     return thread
 
 
 def main():
+    queue_webhook = PubloaderQueueWebhook(worker_type="uploader")
+
     chapters = database_connection["to_upload"].find()
     for chapter in chapters:
         upload_queue.put(chapter)
 
     # Turn-on the worker thread.
-    thread = setup_thread()
+    thread = setup_thread(queue_webhook=queue_webhook)
     print(f"Starting Uploader watcher.")
 
     while True:
@@ -388,7 +396,7 @@ def main():
 
                 print("Restarting Uploader Thread")
                 if not thread.is_alive():
-                    thread = setup_thread()
+                    thread = setup_thread(queue_webhook=queue_webhook)
         except pymongo.errors.PyMongoError as e:
             print(e)
 

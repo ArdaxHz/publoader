@@ -6,7 +6,7 @@ import sys
 import traceback
 from datetime import time, timedelta, timezone
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from publoader.models.database import database_connection
 from publoader.models.dataclasses import Chapter, Manga
@@ -40,6 +40,17 @@ def validate_list_chapters(list_to_validate, list_elements_type):
     if list_elements_wrong:
         logger.warning(f"Skipping wrong type elements: {list_elements_wrong}")
     return list_elements_correct
+
+
+def validate_extension_name(name: Optional[str]):
+    """Check if the extension name is valid."""
+    if (
+        name is None
+        or any(x in string.punctuation.replace("-", "").replace("_", "") for x in name)
+        or " " in name
+    ):
+        raise TypeError(f"{name} contains either punctuation or a space.")
+    return str(name).lower()
 
 
 def check_class_has_attribute(
@@ -169,51 +180,55 @@ def load_extension(extension: Path, clean_db: bool = False, general_run: bool = 
         logger.error(f"{extension.name} main file does not exist, skipping.")
         return
 
-    extension_name = f"extensions.{extension.name}"
-    print(f"------Loading {extension_name}------")
+    normalised_extension_name = f"extensions.{extension.name}"
+    print(f"------Loading {normalised_extension_name}------")
 
     try:
         spec = importlib.util.spec_from_file_location(
-            extension_name, extension_mainfile
+            normalised_extension_name, extension_mainfile
         )
         foo = importlib.util.module_from_spec(spec)
-        sys.modules[extension_name] = foo
+        sys.modules[normalised_extension_name] = foo
         spec.loader.exec_module(foo)
 
         try:
             extension_class = foo.Extension(extension)
         except NameError:
-            logger.error(f"{extension_name} doesn't have the Extension class")
+            logger.error(
+                f"{normalised_extension_name} doesn't have the Extension class"
+            )
             return
 
         extension_disabled = check_class_has_attribute(
-            extension_name, extension_class, "disabled", default=True
+            normalised_extension_name, extension_class, "disabled", default=True
         )
         if extension_disabled:
-            logger.info(f"{extension_name} is disabled: {extension_disabled}.")
-            print(f"{extension_name} is disabled.")
+            logger.info(
+                f"{normalised_extension_name} is disabled: {extension_disabled}."
+            )
+            print(f"{normalised_extension_name} is disabled.")
             return
 
         run_extension, clean_db, run_at = check_extension_run(
-            extension_name, extension_class, clean_db, general_run
+            normalised_extension_name, extension_class, clean_db, general_run
         )
         if not run_extension and not clean_db:
             print(
-                f"{extension_name} is not scheduled to run now: "
+                f"{normalised_extension_name} is not scheduled to run now: "
                 f"{datetime.datetime.now()}"
             )
             return
 
-        print(f"{clean_db=} for {extension_name}")
+        print(f"{clean_db=} for {normalised_extension_name}")
         return {
             "extension": extension_class,
             "clean_db": clean_db,
-            "extension_name": extension_name,
+            "extension_name": normalised_extension_name,
             "run_at": run_at,
         }
     except Exception:
         traceback.print_exc()
-        logger.exception(f"------{extension_name} raised an error.")
+        logger.exception(f"------{normalised_extension_name} raised an error.")
         return
 
 
@@ -236,15 +251,6 @@ def load_extensions(names=None, clean_db: bool = False, general_run: bool = Fals
     return updates
 
 
-def read_extension(name: str, clean_db: bool = False):
-    """Load a specific extension."""
-    extension_folder = extensions_folder.joinpath(name)
-    if not extension_folder.exists():
-        raise FileNotFoundError(f"extensions.{name} not found.")
-
-    return load_extension(extension_folder, clean_db=clean_db, general_run=True)
-
-
 def run_extension(extension: dict, clean_db_override: bool = False):
     """Run a single extension."""
     extension_class = extension["extension"]
@@ -258,24 +264,15 @@ def run_extension(extension: dict, clean_db_override: bool = False):
         logger.info(f"Running {extension_name}.")
 
         name = check_class_has_attribute(extension_name, extension_class, "name")
-        if name is None:
-            return
-        else:
-            name = str(name)
-
-        if (
-            any(x in string.punctuation.replace("-", "").replace("_", "") for x in name)
-            or " " in name
-        ):
-            logger.error(f"{name} contains either punctuation or a space.")
-            print(f"{name} contains either punctuation or a space.")
-            return
+        name = validate_extension_name(name)
 
         posted_chapters_ids = list(
             database_connection["uploaded_ids"].find({"extension_name": {"$eq": name}})
         )
 
-        posted_chapters_ids = [chap["chapter_id"] for chap in posted_chapters_ids]
+        posted_chapters_ids = (
+            [chap["chapter_id"] for chap in posted_chapters_ids] if not clean_db else []
+        )
 
         update_posted_chapter_ids = check_class_has_method(
             extension_name, extension_class, "update_external_data", run=False
@@ -386,7 +383,14 @@ def run_extensions(extensions: dict, clean_db_override: bool):
     updates = {}
     for site in extensions:
         extension = extensions[site]
-        data = run_extension(extension, clean_db_override=clean_db_override)
+        extension_name = extension["extension_name"]
+
+        try:
+            data = run_extension(extension, clean_db_override=clean_db_override)
+        except TypeError as e:
+            traceback.print_exc()
+            logger.exception(f"Error when running {extension_name}.")
+            continue
 
         if data is not None and data:
             updates[site] = data

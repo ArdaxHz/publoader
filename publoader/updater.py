@@ -3,7 +3,7 @@ from pathlib import Path
 
 import git
 
-logger = logging.getLogger("debug")
+logger = logging.getLogger("publoader")
 
 
 def check_for_update(root_path: Path) -> bool:

@@ -10,7 +10,7 @@ from publoader.models.dataclasses import Chapter
 from publoader.models.http import RequestError, http_client
 from publoader.utils.config import mangadex_api_url
 from publoader.utils.utils import get_current_datetime
-from publoader.webhook import PubloaderDeleterWebhook
+from publoader.webhook import PubloaderQueueWebhook
 
 logger = logging.getLogger("publoader")
 
@@ -48,10 +48,6 @@ class DeleteProcess:
             if delete_reponse.status_code == 200:
                 logger.info(f"Deleted {self.chapter}.")
                 print(f"--Deleted {deleted_message}")
-
-                PubloaderDeleterWebhook(
-                    self.chapter.extension_name, self.chapter
-                ).main()
                 return True
 
         logger.error(f"Couldn't delete expired chapter {deleted_message}")
@@ -59,7 +55,7 @@ class DeleteProcess:
         return False
 
 
-def worker(http_client):
+def worker(http_client, queue_webhook, **kwargs):
     while True:
         item = delete_queue.get()
         print(f"----Deleter: Working on {item['_id']}----")
@@ -67,6 +63,7 @@ def worker(http_client):
         chapter_deleter = DeleteProcess(item, http_client)
         deleted = chapter_deleter.delete_chapter()
 
+        queue_webhook.add_chapter(item, processed=deleted)
         if deleted:
             database_connection["to_delete"].delete_one({"_id": {"$eq": item["_id"]}})
             database_connection["uploaded"].delete_one({"_id": {"$eq": item["_id"]}})
@@ -74,15 +71,21 @@ def worker(http_client):
             database_connection["deleted"].insert_one(item)
 
         delete_queue.task_done()
+        if delete_queue.empty():
+            queue_webhook.send_queue_finished()
 
 
-def setup_thread():
-    thread = threading.Thread(target=worker, daemon=True, args=(http_client,))
+def setup_thread(queue_webhook, *args, **kwargs):
+    thread = threading.Thread(
+        target=worker, daemon=True, args=(http_client, queue_webhook), kwargs=kwargs
+    )
     thread.start()
     return thread
 
 
 def main():
+    queue_webhook = PubloaderQueueWebhook(worker_type="deleter", colour="C43542")
+
     chapters = database_connection["to_delete"].find()
     for chapter in chapters:
         delete_queue.put(chapter)
@@ -94,7 +97,7 @@ def main():
         delete_queue.put(chapter)
 
     # Turn-on the worker thread.
-    thread = setup_thread()
+    thread = setup_thread(queue_webhook=queue_webhook)
     print(f"Starting Deleter watcher.")
 
     while True:
@@ -107,7 +110,7 @@ def main():
 
                 print("Restarting Deleter Thread")
                 if not thread.is_alive():
-                    thread = setup_thread()
+                    thread = setup_thread(queue_webhook=queue_webhook)
         except pymongo.errors.PyMongoError as e:
             print(e)
 
