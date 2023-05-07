@@ -2,21 +2,14 @@ import configparser
 import json
 import logging
 import time
-from typing import TYPE_CHECKING, Dict, List
+from typing import Dict, List
 
 from publoader.manga_uploader import MangaUploaderProcess
-from publoader.webhook import PubloaderNotIndexedWebhook, PubloaderWebhook
 from publoader.models.database import update_expired_chapter_database
 from publoader.models.dataclasses import Chapter, Manga
-from publoader.utils.config import ratelimit_time, components_path
-from publoader.utils.misc import get_md_api, format_title
-from publoader.utils.utils import get_current_datetime
-
-if TYPE_CHECKING:
-    import sqlite3
-    from publoader.chapter_deleter import ChapterDeleterProcess
-    from publoader.models.http import HTTPClient
-
+from publoader.utils.config import components_path, ratelimit_time
+from publoader.utils.misc import format_title, get_md_api
+from publoader.webhook import PubloaderNotIndexedWebhook, PubloaderWebhook
 
 logger = logging.getLogger("publoader")
 
@@ -25,7 +18,6 @@ class ExtensionUploader:
     def __init__(
         self,
         config: configparser.RawConfigParser,
-        http_client: "HTTPClient",
         extension,
         extension_name: str,
         updates: List[Chapter],
@@ -35,17 +27,12 @@ class ExtensionUploader:
         mangadex_group_id: str,
         custom_regexes: dict,
         extension_languages: list[str],
-        deleter_process_object: "ChapterDeleterProcess",
-        database_connection: "sqlite3.Connection",
         clean_db: bool,
         chapters_on_db: List[Chapter],
         manga_data_local: Dict[str, dict],
     ):
         self.config = config
-        self.http_client = http_client
         self.extension = extension
-        self.deleter_process_object = deleter_process_object
-        self.database_connection = database_connection
         self.clean_db = clean_db
         self.chapters_on_db = chapters_on_db
         self.manga_data_local = manga_data_local
@@ -68,8 +55,16 @@ class ExtensionUploader:
 
         self.current_uploaded_chapters: List[Chapter] = []
         self._get_manga_data_md()
+
+        for chapter in self.updates:
+            chapter.extension_name = self.extension_name
+
         self.updated_manga_chapters = self._sort_chapters_by_manga(self.updates)
         self.chapters_on_md = self._get_external_chapters_md()
+
+        self.chapters_for_upload: List[Chapter] = []
+        self.chapters_for_skipping: List[Chapter] = []
+        self.chapters_for_editing: List[Chapter] = []
 
         self.manga_untracked = [
             m
@@ -82,7 +77,7 @@ class ExtensionUploader:
     def send_begin_extension_uploading(self):
         PubloaderWebhook(
             self.extension_name,
-            title=f"Posting updates for publisher {self.extension_name}",
+            title=f"Posting updates for extension {self.extension_name}",
             add_timestamp=False,
         ).send()
 
@@ -108,31 +103,18 @@ class ExtensionUploader:
             )
             untracked_manga_webhook.send()
 
-    def _remove_chapters_not_external(self) -> List[Chapter]:
+    def _delete_extra_chapters(self):
         """Find chapters on MangaDex not on external."""
-        chapters_to_delete = []
-
+        logger.info(
+            f"{self.__class__.__name__} deleting chapters that don't exist on external."
+        )
         for manga_id in self.chapters_on_md:
             if manga_id in self.manga_untracked:
-                for expired in self.chapters_on_md[manga_id]:
-                    expired_chapter_object = update_expired_chapter_database(
-                        database_connection=self.database_connection,
-                        extension_name=self.extension_name,
-                        md_chapter_obj=expired,
-                        chapters_on_db=self.chapters_on_db,
-                        md_manga_id=manga_id,
-                    )
-                    chapters_to_delete.append(expired_chapter_object)
-
-        return chapters_to_delete
-
-    def _delete_extra_chapters(self):
-        chapters_to_delete = self._remove_chapters_not_external()
-        logger.info(
-            f"{self.__class__.__name__} deleter finder found: {chapters_to_delete}"
-        )
-        if chapters_to_delete:
-            self.deleter_process_object.add_more_chapters(chapters_to_delete)
+                update_expired_chapter_database(
+                    extension_name=self.extension_name,
+                    md_chapter=self.chapters_on_md[manga_id],
+                    md_manga_id=manga_id,
+                )
 
     def _get_external_chapters_md(self) -> Dict[str, List[dict]]:
         logger.debug(f"Getting all {self.extension_name}'s uploaded chapters.")
@@ -140,7 +122,6 @@ class ExtensionUploader:
         chapters_sorted = {}
         for manga_id in set(self.updated_manga_chapters.keys()):
             chapters_sorted[manga_id] = get_md_api(
-                self.http_client,
                 "chapter",
                 **{
                     "groups[]": [self.mangadex_group_id],
@@ -170,7 +151,6 @@ class ExtensionUploader:
             for manga_splice in tracked_manga_splice:
                 tracked_manga_data.extend(
                     get_md_api(
-                        self.http_client,
                         "manga",
                         **{
                             "ids[]": manga_splice,
@@ -254,7 +234,6 @@ class ExtensionUploader:
             for uploaded_ids in uploaded_chapter_ids_split:
                 chapters_on_md.extend(
                     get_md_api(
-                        self.http_client,
                         "chapter",
                         **{
                             "ids[]": uploaded_ids,
@@ -282,17 +261,13 @@ class ExtensionUploader:
         self._delete_extra_chapters()
 
         for index, mangadex_manga_id in enumerate(self.updated_manga_chapters, start=1):
-            self.http_client.login()
             manga_uploader = MangaUploaderProcess(
                 extension_name=self.extension_name,
-                database_connection=self.database_connection,
-                http_client=self.http_client,
                 clean_db=self.clean_db,
                 updated_chapters=self.updated_manga_chapters.get(mangadex_manga_id, []),
                 all_manga_chapters=all_manga_chapters.get(mangadex_manga_id, []),
                 mangadex_manga_id=mangadex_manga_id,
                 mangadex_group_id=self.mangadex_group_id,
-                deleter_process_object=self.deleter_process_object,
                 chapters_on_md=self.chapters_on_md.get(mangadex_manga_id, []),
                 current_uploaded_chapters=self.current_uploaded_chapters,
                 same_chapter_dict=self.same_chapter_dict,
@@ -300,6 +275,9 @@ class ExtensionUploader:
                 custom_language=self.custom_regexes.get("custom_language", {}),
                 chapters_on_db=self.chapters_on_db,
                 languages=self.extension_languages,
+                chapters_for_upload=self.chapters_for_upload,
+                chapters_for_skipping=self.chapters_for_skipping,
+                chapters_for_editing=self.chapters_for_editing,
             )
             manga_uploader.start_manga_uploading_process(
                 index == len(self.updated_manga_chapters)
@@ -308,3 +286,13 @@ class ExtensionUploader:
 
         if self.current_uploaded_chapters:
             self._check_all_chapters_uploaded()
+
+        PubloaderWebhook(
+            self.extension_name,
+            title=f"{self.extension_name.title()} Updates",
+            description=(
+                f"To upload: {len(self.chapters_for_upload)}\n"
+                f"To edit: {len(self.chapters_for_editing)}\n"
+                f"Skipped: {len(self.chapters_for_skipping)}"
+            ),
+        ).send()

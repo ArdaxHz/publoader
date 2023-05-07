@@ -1,18 +1,15 @@
+import asyncio
 import logging
 import math
-from typing import TYPE_CHECKING, List, Optional, Dict
+from typing import Dict, List, Optional
 
-from publoader.models.http import RequestError
+from publoader.models.http import RequestError, http_client
 from publoader.utils.config import mangadex_api_url, upload_retry
-
-if TYPE_CHECKING:
-    from publoader.models.http import HTTPClient
-
 
 logger = logging.getLogger("publoader")
 
 
-def get_md_api(http_client: "HTTPClient", route: str, **params: dict) -> List[dict]:
+def get_md_api(route: str, **params: dict) -> List[dict]:
     """Go through each page in the api to get all the chapters/manga."""
     chapters = []
     limit = 100
@@ -107,9 +104,7 @@ def iter_aggregate_chapters(aggregate_chapters: dict):
             yield chapter_iter
 
 
-def fetch_aggregate(
-    http_client: "HTTPClient", manga_id: str, **params
-) -> Optional[dict]:
+def fetch_aggregate(http_client, manga_id: str, **params) -> Optional[dict]:
     """Call the mangadex api to get the volumes of each chapter."""
     try:
         aggregate_response = http_client.get(
@@ -143,6 +138,7 @@ def find_key_from_list_value(
 
 
 def format_title(manga_data: dict) -> str:
+    """Get the MD title from the manga data."""
     attributes = manga_data.get("attributes", None)
     if attributes is None:
         return manga_data["id"]
@@ -154,3 +150,16 @@ def format_title(manga_data: dict) -> str:
             attributes["originalLanguage"], attributes["title"][key]
         )
     return manga_title
+
+
+def create_new_event_loop():
+    """Return the event loop, create one if not there is not one running."""
+    try:
+        return asyncio.get_event_loop()
+    except RuntimeError as e:
+        if str(e).startswith("There is no current event loop in thread"):
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            return loop
+        else:
+            raise

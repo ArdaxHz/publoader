@@ -1,38 +1,35 @@
 import argparse
 import logging
-import sqlite3
+import multiprocessing
 import traceback
+from typing import List
 
 import requests
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 
+from publoader.webhook import PubloaderWebhook
+
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
-from publoader import __version__
-from publoader.chapter_deleter import ChapterDeleterProcess
+from publoader.workers import deleter, editor, uploader
 from publoader.dupes_checker import DeleteDuplicatesMD
 from publoader.extension_uploader import ExtensionUploader
 from publoader.load_extensions import (
     load_extensions,
     run_extensions,
-    read_extension,
-    run_extension,
 )
-from publoader.webhook import webhook
-from publoader.models.http import HTTPClient
 from publoader.utils.config import config, components_path
-from publoader.models.database import database_name, database_path, open_database
+from publoader.models.database import (
+    database_connection,
+)
 from publoader.models.dataclasses import Chapter
-from publoader.utils.utils import open_manga_data
+from publoader.utils.utils import get_current_datetime, open_manga_data
 
 logger = logging.getLogger("publoader")
 
 
 def run_updates(
     extension_data: dict,
-    database_connection: "sqlite3.Connection",
-    http_client: "HTTPClient",
-    deleter_process_object: "ChapterDeleterProcess",
     manga_data_local: dict,
 ):
     logger.info(f"Getting updates for {extension_data['name']}")
@@ -47,7 +44,6 @@ def run_updates(
     mangadex_group_id = extension_data["mangadex_group_id"]
     custom_regexes = extension_data["custom_regexes"]
     extension_languages = extension_data["extension_languages"]
-    posted_chapters_ids = extension_data["posted_chapters_ids"]
     clean_db = extension_data["clean_db"]
 
     try:
@@ -69,15 +65,17 @@ def run_updates(
         )
 
         # Get already posted chapters for the extension
-        posted_chapters_data = database_connection.execute(
-            "SELECT * FROM chapters WHERE extension_name=?", (extension_name,)
-        ).fetchall()
+        posted_chapters_data = list(
+            database_connection["uploaded"].find(
+                {"extension_name": {"$eq": extension_name}}
+            )
+        )
+
         posted_chapters_data = [Chapter(**data) for data in posted_chapters_data]
         logger.info("Retrieved posted chapters from database.")
 
         ExtensionUploader(
             config=config,
-            http_client=http_client,
             extension=extension_data,
             extension_name=extension_name,
             updates=updated_chapters,
@@ -87,22 +85,19 @@ def run_updates(
             mangadex_group_id=mangadex_group_id,
             custom_regexes=custom_regexes,
             extension_languages=extension_languages,
-            deleter_process_object=deleter_process_object,
-            database_connection=database_connection,
             clean_db=clean_db,
             chapters_on_db=posted_chapters_data,
             manga_data_local=manga_data_local,
         ).upload_chapters()
 
-        print("Uploaded all update(s).")
+        print(
+            f"Uploaded all chapters for {normalised_extension_name} at {get_current_datetime()}."
+        )
 
         if clean_db:
             dupes_deleter = DeleteDuplicatesMD(
-                http_client=http_client,
                 extension_name=extension_name,
                 tracked_mangadex_ids=tracked_mangadex_ids,
-                deleter_process_object=deleter_process_object,
-                database_connection=database_connection,
                 manga_data_local=manga_data_local,
                 extension_languages=extension_languages,
                 mangadex_group_id=mangadex_group_id,
@@ -115,104 +110,31 @@ def run_updates(
         return False
 
 
-def open_extensions(names=None, clean_db: bool = False, general_run: bool = False):
+def open_extensions(
+    names: List[str] = None, clean_db: bool = False, general_run: bool = False
+):
     """Run multiple extensions."""
     extensions_data = load_extensions(names, clean_db, general_run)
     if not extensions_data:
         return
 
-    database_connection, fill_backlog = open_database(database_path)
-    if fill_backlog:
-        clean_db = True
+    if clean_db:
+        PubloaderWebhook(
+            extension_name=None, title="Bot Clean Run Cycle", colour="26d454"
+        ).send()
 
-    extensions = run_extensions(extensions_data, database_connection, clean_db)
+    extensions = run_extensions(extensions_data, clean_db)
     if not extensions:
         return
 
     manga_data_local = open_manga_data(
         components_path.joinpath(config["Paths"]["manga_data_path"])
     )
-    http_client = HTTPClient(config, __version__)
-
-    # Start deleting expired chapters
-    deleter_process_object = ChapterDeleterProcess(
-        http_client=http_client,
-        database_connection=database_connection,
-    )
-
     for site in extensions:
         run_updates(
             extensions[site],
-            database_connection=database_connection,
-            http_client=http_client,
-            deleter_process_object=deleter_process_object,
             manga_data_local=manga_data_local,
         )
-
-    save(
-        deleter_process_object=deleter_process_object,
-        database_connection=database_connection,
-    )
-
-
-def open_extension(name: str, clean_db: bool = False):
-    """Run a single extension."""
-    loaded_extension = read_extension(name, clean_db=clean_db)
-    if loaded_extension is None:
-        return
-
-    database_connection, fill_backlog = open_database(database_path)
-    if fill_backlog:
-        clean_db = True
-
-    extension_data = run_extension(
-        loaded_extension,
-        database_connection=database_connection,
-        clean_db_override=clean_db,
-    )
-    if not extension_data:
-        return
-
-    manga_data_local = open_manga_data(
-        components_path.joinpath(config["Paths"]["manga_data_path"])
-    )
-    http_client = HTTPClient(config, __version__)
-
-    # Start deleting expired chapters
-    deleter_process_object = ChapterDeleterProcess(
-        http_client=http_client,
-        database_connection=database_connection,
-    )
-
-    run_updates(
-        extension_data,
-        database_connection=database_connection,
-        http_client=http_client,
-        deleter_process_object=deleter_process_object,
-        manga_data_local=manga_data_local,
-    )
-
-    save(
-        deleter_process_object=deleter_process_object,
-        database_connection=database_connection,
-    )
-
-
-def save(
-    deleter_process_object: "ChapterDeleterProcess",
-    database_connection: "sqlite3.Connection",
-):
-    deleter_process_object.delete()
-
-    # Save and close database
-    database_connection.commit()
-    backup_database_connection, _ = open_database(
-        components_path.joinpath(database_name).with_suffix(".bak")
-    )
-    database_connection.backup(backup_database_connection)
-    backup_database_connection.close()
-    database_connection.close()
-    logger.info("Saved and closed database.")
 
 
 if __name__ == "__main__":
@@ -226,12 +148,12 @@ if __name__ == "__main__":
         help="Clean the database.",
     )
     parser.add_argument(
-        "--general",
-        "-g",
+        "--force",
+        "-f",
         default=False,
         const=True,
         nargs="?",
-        help="General run of the bot.",
+        help="Force run the bot, if extensions is unspecified, run all.",
     )
     parser.add_argument(
         "--extension",
@@ -243,14 +165,20 @@ if __name__ == "__main__":
 
     vargs = vars(parser.parse_args())
 
+    process = multiprocessing.Process(target=uploader.main)
+    process.start()
+
+    process = multiprocessing.Process(target=editor.main)
+    process.start()
+
+    process = multiprocessing.Process(target=deleter.main)
+    process.start()
+
     if vargs["extension"] is None:
         extension_to_run = None
     else:
         extension_to_run = [str(extension).strip() for extension in vargs["extension"]]
 
     open_extensions(
-        names=extension_to_run, clean_db=vargs["clean"], general_run=vargs["general"]
+        names=extension_to_run, clean_db=vargs["clean"], general_run=vargs["force"]
     )
-
-    if webhook.embeds:
-        webhook.execute(remove_embeds=True)

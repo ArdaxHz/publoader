@@ -1,10 +1,9 @@
 import logging
-from datetime import date, timedelta, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from publoader.utils.config import max_log_days
 from publoader.utils.utils import root_path
-
 
 logs_root_path = root_path.joinpath("logs")
 logs_root_path.mkdir(parents=True, exist_ok=True)
@@ -45,9 +44,9 @@ def setup_logs(
     fileh.setFormatter(formatter)
 
     log = logging.getLogger(logger_name)  # root logger
-    # for hdlr in log.handlers[:]:  # remove all old handlers
-    #     if isinstance(hdlr, logging.FileHandler):
-    #         log.removeHandler(hdlr)
+    for hdlr in log.handlers[:]:  # remove all old handlers
+        if isinstance(hdlr, logging.FileHandler):
+            log.removeHandler(hdlr)
     log.addHandler(fileh)
     log.setLevel(logging.DEBUG)
 

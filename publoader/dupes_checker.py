@@ -1,23 +1,17 @@
 import logging
 from datetime import datetime
-from typing import TYPE_CHECKING, Dict, List, Optional
+from typing import Dict, List, Optional
 
-from publoader.models.dataclasses import Chapter
-from publoader.webhook import PubloaderDupesWebhook
 from publoader.models.database import update_expired_chapter_database
-from publoader.models.http import RequestError
+from publoader.models.http import RequestError, http_client
 from publoader.utils.config import mangadex_api_url
 from publoader.utils.misc import (
     fetch_aggregate,
+    format_title,
     get_md_api,
     iter_aggregate_chapters,
-    format_title,
 )
-
-if TYPE_CHECKING:
-    import sqlite3
-    from publoader.chapter_deleter import ChapterDeleterProcess
-    from publoader.models.http import HTTPClient
+from publoader.webhook import PubloaderDupesWebhook
 
 logger = logging.getLogger("publoader")
 
@@ -25,20 +19,14 @@ logger = logging.getLogger("publoader")
 class DeleteDuplicatesMD:
     def __init__(
         self,
-        http_client: "HTTPClient",
         extension_name: str,
         tracked_mangadex_ids: List[str],
-        deleter_process_object: "ChapterDeleterProcess",
-        database_connection: "sqlite3.Connection",
         manga_data_local: Dict[str, dict],
         extension_languages: List[str],
         mangadex_group_id: str,
     ) -> None:
-        self.http_client = http_client
         self.extension_name = extension_name
         self.tracked_mangadex_ids = tracked_mangadex_ids
-        self.deleter_process_object = deleter_process_object
-        self.database_connection = database_connection
         self.manga_data_local = manga_data_local
         self.languages = list(set(extension_languages))
         self.mangadex_group_id = mangadex_group_id
@@ -54,7 +42,7 @@ class DeleteDuplicatesMD:
     def fetch_chapters(self, chapters: List[str]) -> Optional[List[dict]]:
         logger.debug(f"Getting chapter data for chapter ids: {chapters}")
         try:
-            chapters_response = self.http_client.get(
+            chapters_response = http_client.get(
                 f"{mangadex_api_url}/chapter",
                 params={"ids[]": chapters, "limit": 100, "includes[]": ["manga"]},
                 verify=False,
@@ -165,7 +153,7 @@ class DeleteDuplicatesMD:
                 f"Getting aggregate info for extensions.{self.extension_name} manga {manga_id} in languages {self.languages}."
             )
             aggregate_chapters_all_langs_unchecked = fetch_aggregate(
-                self.http_client,
+                http_client,
                 manga_id,
                 **{
                     "translatedLanguage[]": self.languages,
@@ -204,9 +192,7 @@ class DeleteDuplicatesMD:
             for chapter_chunk in all_chapter_ids_unsorted_split:
                 chapters_md_unsorted.extend(
                     get_md_api(
-                        self.http_client,
-                        "chapter",
-                        **{"ids[]": chapter_chunk, "includes[]": ["manga"]},
+                        "chapter", **{"ids[]": chapter_chunk, "includes[]": ["manga"]}
                     )
                 )
 
@@ -226,17 +212,11 @@ class DeleteDuplicatesMD:
 
                 logger.debug(f"Found dupes in manga {manga_id} for language {language}")
 
-                chapters_to_delete_list: List[Chapter] = [
-                    update_expired_chapter_database(
-                        database_connection=self.database_connection,
-                        extension_name=self.extension_name,
-                        md_chapter_obj=expired_obj,
-                        md_manga_id=manga_id,
-                    )
-                    for expired_obj in chapters_to_delete
-                ]
-
-                self.deleter_process_object.add_more_chapters(chapters_to_delete_list)
+                update_expired_chapter_database(
+                    extension_name=self.extension_name,
+                    md_chapter=chapters_to_delete,
+                    md_manga_id=manga_id,
+                )
 
             if not dupes_found:
                 print(f"Didn't find any dupes in manga: {manga_id}")

@@ -1,22 +1,21 @@
-import datetime
 import logging
 import math
 import time
 from json import JSONDecodeError
 from typing import Dict, List, Optional, Union
 
+from discord_webhook import DiscordEmbed, DiscordWebhook
+
 from publoader.models.dataclasses import Chapter
 from publoader.utils.config import config
 from publoader.utils.utils import EXPIRE_TIME, get_current_datetime
 
-from discord_webhook import DiscordEmbed, DiscordWebhook
-
-
 logger = logging.getLogger("webhook")
+webhook_url = config["Paths"].get("webhook_url")
 
 
 def make_webhook():
-    return DiscordWebhook(url=config["Paths"]["webhook_url"], rate_limit_retry=True)
+    return DiscordWebhook(url=webhook_url, rate_limit_retry=True)
 
 
 webhook = make_webhook()
@@ -24,9 +23,9 @@ COLOUR = "B86F8C"
 
 
 class WebhookHelper:
-    def __init__(self, extension_name: str) -> None:
-        self.extension_name = extension_name
-        self.colour = COLOUR
+    def __init__(self, **kwargs) -> None:
+        self.extension_name = kwargs.get("extension_name")
+        self.colour = kwargs.get("colour") or COLOUR
         self.mangadex_chapter_url = "https://mangadex.org/chapter/{}"
         self.mangadex_manga_url = "https://mangadex.org/manga/{}"
 
@@ -50,21 +49,25 @@ class WebhookHelper:
 
     def normalise_chapter(
         self,
-        chapter: Chapter,
+        chapter: Union[Chapter, dict],
         failed_upload: bool = False,
         inline: bool = True,
+        success: bool = False,
     ) -> Dict[str, str]:
-        name = f"Chapter: {chapter.chapter_number}\nExtension: {chapter.extension_name}"
+        if isinstance(chapter, Chapter):
+            chapter = vars(chapter)
+
+        name = f"Success: {success}\n\nChapter: {chapter.get('chapter_number')}\nExtension: {chapter.get('extension_name')}"
         value = (
-            f"Language: `{chapter.chapter_language}`\n"
-            f"Chapter title: `{chapter.chapter_title}`\n"
-            f"Chapter expiry: `{(chapter.chapter_expire or EXPIRE_TIME).isoformat()}`\n"
+            f"Language: `{chapter.get('chapter_language')}`\n"
+            f"Chapter title: `{chapter.get('chapter_title')}`\n"
+            f"Chapter expiry: `{(chapter.get('chapter_expire') or EXPIRE_TIME).isoformat()}`\n"
             "\n"
-            f"{self._format_link(name='MangaDex', type='chapter', url=self.mangadex_chapter_url.format(chapter.md_chapter_id), skip_chapter_id=failed_upload)}"
-            f"{self._format_link(name='MangaDex', type='manga', url=self.mangadex_manga_url.format(chapter.md_manga_id), skip_chapter_id=failed_upload)}"
+            f"{self._format_link(name='MangaDex', type='chapter', url=self.mangadex_chapter_url.format(chapter.get('md_chapter_id')), skip_chapter_id=failed_upload)}"
+            f"{self._format_link(name='MangaDex', type='manga', url=self.mangadex_manga_url.format(chapter.get('md_manga_id')), skip_chapter_id=failed_upload)}"
             "\n"
-            f"{self._format_link(name=self.extension_name, type='chapter', url=chapter.chapter_url)}"
-            f"{self._format_link(name=self.extension_name, type='manga', url=chapter.manga_url)}"
+            f"{self._format_link(name=chapter.get('extension_name'), type='chapter', url=chapter.get('chapter_url'))}"
+            f"{self._format_link(name=chapter.get('extension_name'), type='manga', url=chapter.get('manga_url'))}"
         )
 
         return {"name": name, "value": value, "inline": inline}
@@ -77,6 +80,20 @@ class WebhookHelper:
             normalised_chapters[elem : elem + 25]
             for elem in range(0, len(normalised_chapters), 25)
         ]
+
+    def make_embed(self, embed_data: Optional[dict] = None) -> DiscordEmbed:
+        embed = DiscordEmbed(**embed_data)
+        embed.set_title(embed_data.get("title", None))
+        embed.set_description(embed_data.get("description", None))
+        logger.debug(f"Made embed: {embed.title}, {embed.description}")
+        return embed
+
+    def add_fields_to_embed(
+        self, embed: "DiscordEmbed", normalised_chapters: List[dict]
+    ):
+        logger.debug(f"Adding chapters to embed {embed.title}: {normalised_chapters}")
+        for c in normalised_chapters:
+            embed.add_embed_field(**c)
 
     def _calculate_embed_size(self, embed: Union[DiscordEmbed, dict]):
         if isinstance(embed, DiscordEmbed):
@@ -137,6 +154,9 @@ class WebhookHelper:
                 local_webhook.embeds[index:index] = split_embeds
 
     def send_webhook(self, local_webhook: DiscordWebhook = webhook):
+        if webhook_url is None:
+            return
+
         if local_webhook.embeds:
             self.check_embeds_size(local_webhook)
 
@@ -171,38 +191,15 @@ class WebhookBase(WebhookHelper):
         extension_name: str,
         manga: dict,
     ) -> None:
-        super().__init__(extension_name)
+        super().__init__(extension_name=extension_name)
         self.manga = manga
         logger.debug(f"Making embed for manga {self.manga}")
         self.manga_id = manga["id"]
         self.manga_title = manga["title"]
         self.mangadex_manga_url = self.mangadex_manga_url.format(self.manga_id)
 
-    def make_embed(self, embed_data: Optional[dict] = None) -> DiscordEmbed:
-        # if embed_data is None:
-        #     embed_data = self.normalised_manga
-
-        embed = DiscordEmbed(**embed_data)
-        embed.set_title(embed_data.get("title", None))
-        embed.set_description(embed_data.get("description", None))
-        logger.debug(f"Made embed: {embed.title}, {embed.description}")
-        return embed
-
-    def add_fields_to_embed(
-        self, embed: "DiscordEmbed", normalised_chapters: List[dict]
-    ):
-        logger.debug(f"Adding chapters to embed {embed.title}: {normalised_chapters}")
-        for c in normalised_chapters:
-            embed.add_embed_field(**c)
-
 
 class PubloaderUpdatesWebhook(WebhookBase):
-    no_new_chapters_embed = None
-
-    @staticmethod
-    def make_static_method():
-        return DiscordEmbed(**{"color": COLOUR})
-
     def __init__(
         self,
         extension_name: str,
@@ -238,10 +235,9 @@ class PubloaderUpdatesWebhook(WebhookBase):
         return {
             "title": f"{self.manga_title}",
             "description": f"MangaDex manga link: [here]({self.mangadex_manga_url})\n"
-            f"Uploaded: {chapter_count}\n"
-            f"Failed: {failed}\n"
+            f"To Upload: {chapter_count}\n"
             f"Skipped: {skipped}\n"
-            f"Edited: {edited}",
+            f"To Edit: {edited}",
             "timestamp": get_current_datetime().isoformat(),
             "color": self.colour,
         }
@@ -257,13 +253,6 @@ class PubloaderUpdatesWebhook(WebhookBase):
             if len(webhook.embeds) >= 10 or len(embed.fields) >= 5:
                 self.send_webhook()
 
-    def send_first_manga_external_name(self, external_name):
-        embed = self.make_embed(
-            {"title": f"Posting updates for {external_name}.", "color": self.colour}
-        )
-        webhook.add_embed(embed)
-        self.send_webhook()
-
     def main(self, last_manga: bool = True):
         if self.uploaded > 0 or self.failed > 0:
             self.send_webhook()
@@ -278,23 +267,6 @@ class PubloaderUpdatesWebhook(WebhookBase):
         if self.skipped > 0 and not self.clean_db:
             embed = self.make_embed(self.normalised_manga)
             webhook.add_embed(embed)
-
-        # if not self.chapters and not self.failed_chapters:
-        #     if PubloaderUpdatesWebhook.no_new_chapters_embed is None:
-        #         PubloaderUpdatesWebhook.no_new_chapters_embed = (
-        #             PubloaderUpdatesWebhook.make_static_method()
-        #         )
-
-        #     PubloaderUpdatesWebhook.no_new_chapters_embed.add_embed_field(
-        #         name=self.normalised_manga["title"],
-        #         value=self.normalised_manga["description"],
-        #     )
-
-        #     if len(PubloaderUpdatesWebhook.no_new_chapters_embed.fields) >= 10:
-        #         webhook.add_embed(PubloaderUpdatesWebhook.no_new_chapters_embed)
-        #         self.send_webhook()
-        #         PubloaderUpdatesWebhook.no_new_chapters_embed.fields[:] = []
-        #         return
 
         if last_manga:
             embed = self.make_embed(
@@ -317,6 +289,48 @@ class PubloaderUpdatesWebhook(WebhookBase):
 
             if last_manga:
                 self.send_webhook()
+
+
+class PubloaderQueueWebhook(WebhookHelper):
+    def __init__(self, worker_type: str, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.webhook = make_webhook()
+        self.worker_type = worker_type.capitalize()
+        self.fields = []
+
+    def normalise_embed(self) -> Dict[str, str]:
+        return {
+            "title": self.worker_type,
+            "timestamp": get_current_datetime().isoformat(),
+            "color": self.colour,
+        }
+
+    def add_chapter(self, chapter: dict, processed: bool = True):
+        self.fields.append(self.normalise_chapter(chapter, success=processed))
+
+        if len(self.fields) >= 6:
+            embed = self.make_embed(self.normalise_embed())
+            self.add_fields_to_embed(embed, self.fields)
+
+            self.webhook.add_embed(embed)
+            self.send_webhook(self.webhook)
+
+            self.fields[:] = []
+
+    def send_queue_finished(self):
+        embed = self.make_embed(self.normalise_embed())
+        embed_last = self.make_embed(
+            {
+                "title": f"{self.worker_type}: Finished all items in queue.",
+                "color": self.colour,
+            }
+        )
+        self.add_fields_to_embed(embed, self.fields)
+        self.fields[:] = []
+
+        self.webhook.add_embed(embed)
+        self.webhook.add_embed(embed_last)
+        self.send_webhook(self.webhook)
 
 
 class PubloaderDupesWebhook(WebhookBase):
@@ -368,36 +382,9 @@ class PubloaderDupesWebhook(WebhookBase):
                 self.send_webhook()
 
 
-class PubloaderDeleterWebhook(WebhookHelper):
-    def __init__(self, extension_name: str, chapter: Chapter) -> None:
-        super().__init__(extension_name)
-        self.colour = "C43542"
-        self.chapter = chapter
-        self.webhook = make_webhook()
-        self.normalised_chapter = self.normalise_chapter(self.chapter)
-
-    def make_embed(self):
-        embed = DiscordEmbed(
-            title=f"Deleted chapter {self.chapter.md_chapter_id}",
-            description=f"{self.normalised_chapter['name']}\n\n{self.normalised_chapter['value']}",
-            **{
-                "color": self.colour,
-                "timestamp": get_current_datetime().isoformat(),
-            },
-        )
-
-        logger.debug(f"Made embed: {embed.title}, {embed.description}")
-        return embed
-
-    def main(self):
-        embed = self.make_embed()
-        self.webhook.add_embed(embed)
-        self.send_webhook(self.webhook)
-
-
 class PubloaderNotIndexedWebhook(WebhookHelper):
     def __init__(self, extension_name: str, chapter_ids: List[str]) -> None:
-        super().__init__(extension_name)
+        super().__init__(extension_name=extension_name)
         self.chapter_ids = chapter_ids
         self.colour = "45539B"
 
@@ -431,7 +418,7 @@ class PubloaderNotIndexedWebhook(WebhookHelper):
 
 class PubloaderWebhook(WebhookHelper):
     def __init__(self, extension_name: str, **kwargs) -> None:
-        super().__init__(extension_name)
+        super().__init__(extension_name=extension_name)
         self.embed = None
         self.embed_title = kwargs.get("title")
         self.embed_description = kwargs.get("description")

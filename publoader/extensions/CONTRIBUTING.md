@@ -87,7 +87,7 @@ The class that is used to read the chapter data from. This class **must** be nam
 
 ```python
 class Extension:
-    def __init__(self, extension_dirpath: Path):
+    def __init__(self, extension_dirpath: Path, **kwargs):
         pass
 ```
 
@@ -95,13 +95,14 @@ class Extension:
 
 ### Main class key variables
 
-| Field                  | Type        | Description                                                                                   |
-|------------------------|-------------|-----------------------------------------------------------------------------------------------|
-| `name`                 | `str`       | Name used in the database and in the logs. *This name should not be changed.*                 |
-| `mangadex_group_id`    | `str`       | MangaDex id of the group to upload to.                                                        |
-| `custom_regexes`       | `dict`      | Your custom regexes file after being opened and read. If not used, return an empty dict `{}`. |
-| `extension_languages`  | `List[str]` | A list of languages supported by the extension.                                               |
-| `tracked_mangadex_ids` | `List[str]` | A list of MangaDex manga ids the extension uploads to.                                        |
+| Field                  | Type        | Description                                                                                           |
+|------------------------|-------------|-------------------------------------------------------------------------------------------------------|
+| `name`                 | `str`       | Name used in the database and in the logs. Can contain `-` or `_`. *This name should not be changed.* |
+| `mangadex_group_id`    | `str`       | MangaDex id of the group to upload to.                                                                |
+| `custom_regexes`       | `dict`      | Your custom regexes file after being opened and read. If not used, return an empty dict `{}`.         |
+| `extension_languages`  | `List[str]` | A list of languages supported by the extension.                                                       |
+| `tracked_mangadex_ids` | `List[str]` | A list of MangaDex manga ids the extension uploads to.                                                |
+| `disabled`             | `bool`      | If the extension is active to run or skipped. *If missing this will be True.*                         |
 
 ---
 
@@ -119,7 +120,8 @@ class Extension:
 
 #### The following methods should accept the parameters specified. Your implementation of the parameters is to your discretion.
 
-- `update_posted_chapter_ids(self, posted_chapter_ids: List[str]) -> None` Provides a list of chapter ids (as strings) already uploaded. You can use this list to retrieve the updated chapters list.
+- `update_external_data(self, posted_chapter_ids: List[str], fetch_all_chapters: bool, **kwargs) -> None` Provides data to use before starting the fetch of chapters. `posted_chapter_ids` provides the ids of chapters already uploaded. `fetch_all_chapters` is `True` if the bot is going through the clean cycle. *****kwargs needs to be implemented.***  
+
 
 The list of chapters returned must be of the `Chapter` class. The chapter class is provided in the package `publoader.models.dataclasses`.
 The chapter class contains the following fields:

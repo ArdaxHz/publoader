@@ -6,14 +6,17 @@ from copy import copy
 from datetime import datetime
 from typing import Optional
 
+import requests
+
+from publoader import __version__
 from publoader.utils.config import (
+    components_path,
+    config,
+    mangadex_api_url,
     max_requests,
     upload_retry,
-    components_path,
-    mangadex_api_url,
 )
-
-import requests
+from publoader.utils.singleton import Singleton
 
 logger = logging.getLogger("publoader")
 http_error_codes = {
@@ -31,6 +34,7 @@ http_error_codes = {
 
 class RequestError(Exception):
     def __init__(self, message: str) -> None:
+        self.message = message
         super().__init__(message)
 
 
@@ -129,7 +133,7 @@ class HTTPResponse:
         return error_message
 
 
-class HTTPModel:
+class HTTPModel(metaclass=Singleton):
     def __init__(self, config: "configparser.RawConfigParser", version: str) -> None:
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": f"MP-MD_bot/{version}"})
@@ -315,7 +319,7 @@ class HTTPModel:
                 total_retry -= 1
                 continue
 
-        raise RequestError(formatted_request_string)
+        raise RequestError(f"Error fetching `{formatted_request_string}`")
 
     def _login(self):
         if self._first_login:
@@ -456,7 +460,7 @@ class HTTPModel:
         return False
 
 
-class HTTPClient(HTTPModel):
+class HTTPClient(HTTPModel, metaclass=Singleton):
     def __init__(self, config: configparser.RawConfigParser, version: str):
         super().__init__(config, version)
 
@@ -575,3 +579,6 @@ class HTTPClient(HTTPModel):
     def login(self):
         """Login to MD account using details or saved token."""
         self._login()
+
+
+http_client = HTTPClient(config, __version__)
