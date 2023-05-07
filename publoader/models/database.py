@@ -61,6 +61,9 @@ def update_database(chapter: Union[list, Union[Chapter, dict]], **kwargs):
         f"Chapters to insert into database but md_chapter_id is null {null_chapters}"
     )
     chapters = list(filter(lambda x: x.get("md_chapter_id") is not None, chapters))
+    if not chapters:
+        logger.warning("No chapters to add to the database.")
+        return
 
     try:
         result = database_connection["uploaded"].bulk_write(
