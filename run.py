@@ -12,7 +12,8 @@ from importlib import reload
 from scheduler import Scheduler
 
 from publoader.updater import check_for_update
-from publoader.utils.config import config
+from publoader.utils.config import components_path, daily_run_time_checks_hour, \
+    daily_run_time_checks_minute, daily_run_time_daily_hour, daily_run_time_daily_minute
 from publoader.utils.utils import root_path
 from publoader.workers import deleter, editor, uploader
 
@@ -29,9 +30,22 @@ def main(extension_names: list[str] = None, general_run=False, clean_db=False):
     )
 
 
+def open_latest_commits():
+    """Open the commits file."""
+    commits_file = components_path.joinpath(".commits")
+    if not commits_file.exists():
+        return {}
+
+    try:
+        return json.loads(commits_file.read_bytes())
+    except json.JSONDecodeError:
+        return {}
+
+
+
 def open_timings():
     """Open the timings file."""
-    timings_path = root_path.joinpath("components", "schedule").with_suffix(".json")
+    timings_path = root_path.joinpath("publoader", "extensions", "schedule").with_suffix(".json")
     if not timings_path.exists():
         return {}
 
@@ -131,19 +145,6 @@ if __name__ == "__main__":
     )
 
     vargs = vars(parser.parse_args())
-
-    daily_run_time_daily_hour = int(
-        config["User Set"]["bot_run_time_daily"].split(":")[0]
-    )
-    daily_run_time_daily_minute = int(
-        config["User Set"]["bot_run_time_daily"].split(":")[1]
-    )
-    daily_run_time_checks_hour = int(
-        config["User Set"]["bot_run_time_checks"].split(":")[0]
-    )
-    daily_run_time_checks_minute = int(
-        config["User Set"]["bot_run_time_checks"].split(":")[1]
-    )
 
     process = multiprocessing.Process(target=uploader.main)
     process.start()

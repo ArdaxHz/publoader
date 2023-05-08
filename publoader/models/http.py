@@ -9,13 +9,8 @@ from typing import Optional
 import requests
 
 from publoader import __version__
-from publoader.utils.config import (
-    components_path,
-    config,
-    mangadex_api_url,
-    max_requests,
-    upload_retry,
-)
+from publoader.utils.config import (components_path, config, mangadex_api_url,
+                                    max_requests, upload_retry, )
 from publoader.utils.singleton import Singleton
 
 logger = logging.getLogger("publoader")
@@ -431,8 +426,8 @@ class HTTPModel(metaclass=Singleton):
 
     def _login_using_details(self) -> bool:
         """Login using account details."""
-        username = self._config["MangaDex Credentials"]["mangadex_username"]
-        password = self._config["MangaDex Credentials"]["mangadex_password"]
+        username = self._config["Credentials"]["mangadex_username"]
+        password = self._config["Credentials"]["mangadex_password"]
 
         if username == "" or password == "":
             critical_message = "Login details missing."

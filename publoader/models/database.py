@@ -17,8 +17,8 @@ logger_debug = logging.getLogger("debug")
 
 class DatabaseConnector(metaclass=Singleton):
     def __init__(self):
-        self.database_uri = config["MangaDex Credentials"]["mongodb_uri"]
-        self.database_name = config["MangaDex Credentials"]["mongodb_db_name"]
+        self.database_uri = config["Credentials"]["mongodb_uri"]
+        self.database_name = config["Credentials"]["mongodb_db_name"]
         self.database = self.connect_db()
         self.database_connection = self.database[self.database_name]
 

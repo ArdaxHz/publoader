@@ -14,7 +14,7 @@ from publoader.utils.config import CLEAN_TIME, DEFAULT_CLEAN_DAY, DEFAULT_TIME
 from publoader.utils.utils import get_current_datetime, root_path
 
 logger = logging.getLogger("publoader")
-extensions_folder = root_path.joinpath("publoader", "extensions")
+extensions_folder = root_path.joinpath("publoader", "extensions", "src")
 
 
 def validate_list_chapters(list_to_validate, list_elements_type):
