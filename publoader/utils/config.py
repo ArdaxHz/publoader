@@ -9,25 +9,37 @@ logger = logging.getLogger("publoader")
 
 
 def load_config_info(config: configparser.RawConfigParser):
-    if config["Paths"].get("database_path", "") == "":
-        logger.warning("Database path empty, using default.")
-        config["Paths"]["database_path"] = "chapters.db"
-
     if config["Paths"].get("mangadex_api_url", "") == "":
         logger.warning("Mangadex api path empty, using default.")
         config["Paths"]["mangadex_api_url"] = "https://api.mangadex.org"
 
     if config["Paths"].get("mdauth_path", "") == "":
-        logger.info("mdauth path empty, using default.")
+        logger.info("Mdauth path empty, using default.")
         config["Paths"]["mdauth_path"] = ".mdauth"
 
-    if config["Paths"].get("components_path", "") == "":
-        logger.info("components path empty, using default.")
-        config["Paths"]["components_path"] = "components_path"
+    if config["Paths"].get("commits_path", "") == "":
+        logger.info("Commits path empty, using default.")
+        config["Paths"]["commits_path"] = ".commits"
+
+    if config["Paths"].get("resources_path", "") == "":
+        logger.info("Resources path empty, using default.")
+        config["Paths"]["resources_path"] = "resources"
 
     if config["Paths"].get("manga_data_path", "") == "":
         logger.info("Manga data path empty, using default.")
         config["Paths"]["manga_data_path"] = "manga_data.json"
+
+    if config["Repo"].get("github_access_token", "") == "":
+        config["Repo"]["github_access_token"] = None
+
+    if config["Repo"].get("repo_owner", "") == "":
+        config["Repo"]["repo_owner"] = "ArdaxHz"
+
+    if config["Repo"].get("base_repo_path", "") == "":
+        config["Repo"]["base_repo_path"] = "publoader"
+
+    if config["Repo"].get("extensions_repo_path", "") == "":
+        config["Repo"]["extensions_repo_path"] = "publoader-extensions"
 
 
 def open_config_file() -> configparser.RawConfigParser:
@@ -46,8 +58,8 @@ def open_config_file() -> configparser.RawConfigParser:
 
 config_file_path = root_path.joinpath("config").with_suffix(".ini")
 config = open_config_file()
-components_path = root_path.joinpath(config["Paths"]["components_path"])
-components_path.mkdir(parents=True, exist_ok=True)
+resources_path = root_path.joinpath(config["Paths"]["resources_path"])
+resources_path.mkdir(parents=True, exist_ok=True)
 
 mangadex_api_url = config["Paths"]["mangadex_api_url"]
 md_upload_api_url = f"{mangadex_api_url}/upload"

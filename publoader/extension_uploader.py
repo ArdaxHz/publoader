@@ -7,7 +7,7 @@ from typing import Dict, List
 from publoader.manga_uploader import MangaUploaderProcess
 from publoader.models.database import update_expired_chapter_database
 from publoader.models.dataclasses import Chapter, Manga
-from publoader.utils.config import components_path, ratelimit_time
+from publoader.utils.config import ratelimit_time, resources_path
 from publoader.utils.misc import format_title, get_md_api
 from publoader.webhook import PubloaderNotIndexedWebhook, PubloaderWebhook
 
@@ -167,7 +167,7 @@ class ExtensionUploader:
                     )
 
             with open(
-                components_path.joinpath(self.config["Paths"]["manga_data_path"]),
+                resources_path.joinpath(self.config["Paths"]["manga_data_path"]),
                 "w",
             ) as json_file:
                 json.dump(self.manga_data_local, json_file, indent=2)

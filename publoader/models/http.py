@@ -9,8 +9,13 @@ from typing import Optional
 import requests
 
 from publoader import __version__
-from publoader.utils.config import (components_path, config, mangadex_api_url,
-                                    max_requests, upload_retry, )
+from publoader.utils.config import (
+    config,
+    mangadex_api_url,
+    max_requests,
+    resources_path,
+    upload_retry,
+)
 from publoader.utils.singleton import Singleton
 
 logger = logging.getLogger("publoader")
@@ -139,7 +144,7 @@ class HTTPModel(metaclass=Singleton):
         self.total_requests = 0
 
         self._config = config
-        self._token_file = components_path.joinpath(config["Paths"]["mdauth_path"])
+        self._token_file = resources_path.joinpath(config["Paths"]["mdauth_path"])
         self._md_auth_api_url = f"{mangadex_api_url}/auth"
         self._md_auth_auth_url = f"{self._md_auth_api_url}/auth"
         self._md_auth_token_url = f"{self._md_auth_api_url}/token"

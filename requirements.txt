@@ -1,7 +1,7 @@
 requests
 scheduler
 discord-webhook
-GitPython
+PyGithub
 pydantic
 natsort
 pymongo

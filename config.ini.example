@@ -14,12 +14,14 @@ MAX_LOG_DAYS=30
 
 [Paths]
 MANGADEX_API_URL=https://api.mangadex.org
-COMPONENTS_PATH=components
+RESOURCES_PATH=resources
 MDAUTH_PATH=.mdauth
+COMMITS_PATH=.commits
 WEBHOOK_URL=
 MANGA_DATA_PATH=manga_data.json
 
 [Repo]
-BASE_REPO_PATH=https://github.com/ArdaxHz/publoader
-EXTENSIONS_REPO_PATH=https://github.com/ArdaxHz/publoader-extensions
-
+REPO_OWNER=ArdaxHz
+BASE_REPO_PATH=publoader
+EXTENSIONS_REPO_PATH=publoader-extensions
+GITHUB_ACCESS_TOKEN=

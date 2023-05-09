@@ -18,7 +18,7 @@ from publoader.load_extensions import (
     load_extensions,
     run_extensions,
 )
-from publoader.utils.config import config, components_path
+from publoader.utils.config import config, resources_path
 from publoader.models.database import (
     database_connection,
 )
@@ -128,7 +128,7 @@ def open_extensions(
         return
 
     manga_data_local = open_manga_data(
-        components_path.joinpath(config["Paths"]["manga_data_path"])
+        resources_path.joinpath(config["Paths"]["manga_data_path"])
     )
     for site in extensions:
         run_updates(
