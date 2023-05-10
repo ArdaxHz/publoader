@@ -271,7 +271,7 @@ class MangaUploaderProcess:
                     images = []
                     images_length = 0
                     if chap["images"] is not None and chap["images"]:
-                        images_length = chap["images"]
+                        images_length = len(chap["images"])
                         for index, img in enumerate(chap["images"]):
                             try:
                                 img_insert_id = image_filestream.put(

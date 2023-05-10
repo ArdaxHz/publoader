@@ -1,11 +1,10 @@
-[MangaDex Credentials]
+[Credentials]
 MANGADEX_USERNAME=
 MANGADEX_PASSWORD=
-MANGADEX_USERID=
 MONGODB_URI=
 MONGODB_DB_NAME=
 
-[User Set]
+[Options]
 MANGADEX_RATELIMIT_TIME=2
 MAX_REQUESTS=5
 UPLOAD_RETRY=3
@@ -13,13 +12,16 @@ BOT_RUN_TIME_DAILY=15:00
 BOT_RUN_TIME_CHECKS=01:00
 MAX_LOG_DAYS=30
 
-# All file paths are joined under the components path
 [Paths]
 MANGADEX_API_URL=https://api.mangadex.org
-COMPONENTS_PATH=components
-DATABASE_PATH=chapters.db
-MANGA_ID_MAP_PATH=manga.json
-TITLE_REGEX_PATH=title_regex.json
+RESOURCES_PATH=resources
 MDAUTH_PATH=.mdauth
+COMMITS_PATH=.commits
 WEBHOOK_URL=
 MANGA_DATA_PATH=manga_data.json
+
+[Repo]
+REPO_OWNER=ArdaxHz
+BASE_REPO_PATH=publoader
+EXTENSIONS_REPO_PATH=publoader-extensions
+GITHUB_ACCESS_TOKEN=

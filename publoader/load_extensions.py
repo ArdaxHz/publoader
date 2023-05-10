@@ -1,7 +1,7 @@
 import datetime
 import importlib.util
 import logging
-import string
+import re
 import sys
 import traceback
 from datetime import time, timedelta, timezone
@@ -14,7 +14,7 @@ from publoader.utils.config import CLEAN_TIME, DEFAULT_CLEAN_DAY, DEFAULT_TIME
 from publoader.utils.utils import get_current_datetime, root_path
 
 logger = logging.getLogger("publoader")
-extensions_folder = root_path.joinpath("publoader", "extensions")
+EXTENSION_NAME_REGEX = re.compile(r"^([a-z0-9\-_]+)$")
 
 
 def validate_list_chapters(list_to_validate, list_elements_type):
@@ -44,13 +44,12 @@ def validate_list_chapters(list_to_validate, list_elements_type):
 
 def validate_extension_name(name: Optional[str]):
     """Check if the extension name is valid."""
-    if (
-        name is None
-        or any(x in string.punctuation.replace("-", "").replace("_", "") for x in name)
-        or " " in name
-    ):
-        raise TypeError(f"{name} contains either punctuation or a space.")
-    return str(name).lower()
+    if name is not None:
+        name = str(name)
+
+    if not bool(EXTENSION_NAME_REGEX.match(name)):
+        raise TypeError(f"{name!r} does not match {EXTENSION_NAME_REGEX.pattern}")
+    return name
 
 
 def check_class_has_attribute(
@@ -236,6 +235,9 @@ def load_extension(extension: Path, clean_db: bool = False, general_run: bool = 
 def load_extensions(names=None, clean_db: bool = False, general_run: bool = False):
     """Load all the extensions in the extensions folder."""
     updates = {}
+    extensions_folder = root_path.joinpath("publoader", "extensions", "src")
+    extensions_folder.mkdir(parents=True, exist_ok=True)
+    names = [name.lower() for name in names] if names is not None else None
 
     for extension in [
         f for f in extensions_folder.iterdir() if f.is_dir() and f.name != "__pycache__"
@@ -245,6 +247,12 @@ def load_extensions(names=None, clean_db: bool = False, general_run: bool = Fals
                 continue
             else:
                 general_run = True
+
+        try:
+            validate_extension_name(extension.name)
+        except TypeError as e:
+            logger.warning(f"Skipping as {', '.join(e.args)}")
+            continue
 
         data = load_extension(extension, clean_db=clean_db, general_run=general_run)
         if data is not None and data:
@@ -265,7 +273,7 @@ def run_extension(extension: dict, clean_db_override: bool = False):
         logger.info(f"Running {extension_name}.")
 
         name = check_class_has_attribute(extension_name, extension_class, "name")
-        name = validate_extension_name(name)
+        validate_extension_name(name)
 
         posted_chapters_ids = list(
             database_connection["uploaded_ids"].find({"extension_name": {"$eq": name}})

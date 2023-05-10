@@ -75,7 +75,7 @@ def worker(http_client, queue_webhook, **kwargs):
                 update_database(item["chapter"])
 
             edit_queue.task_done()
-            if edit_queue.empty():
+            if edit_queue.qsize() == 0:
                 queue_webhook.send_queue_finished()
         except Exception as e:
             traceback.print_exc()
@@ -89,6 +89,9 @@ def fetch_data_from_database():
 
 
 def setup_thread(queue_webhook, *args, **kwargs):
+    with edit_queue.mutex:
+        edit_queue.queue.clear()
+
     fetch_data_from_database()
     thread = threading.Thread(
         target=worker, daemon=True, args=(http_client, queue_webhook), kwargs=kwargs
@@ -112,8 +115,8 @@ def main():
                 for change in stream:
                     edit_queue.put(change["fullDocument"])
 
-                print("Restarting Editor Thread")
                 if not thread.is_alive():
+                    print("Restarting Editor Thread")
                     thread = setup_thread(queue_webhook=queue_webhook)
         except pymongo.errors.PyMongoError as e:
             print(e)
