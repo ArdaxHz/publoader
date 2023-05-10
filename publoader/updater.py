@@ -115,7 +115,13 @@ class PubloaderUpdater:
         return failed_download
 
     def move_files(self):
-        shutil.copytree(self.update_path, self.root_path, copy_function=shutil.move)
+        shutil.copytree(
+            self.update_path,
+            self.root_path,
+            copy_function=shutil.move,
+            dirs_exist_ok=True,
+        )
+        shutil.rmtree(self.update_path, ignore_errors=True)
 
     def update(self):
         extensions_path = self.update_path.joinpath(self.extensions_path)

@@ -44,13 +44,21 @@ def validate_list_chapters(list_to_validate, list_elements_type):
 
 def validate_extension_name(name: Optional[str]):
     """Check if the extension name is valid."""
+    if name is not None:
+        name = str(name)
+
     if (
         name is None
+        or not name.isascii()
         or any(x in string.punctuation.replace("-", "").replace("_", "") for x in name)
         or " " in name
+        or not name.islower()
     ):
-        raise TypeError(f"{name} contains either punctuation or a space.")
-    return str(name).lower()
+        raise TypeError(
+            f"{name} can only be ascii, lowercase, "
+            "and not contain punctuation or space (except - and _)."
+        )
+    return name
 
 
 def check_class_has_attribute(
@@ -236,6 +244,7 @@ def load_extension(extension: Path, clean_db: bool = False, general_run: bool = 
 def load_extensions(names=None, clean_db: bool = False, general_run: bool = False):
     """Load all the extensions in the extensions folder."""
     updates = {}
+    names = [name.lower() for name in names] if names is not None else None
 
     for extension in [
         f for f in extensions_folder.iterdir() if f.is_dir() and f.name != "__pycache__"
@@ -245,6 +254,14 @@ def load_extensions(names=None, clean_db: bool = False, general_run: bool = Fals
                 continue
             else:
                 general_run = True
+
+        try:
+            validate_extension_name(extension.name)
+        except TypeError:
+            logger.warning(
+                f"Skipping {extension.name} as the name is not in the correct format."
+            )
+            continue
 
         data = load_extension(extension, clean_db=clean_db, general_run=general_run)
         if data is not None and data:
