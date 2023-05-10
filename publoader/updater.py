@@ -2,7 +2,6 @@ import json
 import logging
 import shutil
 import time
-from pathlib import Path
 
 import requests
 from github import Github
@@ -29,7 +28,7 @@ class PubloaderUpdater:
         self.repo_owner = config["Repo"]["repo_owner"]
         self.base_repo = config["Repo"]["base_repo_path"]
         self.extensions_repo = config["Repo"]["extensions_repo_path"]
-        self.extensions_path = Path("publoader/extensions")
+        self.extensions_path = "publoader/extensions"
 
     def _open_commits(self):
         """Open the commits file."""
@@ -119,14 +118,16 @@ class PubloaderUpdater:
         shutil.copytree(self.update_path, self.root_path, copy_function=shutil.move)
 
     def update(self):
+        extensions_path = self.update_path.joinpath(self.extensions_path)
+
         base_repo_failed = self.fetch_repo(
-            self.base_repo, self.latest_commit_sha, self.root_path
+            self.base_repo, self.latest_commit_sha, self.update_path
         )
 
         time.sleep(8)
 
         extensions_repo_failed = self.fetch_repo(
-            self.extensions_repo, self.latest_extension_sha, self.extensions_path
+            self.extensions_repo, self.latest_extension_sha, extensions_path
         )
 
         if base_repo_failed or extensions_repo_failed:
@@ -134,5 +135,6 @@ class PubloaderUpdater:
             shutil.rmtree(self.update_path, ignore_errors=True)
             return
 
+        logger.info("Update download complete, applying changes.")
         self.move_files()
         self._save_commits()
