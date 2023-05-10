@@ -1,7 +1,7 @@
 import datetime
 import importlib.util
 import logging
-import string
+import re
 import sys
 import traceback
 from datetime import time, timedelta, timezone
@@ -14,8 +14,7 @@ from publoader.utils.config import CLEAN_TIME, DEFAULT_CLEAN_DAY, DEFAULT_TIME
 from publoader.utils.utils import get_current_datetime, root_path
 
 logger = logging.getLogger("publoader")
-extensions_folder = root_path.joinpath("publoader", "extensions", "src")
-
+EXTENSION_NAME_REGEX = re.compile(r"^([a-z0-9\-_]+)$")
 
 def validate_list_chapters(list_to_validate, list_elements_type):
     """Check if variable is a list and the contents of the list are of the specified type."""
@@ -48,15 +47,10 @@ def validate_extension_name(name: Optional[str]):
         name = str(name)
 
     if (
-        name is None
-        or not name.isascii()
-        or any(x in string.punctuation.replace("-", "").replace("_", "") for x in name)
-        or " " in name
-        or not name.islower()
+        not bool(EXTENSION_NAME_REGEX.match(name))
     ):
         raise TypeError(
-            f"{name} can only be ascii, lowercase, "
-            "and not contain punctuation or space (except - and _)."
+            f"{name!r} does not match {EXTENSION_NAME_REGEX.pattern}"
         )
     return name
 
@@ -244,6 +238,8 @@ def load_extension(extension: Path, clean_db: bool = False, general_run: bool = 
 def load_extensions(names=None, clean_db: bool = False, general_run: bool = False):
     """Load all the extensions in the extensions folder."""
     updates = {}
+    extensions_folder = root_path.joinpath("publoader", "extensions", "src")
+    extensions_folder.mkdir(parents=True, exist_ok=True)
     names = [name.lower() for name in names] if names is not None else None
 
     for extension in [
@@ -257,9 +253,9 @@ def load_extensions(names=None, clean_db: bool = False, general_run: bool = Fals
 
         try:
             validate_extension_name(extension.name)
-        except TypeError:
+        except TypeError as e:
             logger.warning(
-                f"Skipping {extension.name} as the name is not in the correct format."
+                f"Skipping as {', '.join(e.args)}"
             )
             continue
 
@@ -282,7 +278,7 @@ def run_extension(extension: dict, clean_db_override: bool = False):
         logger.info(f"Running {extension_name}.")
 
         name = check_class_has_attribute(extension_name, extension_class, "name")
-        name = validate_extension_name(name)
+        validate_extension_name(name)
 
         posted_chapters_ids = list(
             database_connection["uploaded_ids"].find({"extension_name": {"$eq": name}})
