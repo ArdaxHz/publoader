@@ -124,6 +124,7 @@ class PubloaderUpdater:
         shutil.rmtree(self.update_path, ignore_errors=True)
 
     def update(self):
+        print(f"Looking for new updates.")
         extensions_path = self.update_path.joinpath(self.extensions_path)
 
         base_repo_failed = self.fetch_repo(
@@ -144,3 +145,4 @@ class PubloaderUpdater:
         logger.info("Update download complete, applying changes.")
         self.move_files()
         self._save_commits()
+        print(f"Finished looking for new updates.")
