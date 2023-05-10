@@ -36,16 +36,14 @@ class UploaderProcess:
         images: list,
         **kwargs,
     ):
+        upload_chapter.pop("images")
         self.chapter = Chapter(**upload_chapter)
         self.http_client = http_client
         self.extension_name = self.chapter.extension_name
         self.mangadex_manga_id = upload_chapter.get("mangadex_manga_id", "")
         self.mangadex_group_id = upload_chapter.get("mangadex_group_id", "")
-
-        if upload_chapter.get("images") is not None:
-            self.image_ids = images
-        else:
-            self.image_ids = []
+        self.image_ids = images
+        self.image_ids_str = [str(img._id) for img in self.image_ids]
 
         self.manga_generic_error_message = (
             f"Extension: {self.extension_name}, "
@@ -159,7 +157,7 @@ class UploaderProcess:
         files: Dict[str, bytes] = {}
         for array_index, image in enumerate(images_to_read, start=1):
             # Get index of the image in the images array
-            renamed_file = str(self.image_ids.index(image._id))
+            renamed_file = str(self.image_ids_str.index(str(image._id)))
             # Keeps track of which image index belongs to which image name
             self.images_to_upload_names.update({renamed_file: image.filename})
             files.update({renamed_file: image.read()})
@@ -341,11 +339,12 @@ def worker(http_client, queue_webhook, **kwargs):
 
             if "images" in item:
                 images = image_filestream.find({"_id": {"$in": item["images"]}})
-                image_ids = natsort.natsorted(images, key=lambda x: x["filename"])
+                image_ids = list(natsort.natsorted(images, key=lambda x: x.filename))
             else:
                 images = []
                 image_ids = []
 
+            print([img._id for img in image_ids])
             chapter_uploader = UploaderProcess(item, http_client, image_ids)
             uploaded = chapter_uploader.start_upload()
 
@@ -360,10 +359,10 @@ def worker(http_client, queue_webhook, **kwargs):
 
                 if images:
                     database_connection["images.files"].delete_many(
-                        {"_id": {"$in": [img["id"] for img in image_ids]}}
+                        {"_id": {"$in": [img._id for img in image_ids]}}
                     )
                     database_connection["images.chunks"].delete_many(
-                        {"files_id": {"$in": [img["id"] for img in image_ids]}}
+                        {"files_id": {"$in": [img._id for img in image_ids]}}
                     )
 
                 if successful_upload_id is not None:
@@ -371,7 +370,7 @@ def worker(http_client, queue_webhook, **kwargs):
                     update_database(item)
 
             upload_queue.task_done()
-            if upload_queue.empty():
+            if upload_queue.qsize() == 0:
                 queue_webhook.send_queue_finished()
         except Exception as e:
             traceback.print_exc()
@@ -385,6 +384,9 @@ def fetch_data_from_database():
 
 
 def setup_thread(queue_webhook, *args, **kwargs):
+    with upload_queue.mutex:
+        upload_queue.queue.clear()
+
     fetch_data_from_database()
     thread = threading.Thread(
         target=worker, daemon=True, args=(http_client, queue_webhook), kwargs=kwargs
@@ -408,8 +410,8 @@ def main():
                 for change in stream:
                     upload_queue.put(change["fullDocument"])
 
-                print("Restarting Uploader Thread")
                 if not thread.is_alive():
+                    print("Restarting Uploader Thread")
                     thread = setup_thread(queue_webhook=queue_webhook)
         except pymongo.errors.PyMongoError as e:
             print(e)

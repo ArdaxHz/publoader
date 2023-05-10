@@ -270,7 +270,7 @@ class ExtensionUploader:
                 chapters_on_md=self.chapters_on_md.get(mangadex_manga_id, []),
                 current_uploaded_chapters=self.current_uploaded_chapters,
                 same_chapter_dict=self.same_chapter_dict,
-                mangadex_manga_data=self.manga_data_local.get(mangadex_manga_id, ""),
+                mangadex_manga_data=self.manga_data_local.get(mangadex_manga_id, {}),
                 custom_language=self.custom_regexes.get("custom_language", {}),
                 chapters_on_db=self.chapters_on_db,
                 languages=self.extension_languages,

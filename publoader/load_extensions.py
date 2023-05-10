@@ -16,6 +16,7 @@ from publoader.utils.utils import get_current_datetime, root_path
 logger = logging.getLogger("publoader")
 EXTENSION_NAME_REGEX = re.compile(r"^([a-z0-9\-_]+)$")
 
+
 def validate_list_chapters(list_to_validate, list_elements_type):
     """Check if variable is a list and the contents of the list are of the specified type."""
     if not isinstance(list_to_validate, list):
@@ -46,12 +47,8 @@ def validate_extension_name(name: Optional[str]):
     if name is not None:
         name = str(name)
 
-    if (
-        not bool(EXTENSION_NAME_REGEX.match(name))
-    ):
-        raise TypeError(
-            f"{name!r} does not match {EXTENSION_NAME_REGEX.pattern}"
-        )
+    if not bool(EXTENSION_NAME_REGEX.match(name)):
+        raise TypeError(f"{name!r} does not match {EXTENSION_NAME_REGEX.pattern}")
     return name
 
 
@@ -254,9 +251,7 @@ def load_extensions(names=None, clean_db: bool = False, general_run: bool = Fals
         try:
             validate_extension_name(extension.name)
         except TypeError as e:
-            logger.warning(
-                f"Skipping as {', '.join(e.args)}"
-            )
+            logger.warning(f"Skipping as {', '.join(e.args)}")
             continue
 
         data = load_extension(extension, clean_db=clean_db, general_run=general_run)

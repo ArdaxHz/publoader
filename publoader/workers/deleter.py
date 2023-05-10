@@ -77,7 +77,7 @@ def worker(http_client, queue_webhook, **kwargs):
                 database_connection["deleted"].insert_one(item)
 
             delete_queue.task_done()
-            if delete_queue.empty():
+            if delete_queue.qsize() == 0:
                 queue_webhook.send_queue_finished()
         except Exception as e:
             traceback.print_exc()
@@ -97,6 +97,9 @@ def fetch_data_from_database():
 
 
 def setup_thread(queue_webhook, *args, **kwargs):
+    with delete_queue.mutex:
+        delete_queue.queue.clear()
+
     fetch_data_from_database()
     thread = threading.Thread(
         target=worker, daemon=True, args=(http_client, queue_webhook), kwargs=kwargs
@@ -120,8 +123,8 @@ def main():
                 for change in stream:
                     delete_queue.put(change["fullDocument"])
 
-                print("Restarting Deleter Thread")
                 if not thread.is_alive():
+                    print("Restarting Deleter Thread")
                     thread = setup_thread(queue_webhook=queue_webhook)
         except pymongo.errors.PyMongoError as e:
             print(e)
