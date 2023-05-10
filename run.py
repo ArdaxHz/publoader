@@ -188,6 +188,7 @@ if __name__ == "__main__":
         tags={"daily_checker"},
     )
     schedule_extensions()
+    print(schedule)
 
     try:
         while True:
