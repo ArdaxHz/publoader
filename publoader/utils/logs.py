@@ -19,6 +19,7 @@ current_date = date.today()
 last_date_keep_logs = current_date - timedelta(days=max_log_days)
 
 bot_logs_folder_path = format_log_dir_path("bot")
+worker_logs_folder_path = format_log_dir_path("workers")
 extensions_logs_folder_path = format_log_dir_path("extensions")
 webhook_logs_folder_path = format_log_dir_path("webhook")
 debug_logs_folder_path = format_log_dir_path("debug")
@@ -82,6 +83,9 @@ setup_logs(
     path=webhook_logs_folder_path,
     logger_filename="webhook",
 )
+setup_logs("publoader-uploader", worker_logs_folder_path.joinpath("uploader"))
+setup_logs("publoader-editor", worker_logs_folder_path.joinpath("editor"))
+setup_logs("publoader-deleter", worker_logs_folder_path.joinpath("deleter"))
 
 _logger = logging.getLogger("publoader")
 

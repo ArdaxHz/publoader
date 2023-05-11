@@ -108,11 +108,11 @@ class PubloaderUpdater:
             logger.info(
                 f"No new commit, not updating. Latest commit: {latest_remote_commit.sha}"
             )
-            return
+            return False, commit_sha_var
 
         logger.info(f"Update found, downloading {latest_remote_commit.sha}")
         failed_download = self.download_content(repo, download_path, "")
-        return failed_download
+        return failed_download, latest_remote_commit.sha
 
     def move_files(self):
         shutil.copytree(
@@ -127,13 +127,13 @@ class PubloaderUpdater:
         print(f"Looking for new updates.")
         extensions_path = self.update_path.joinpath(self.extensions_path)
 
-        base_repo_failed = self.fetch_repo(
+        base_repo_failed, self.latest_commit_sha = self.fetch_repo(
             self.base_repo, self.latest_commit_sha, self.update_path
         )
 
         time.sleep(8)
 
-        extensions_repo_failed = self.fetch_repo(
+        extensions_repo_failed, self.latest_extension_sha = self.fetch_repo(
             self.extensions_repo, self.latest_extension_sha, extensions_path
         )
 

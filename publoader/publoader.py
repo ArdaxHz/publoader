@@ -1,6 +1,5 @@
 import argparse
 import logging
-import multiprocessing
 import traceback
 from typing import List
 
@@ -11,7 +10,7 @@ from publoader.webhook import PubloaderWebhook
 
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
-from publoader.workers import deleter, editor, uploader
+from publoader.workers import worker
 from publoader.dupes_checker import DeleteDuplicatesMD
 from publoader.extension_uploader import ExtensionUploader
 from publoader.load_extensions import (
@@ -46,9 +45,19 @@ def run_updates(
     extension_languages = extension_data["extension_languages"]
     clean_db = extension_data["clean_db"]
 
+    PubloaderWebhook(
+        extension_name,
+        title=f"Posting updates for extension {extension_name}",
+        add_timestamp=False
+    ).main()
+
     try:
         if not updated_chapters:
             print(f"No new updates found for {normalised_extension_name}")
+            PubloaderWebhook(
+                extension_name,
+                title=f"No new updates found for {extension_name}",
+            ).send()
             return False
 
         for update in updated_chapters:
@@ -60,9 +69,11 @@ def run_updates(
                 f"title: {update.chapter_title!r}."
             )
 
-        print(
-            f"Found {len(updated_chapters)} new chapters for {normalised_extension_name}"
-        )
+        print(f"Found {len(updated_chapters)} chapters for {normalised_extension_name}")
+        PubloaderWebhook(
+            extension_name,
+            title=f"Found {len(updated_chapters)} chapters for {normalised_extension_name}",
+        ).send()
 
         # Get already posted chapters for the extension
         posted_chapters_data = list(
@@ -120,7 +131,7 @@ def open_extensions(
 
     if clean_db:
         PubloaderWebhook(
-            extension_name=None, title="Bot Clean Run Cycle", colour="26d454"
+            extension_name=None, title="Bot Clean Run Cycle", colour="256ef5"
         ).send()
 
     extensions = run_extensions(extensions_data, clean_db)
@@ -165,20 +176,16 @@ if __name__ == "__main__":
 
     vargs = vars(parser.parse_args())
 
-    process = multiprocessing.Process(target=uploader.main)
-    process.start()
-
-    process = multiprocessing.Process(target=editor.main)
-    process.start()
-
-    process = multiprocessing.Process(target=deleter.main)
-    process.start()
+    worker.main()
 
     if vargs["extension"] is None:
         extension_to_run = None
     else:
         extension_to_run = [str(extension).strip() for extension in vargs["extension"]]
 
-    open_extensions(
-        names=extension_to_run, clean_db=vargs["clean"], general_run=vargs["force"]
-    )
+    try:
+        open_extensions(
+            names=extension_to_run, clean_db=vargs["clean"], general_run=vargs["force"]
+        )
+    except KeyboardInterrupt:
+        worker.kill()

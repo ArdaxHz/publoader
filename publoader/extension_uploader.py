@@ -46,7 +46,6 @@ class ExtensionUploader:
         self.mangadex_group_id = mangadex_group_id
         self.extension_languages = extension_languages
 
-        self.send_begin_extension_uploading()
         self.send_untracked_manga_webhook()
 
         self.same_chapter_dict: Dict[str, List[str]] = self.custom_regexes.get(
@@ -73,12 +72,6 @@ class ExtensionUploader:
         ]
 
         logger.info(f"Manga not tracked but on mangadex: {self.manga_untracked}")
-
-    def send_begin_extension_uploading(self):
-        PubloaderWebhook(
-            self.extension_name,
-            title=f"Posting updates for extension {self.extension_name}",
-        ).send()
 
     def send_untracked_manga_webhook(self):
         for untracked in self.untracked_manga:

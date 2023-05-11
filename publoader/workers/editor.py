@@ -1,21 +1,11 @@
 import logging
-import queue
-import threading
-import traceback
-
-import pymongo
 
 from publoader.models.database import database_connection, update_database
 from publoader.models.dataclasses import Chapter
-from publoader.models.http import RequestError, http_client
-from publoader.utils.config import (
-    mangadex_api_url,
-)
-from publoader.webhook import PubloaderQueueWebhook
+from publoader.models.http import RequestError
+from publoader.utils.config import mangadex_api_url
 
-logger = logging.getLogger("publoader")
-
-edit_queue = queue.Queue()
+logger = logging.getLogger("publoader-editor")
 
 
 class EditorProcess:
@@ -60,67 +50,15 @@ class EditorProcess:
         return False
 
 
-def worker(http_client, queue_webhook, **kwargs):
-    while True:
-        try:
-            item = edit_queue.get()
-            print(f"----Editor: Working on {item['_id']}----")
+def run(item, http_client, queue_webhook, **kwargs):
+    chapter_editor = EditorProcess(item, http_client)
+    edited = chapter_editor.start_edit()
 
-            chapter_editor = EditorProcess(item, http_client)
-            edited = chapter_editor.start_edit()
-
-            queue_webhook.add_chapter(item["chapter"], processed=edited)
-            database_connection["to_edit"].delete_one({"_id": {"$eq": item["_id"]}})
-            if edited:
-                update_database(item["chapter"])
-
-            edit_queue.task_done()
-            if edit_queue.qsize() == 0:
-                queue_webhook.send_queue_finished()
-        except Exception as e:
-            traceback.print_exc()
-            logger.exception(f"Editor raised an error.")
+    queue_webhook.add_chapter(item["chapter"], processed=edited)
+    database_connection["to_edit"].delete_one({"_id": {"$eq": item["_id"]}})
+    if edited:
+        update_database(item["chapter"])
 
 
 def fetch_data_from_database():
-    chapters = database_connection["to_edit"].find()
-    for chapter in chapters:
-        edit_queue.put(chapter)
-
-
-def setup_thread(queue_webhook, *args, **kwargs):
-    with edit_queue.mutex:
-        edit_queue.queue.clear()
-
-    fetch_data_from_database()
-    thread = threading.Thread(
-        target=worker, daemon=True, args=(http_client, queue_webhook), kwargs=kwargs
-    )
-    thread.start()
-    return thread
-
-
-def main():
-    queue_webhook = PubloaderQueueWebhook(worker_type="editor", colour="FFF71C")
-
-    # Turn-on the worker thread.
-    thread = setup_thread(queue_webhook=queue_webhook)
-    print(f"Starting Editor watcher.")
-
-    while True:
-        try:
-            with database_connection["to_edit"].watch(
-                [{"$match": {"operationType": "insert"}}]
-            ) as stream:
-                for change in stream:
-                    edit_queue.put(change["fullDocument"])
-
-                if not thread.is_alive():
-                    print("Restarting Editor Thread")
-                    thread = setup_thread(queue_webhook=queue_webhook)
-        except pymongo.errors.PyMongoError as e:
-            print(e)
-
-    # Block until all tasks are done.
-    edit_queue.join()
-    print("All work completed")
+    return [chap for chap in database_connection["to_edit"].find()]

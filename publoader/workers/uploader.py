@@ -1,12 +1,8 @@
 import logging
-import queue
-import threading
-import traceback
 from datetime import datetime
 from typing import Dict, List, Optional
 
 import natsort
-import pymongo
 from gridfs import GridOut
 
 from publoader.models.database import (
@@ -15,17 +11,14 @@ from publoader.models.database import (
     update_database,
 )
 from publoader.models.dataclasses import Chapter
-from publoader.models.http import RequestError, http_client
+from publoader.models.http import RequestError
 from publoader.utils.config import (
     md_upload_api_url,
     upload_retry,
 )
 from publoader.utils.misc import flatten
-from publoader.webhook import PubloaderQueueWebhook
 
-logger = logging.getLogger("publoader")
-
-upload_queue = queue.Queue()
+logger = logging.getLogger("publoader-uploader")
 
 
 class UploaderProcess:
@@ -331,91 +324,36 @@ class UploaderProcess:
         return True
 
 
-def worker(http_client, queue_webhook, **kwargs):
-    while True:
-        try:
-            item = upload_queue.get()
-            print(f"----Uploader: Working on {item['_id']}----")
+def run(item, http_client, queue_webhook, **kwargs):
+    if "images" in item:
+        images = image_filestream.find({"_id": {"$in": item["images"]}})
+        image_ids = list(natsort.natsorted(images, key=lambda x: x.filename))
+    else:
+        images = []
+        image_ids = []
 
-            if "images" in item:
-                images = image_filestream.find({"_id": {"$in": item["images"]}})
-                image_ids = list(natsort.natsorted(images, key=lambda x: x.filename))
-            else:
-                images = []
-                image_ids = []
+    chapter_uploader = UploaderProcess(item, http_client, image_ids)
+    uploaded = chapter_uploader.start_upload()
 
-            print([img._id for img in image_ids])
-            chapter_uploader = UploaderProcess(item, http_client, image_ids)
-            uploaded = chapter_uploader.start_upload()
+    successful_upload_id = chapter_uploader.successful_upload_id
+    item["md_chapter_id"] = successful_upload_id
 
-            successful_upload_id = chapter_uploader.successful_upload_id
-            item["md_chapter_id"] = successful_upload_id
+    queue_webhook.add_chapter(item, processed=uploaded)
+    database_connection["to_upload"].delete_one({"_id": {"$eq": item["_id"]}})
+    if uploaded:
+        database_connection["to_upload"].delete_one({"_id": {"$eq": item["_id"]}})
 
-            queue_webhook.add_chapter(item, processed=uploaded)
-            if uploaded:
-                database_connection["to_upload"].delete_one(
-                    {"_id": {"$eq": item["_id"]}}
-                )
+        if images:
+            database_connection["images.files"].delete_many(
+                {"_id": {"$in": [img._id for img in image_ids]}}
+            )
+            database_connection["images.chunks"].delete_many(
+                {"files_id": {"$in": [img._id for img in image_ids]}}
+            )
 
-                if images:
-                    database_connection["images.files"].delete_many(
-                        {"_id": {"$in": [img._id for img in image_ids]}}
-                    )
-                    database_connection["images.chunks"].delete_many(
-                        {"files_id": {"$in": [img._id for img in image_ids]}}
-                    )
-
-                if successful_upload_id is not None:
-                    print(successful_upload_id)
-                    update_database(item)
-
-            upload_queue.task_done()
-            if upload_queue.qsize() == 0:
-                queue_webhook.send_queue_finished()
-        except Exception as e:
-            traceback.print_exc()
-            logger.exception(f"Uploader raised an error.")
+        if successful_upload_id is not None:
+            update_database(item)
 
 
 def fetch_data_from_database():
-    chapters = database_connection["to_upload"].find()
-    for chapter in chapters:
-        upload_queue.put(chapter)
-
-
-def setup_thread(queue_webhook, *args, **kwargs):
-    with upload_queue.mutex:
-        upload_queue.queue.clear()
-
-    fetch_data_from_database()
-    thread = threading.Thread(
-        target=worker, daemon=True, args=(http_client, queue_webhook), kwargs=kwargs
-    )
-    thread.start()
-    return thread
-
-
-def main():
-    queue_webhook = PubloaderQueueWebhook(worker_type="uploader")
-
-    # Turn-on the worker thread.
-    thread = setup_thread(queue_webhook=queue_webhook)
-    print(f"Starting Uploader watcher.")
-
-    while True:
-        try:
-            with database_connection["to_upload"].watch(
-                [{"$match": {"operationType": "insert"}}]
-            ) as stream:
-                for change in stream:
-                    upload_queue.put(change["fullDocument"])
-
-                if not thread.is_alive():
-                    print("Restarting Uploader Thread")
-                    thread = setup_thread(queue_webhook=queue_webhook)
-        except pymongo.errors.PyMongoError as e:
-            print(e)
-
-    # Block until all tasks are done.
-    upload_queue.join()
-    print("All work completed")
+    return [chapter for chapter in database_connection["to_upload"].find()]

@@ -14,7 +14,7 @@ from publoader.utils.config import CLEAN_TIME, DEFAULT_CLEAN_DAY, DEFAULT_TIME
 from publoader.utils.utils import get_current_datetime, root_path
 
 logger = logging.getLogger("publoader")
-EXTENSION_NAME_REGEX = re.compile(r"^([a-z0-9\-_]+)$")
+EXTENSION_NAME_REGEX = re.compile(r"^([a-z0-9_]+)$")
 
 
 def validate_list_chapters(list_to_validate, list_elements_type):

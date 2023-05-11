@@ -1,7 +1,6 @@
 import argparse
 import json
 import logging
-import multiprocessing
 import os
 import subprocess
 import sys
@@ -19,7 +18,7 @@ from publoader.utils.config import (
     daily_run_time_daily_minute,
 )
 from publoader.utils.utils import root_path
-from publoader.workers import deleter, editor, uploader
+from publoader.workers import worker
 
 logger = logging.getLogger("publoader")
 
@@ -104,6 +103,7 @@ def install_requirements():
 
 def restart():
     """Restart the script."""
+    worker.kill()
     updater = PubloaderUpdater()
     updater.update()
     install_requirements()
@@ -137,17 +137,21 @@ if __name__ == "__main__":
         required=False,
         help="Run a specific extension.",
     )
+    parser.add_argument(
+        "--update",
+        "-u",
+        default=False,
+        const=True,
+        nargs="?",
+        help="Update the bot.",
+    )
 
     vargs = vars(parser.parse_args())
 
-    process = multiprocessing.Process(target=uploader.main)
-    process.start()
+    if vargs["update"]:
+        restart()
 
-    process = multiprocessing.Process(target=editor.main)
-    process.start()
-
-    process = multiprocessing.Process(target=deleter.main)
-    process.start()
+    worker.main()
 
     if vargs["extension"] is None:
         extension_to_run = None
@@ -195,4 +199,5 @@ if __name__ == "__main__":
             schedule.exec_jobs()
             time.sleep(1)
     except KeyboardInterrupt:
+        worker.kill()
         sys.exit(1)
