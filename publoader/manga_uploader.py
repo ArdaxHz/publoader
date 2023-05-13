@@ -262,7 +262,7 @@ class MangaUploaderProcess:
         ]
 
         print(
-            f"Inserting chapters for manga {self.mangadex_manga_id}: {self.mangadex_manga_data['title']}"
+            f"Inserting chapters for manga {self.mangadex_manga_id}: {self.mangadex_manga_data.get('title', 'No title found')}"
         )
 
         if chapters_to_insert:

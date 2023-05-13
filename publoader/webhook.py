@@ -437,6 +437,9 @@ class PubloaderWebhook(WebhookHelper):
             self.embed.timestamp = self.timestamp
         webhook.add_embed(self.embed)
 
+        if len(webhook.embeds) >= 5:
+            self.send_webhook()
+
     def send(self, **kwargs):
         self.main()
         self.send_webhook()

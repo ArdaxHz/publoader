@@ -3,6 +3,7 @@ import logging
 import shutil
 import time
 
+import github
 import requests
 from github import Github
 from github.Commit import Commit
@@ -24,10 +25,14 @@ class PubloaderUpdater:
         self.local_commits = self._open_commits()
         self.latest_commit_sha = self.local_commits.get("base_repo")
         self.latest_extension_sha = self.local_commits.get("extension_repo")
+        self.latest_extension_private_sha = self.local_commits.get(
+            "extension_private_repo"
+        )
 
         self.repo_owner = config["Repo"]["repo_owner"]
         self.base_repo = config["Repo"]["base_repo_path"]
         self.extensions_repo = config["Repo"]["extensions_repo_path"]
+        self.extensions_private_repo = config["Repo"]["extensions_private_repo_path"]
         self.extensions_path = "publoader/extensions"
 
     def _open_commits(self):
@@ -45,6 +50,7 @@ class PubloaderUpdater:
             data = {
                 "base_repo": self.latest_commit_sha,
                 "extension_repo": self.latest_extension_sha,
+                "extension_private_repo": self.latest_extension_private_sha,
             }
 
         with open(self.commits_file, "w") as login_file:
@@ -100,7 +106,12 @@ class PubloaderUpdater:
         return failed_download
 
     def fetch_repo(self, repo_name, commit_sha_var, download_path):
-        repo = self.github.get_repo(f"{self.repo_owner}/{repo_name}")
+        try:
+            repo = self.github.get_repo(f"{self.repo_owner}/{repo_name}")
+        except github.UnknownObjectException:
+            logger.exception(f"Error fetching repo {repo_name}")
+            return False, commit_sha_var
+
         logger.info(f"Checking for update in: {repo}")
 
         latest_remote_commit = self._get_latest_commit(repo)
@@ -133,11 +144,22 @@ class PubloaderUpdater:
 
         time.sleep(8)
 
+        (
+            extensions_private_repo_failed,
+            self.latest_extension_private_sha,
+        ) = self.fetch_repo(
+            self.extensions_private_repo,
+            self.latest_extension_private_sha,
+            extensions_path,
+        )
+
+        time.sleep(8)
+
         extensions_repo_failed, self.latest_extension_sha = self.fetch_repo(
             self.extensions_repo, self.latest_extension_sha, extensions_path
         )
 
-        if base_repo_failed or extensions_repo_failed:
+        if extensions_private_repo_failed:
             logger.warning(f"Downloading new repo update failed, not updating.")
             shutil.rmtree(self.update_path, ignore_errors=True)
             return
@@ -146,3 +168,7 @@ class PubloaderUpdater:
         self.move_files()
         self._save_commits()
         print(f"Finished looking for new updates.")
+
+
+if __name__ == "__main__":
+    PubloaderUpdater().update()

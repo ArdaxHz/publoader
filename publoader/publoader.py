@@ -27,6 +27,32 @@ from publoader.utils.utils import get_current_datetime, open_manga_data
 logger = logging.getLogger("publoader")
 
 
+def send_untracked_manga_webhook(extension_name, untracked_manga):
+    logger.info(
+        f"Found {len(untracked_manga)} untracked manga for {extension_name}: {untracked_manga}."
+    )
+    for untracked in untracked_manga:
+        print(f"Found untracked manga {untracked.manga_id}: {untracked.manga_name}")
+
+    if untracked_manga:
+        split_series = [
+            untracked_manga[elem : elem + 30]
+            for elem in range(0, len(untracked_manga), 30)
+        ]
+
+        for count, series_list in enumerate(split_series, start=1):
+            PubloaderWebhook(
+                extension_name=extension_name,
+                title=f"{len(untracked_manga)} Untracked Manga ({count})",
+                description="\n".join(
+                    [
+                        f"**{manga.manga_name}**: [{manga.manga_id}]({manga.manga_url})"
+                        for manga in series_list
+                    ]
+                ),
+            ).send()
+
+
 def run_updates(
     extension_data: dict,
     manga_data_local: dict,
@@ -48,10 +74,12 @@ def run_updates(
     PubloaderWebhook(
         extension_name,
         title=f"Posting updates for extension {extension_name}",
-        add_timestamp=False
+        add_timestamp=False,
     ).main()
 
     try:
+        send_untracked_manga_webhook(extension_name, untracked_manga)
+
         if not updated_chapters:
             print(f"No new updates found for {normalised_extension_name}")
             PubloaderWebhook(
@@ -176,14 +204,16 @@ if __name__ == "__main__":
 
     vargs = vars(parser.parse_args())
 
-    worker.main()
-
-    if vargs["extension"] is None:
-        extension_to_run = None
-    else:
-        extension_to_run = [str(extension).strip() for extension in vargs["extension"]]
-
     try:
+        worker.main(restart_threads=False)
+
+        if vargs["extension"] is None:
+            extension_to_run = None
+        else:
+            extension_to_run = [
+                str(extension).strip() for extension in vargs["extension"]
+            ]
+
         open_extensions(
             names=extension_to_run, clean_db=vargs["clean"], general_run=vargs["force"]
         )

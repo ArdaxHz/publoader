@@ -12,6 +12,7 @@ from publoader.models.database import database_connection
 from publoader.models.dataclasses import Chapter, Manga
 from publoader.utils.config import CLEAN_TIME, DEFAULT_CLEAN_DAY, DEFAULT_TIME
 from publoader.utils.utils import get_current_datetime, root_path
+from publoader.webhook import PubloaderWebhook
 
 logger = logging.getLogger("publoader")
 EXTENSION_NAME_REGEX = re.compile(r"^([a-z0-9_]+)$")
@@ -393,6 +394,12 @@ def run_extensions(extensions: dict, clean_db_override: bool):
     for site in extensions:
         extension = extensions[site]
         extension_name = extension["extension_name"]
+
+        PubloaderWebhook(
+            extension_name,
+            title=f"Posting updates for {extension_name}",
+            add_timestamp=False,
+        ).send()
 
         try:
             data = run_extension(extension, clean_db_override=clean_db_override)

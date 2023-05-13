@@ -9,3 +9,5 @@ logs/*
 manga_data.json
 .idea
 extensions
+.commits
+temp

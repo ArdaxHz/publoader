@@ -7,10 +7,13 @@ import traceback
 
 import pymongo
 
-from publoader.models.database import (database_connection, )
+from publoader.models.database import (
+    database_connection,
+)
 from publoader.models.http import http_client
 from publoader.utils.utils import root_path
 from publoader.webhook import PubloaderQueueWebhook
+from publoader.workers import worker as watcher_worker
 
 logger = logging.getLogger("publoader")
 
@@ -67,9 +70,17 @@ def open_worker_module(worker_type):
     return foo
 
 
-def main(worker_type: str, table_name: str, webhook_colour: str):
+def main(
+    worker_type: str,
+    table_name: str,
+    webhook_colour: str,
+    restart_threads: bool,
+    **kwargs,
+):
     """Start the watcher."""
-    queue_webhook = PubloaderQueueWebhook(worker_type=worker_type, colour=webhook_colour)
+    queue_webhook = PubloaderQueueWebhook(
+        worker_type=worker_type, colour=webhook_colour
+    )
     worker_module = open_worker_module(worker_type)
 
     # Turn-on the worker thread.
@@ -90,8 +101,15 @@ def main(worker_type: str, table_name: str, webhook_colour: str):
                     queue.put(change["fullDocument"])
 
                 if not thread.is_alive():
-                    print(f"Restarting {worker_type.title()} Thread")
-                    thread = setup_thread(queue_webhook=queue_webhook)
+                    if not restart_threads:
+                        watcher_worker.kill()
+                    else:
+                        print(f"Restarting {worker_type.title()} Thread")
+                        thread = setup_thread(
+                            worker_type=worker_type,
+                            queue_webhook=queue_webhook,
+                            worker_module=worker_module,
+                        )
         except pymongo.errors.PyMongoError as e:
             print(e)
 

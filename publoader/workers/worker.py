@@ -3,7 +3,7 @@ import multiprocessing
 from publoader.workers import watcher
 
 
-def main():
+def main(restart_threads=True):
     """Initialise watcher processes."""
     try:
         watchers = [
@@ -14,7 +14,12 @@ def main():
         for worker in watchers:
             process = multiprocessing.Process(
                 target=watcher.main,
-                kwargs={"worker_type": worker["name"], "table_name": worker["table"], "webhook_colour": worker["colour"]},
+                kwargs={
+                    "worker_type": worker["name"],
+                    "table_name": worker["table"],
+                    "webhook_colour": worker["colour"],
+                    "restart_threads": restart_threads,
+                },
             )
             process.start()
     except KeyboardInterrupt:

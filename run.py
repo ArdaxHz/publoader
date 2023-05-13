@@ -35,16 +35,16 @@ def main(extension_names: list[str] = None, general_run=False, clean_db=False):
 
 def open_timings():
     """Open the timings file."""
-    timings_path = root_path.joinpath(
-        "publoader", "extensions", "schedule"
-    ).with_suffix(".json")
-    if not timings_path.exists():
-        return {}
+    timings = {}
 
-    try:
-        return json.loads(timings_path.read_bytes())
-    except json.JSONDecodeError:
-        return {}
+    for schedule_file in root_path.joinpath("publoader", "extensions").glob(
+        "schedule*.json"
+    ):
+        try:
+            timings.update(json.loads(schedule_file.read_bytes()))
+        except json.JSONDecodeError:
+            pass
+    return timings
 
 
 def schedule_extensions():
@@ -166,7 +166,7 @@ if __name__ == "__main__":
         )
 
     print(
-        "--------------------------------------------------Starting scheduler.--------------------------------------------------"
+        "--------------------------------------------------Starting scheduler--------------------------------------------------"
     )
     schedule = Scheduler(tzinfo=timezone.utc, max_exec=1)
     schedule.daily(

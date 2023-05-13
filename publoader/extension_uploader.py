@@ -46,8 +46,6 @@ class ExtensionUploader:
         self.mangadex_group_id = mangadex_group_id
         self.extension_languages = extension_languages
 
-        self.send_untracked_manga_webhook()
-
         self.same_chapter_dict: Dict[str, List[str]] = self.custom_regexes.get(
             "same", {}
         )
@@ -72,28 +70,6 @@ class ExtensionUploader:
         ]
 
         logger.info(f"Manga not tracked but on mangadex: {self.manga_untracked}")
-
-    def send_untracked_manga_webhook(self):
-        for untracked in self.untracked_manga:
-            logger.info(
-                f"Found untracked manga {untracked.manga_id}: {untracked.manga_name}."
-            )
-            print(
-                f"Found untracked manga {untracked.manga_id}: {untracked.manga_name}."
-            )
-
-        if self.untracked_manga:
-            untracked_manga_webhook = PubloaderWebhook(
-                extension_name=self.extension_name,
-                title="Untracked Manga",
-                description="\n".join(
-                    [
-                        f"**{manga.manga_name}**: [{manga.manga_id}]({manga.manga_url})"
-                        for manga in self.untracked_manga
-                    ]
-                ),
-            )
-            untracked_manga_webhook.send()
 
     def _delete_extra_chapters(self):
         """Find chapters on MangaDex not on external."""
