@@ -39,6 +39,9 @@ def worker(worker_type: str, worker_module, http_client, queue_webhook, **kwargs
         if queue.qsize() == 0:
             queue_webhook.send_queue_finished()
 
+            if worker_type == "uploader":
+                worker_module.check_all_chapters_uploaded()
+
 
 def setup_thread(worker_type, queue_webhook, worker_module, *args, **kwargs):
     """Start the worker thread."""

@@ -32,7 +32,9 @@ class PubloaderUpdater:
         self.repo_owner = config["Repo"]["repo_owner"]
         self.base_repo = config["Repo"]["base_repo_path"]
         self.extensions_repo = config["Repo"]["extensions_repo_path"]
-        self.extensions_private_repo = config["Repo"]["extensions_private_repo_path"]
+        self.extensions_private_repo = config["Repo"].get(
+            "extensions_private_repo_path"
+        )
         self.extensions_path = "publoader/extensions"
 
     def _open_commits(self):
@@ -143,23 +145,25 @@ class PubloaderUpdater:
         )
 
         time.sleep(8)
+        extensions_private_repo_failed = False
 
-        (
-            extensions_private_repo_failed,
-            self.latest_extension_private_sha,
-        ) = self.fetch_repo(
-            self.extensions_private_repo,
-            self.latest_extension_private_sha,
-            extensions_path,
-        )
+        if self.extensions_private_repo is not None:
+            (
+                extensions_private_repo_failed,
+                self.latest_extension_private_sha,
+            ) = self.fetch_repo(
+                self.extensions_private_repo,
+                self.latest_extension_private_sha,
+                extensions_path,
+            )
 
-        time.sleep(8)
+            time.sleep(8)
 
         extensions_repo_failed, self.latest_extension_sha = self.fetch_repo(
             self.extensions_repo, self.latest_extension_sha, extensions_path
         )
 
-        if extensions_private_repo_failed:
+        if base_repo_failed or extensions_private_repo_failed or extensions_repo_failed:
             logger.warning(f"Downloading new repo update failed, not updating.")
             shutil.rmtree(self.update_path, ignore_errors=True)
             return

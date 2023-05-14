@@ -1,4 +1,6 @@
 import logging
+import time
+from collections import deque
 from datetime import datetime
 from typing import Dict, List, Optional
 
@@ -14,11 +16,15 @@ from publoader.models.dataclasses import Chapter
 from publoader.models.http import RequestError
 from publoader.utils.config import (
     md_upload_api_url,
+    ratelimit_time,
     upload_retry,
 )
-from publoader.utils.misc import flatten
+from publoader.utils.misc import flatten, get_md_api
+from publoader.webhook import PubloaderNotIndexedWebhook
 
 logger = logging.getLogger("publoader-uploader")
+
+uploaded_list = deque()
 
 
 class UploaderProcess:
@@ -352,8 +358,63 @@ def run(item, http_client, queue_webhook, **kwargs):
             )
 
         if successful_upload_id is not None:
+            uploaded_list.append(successful_upload_id)
             update_database(item)
 
 
 def fetch_data_from_database():
     return [chapter for chapter in database_connection["to_upload"].find()]
+
+
+def check_all_chapters_uploaded():
+    """Check if all the chapters uploaded to MangaDex were indexed correctly."""
+    logger.info(
+        "Checking if all currently uploaded chapters are available on MangaDex."
+    )
+    print("Checking which chapters weren't indexed.")
+    chapters_on_md = []
+
+    # if self.clean_db:
+    #     uploaded_chapter_ids.extend(
+    #         [
+    #             chapter.md_chapter_id
+    #             for chapter in self.chapters_on_db
+    #             if chapter.chapter_expire
+    #             >= get_current_datetime()
+    #             and chapter.md_chapter_id. is not None
+    #         ]
+    #     )
+
+    uploaded_chapter_ids = list(set(uploaded_list))
+    if uploaded_chapter_ids:
+        logger.info(f"Uploaded chapters mangadex ids: {uploaded_chapter_ids}")
+        uploaded_chapter_ids_split = [
+            uploaded_chapter_ids[elem : elem + 100]
+            for elem in range(0, len(uploaded_chapter_ids), 100)
+        ]
+
+        time.sleep(ratelimit_time * 3)
+        for uploaded_ids in uploaded_chapter_ids_split:
+            chapters_on_md.extend(
+                get_md_api(
+                    "chapter",
+                    **{
+                        "ids[]": uploaded_ids,
+                        "order[createdAt]": "desc",
+                        "includes[]": ["manga"],
+                    },
+                )
+            )
+
+        chapters_not_on_md = [
+            chapter_id
+            for chapter_id in uploaded_chapter_ids
+            if chapter_id not in [chapter["id"] for chapter in chapters_on_md]
+        ]
+
+        logger.info(f"Chapters not indexed: {chapters_not_on_md}")
+        PubloaderNotIndexedWebhook(None, chapters_not_on_md).main()
+    else:
+        logger.info("No uploaded chapter mangadex ids.")
+
+    uploaded_list.clear()

@@ -15,7 +15,12 @@ from publoader.models.database import (
 )
 from publoader.models.dataclasses import Chapter
 from publoader.models.http import http_client
-from publoader.utils.misc import fetch_aggregate, find_key_from_list_value, flatten
+from publoader.utils.misc import (
+    fetch_aggregate,
+    find_key_from_list_value,
+    flatten,
+    get_md_api,
+)
 
 logger = logging.getLogger("publoader")
 
@@ -29,7 +34,7 @@ class MangaUploaderProcess:
         all_manga_chapters: List[Chapter],
         mangadex_manga_id: str,
         mangadex_group_id: str,
-        chapters_on_md: List[dict],
+        total_chapters_on_md: List[dict],
         current_uploaded_chapters: List[Chapter],
         same_chapter_dict: Dict[str, List[str]],
         mangadex_manga_data: dict,
@@ -47,7 +52,6 @@ class MangaUploaderProcess:
         self.all_manga_chapters = all_manga_chapters
         self.mangadex_manga_id = mangadex_manga_id
         self.mangadex_group_id = mangadex_group_id
-        self.chapters_on_md = chapters_on_md
         self.posted_md_updates = current_uploaded_chapters
         self.same_chapter_dict = same_chapter_dict
         self.mangadex_manga_data = mangadex_manga_data
@@ -57,10 +61,31 @@ class MangaUploaderProcess:
         self.chapters_for_upload = chapters_for_upload
         self.chapters_for_skipping = chapters_for_skipping
         self.chapters_for_editing = chapters_for_editing
+        self.total_chapters_on_md = total_chapters_on_md
+
+        self.chapters_on_md = self._get_external_chapters_md()
+        self.total_chapters_on_md.extend(self.chapters_on_md)
         self.get_chapter_volumes()
 
         if self.chapters_on_md:
             self._delete_extra_chapters()
+
+    def _get_external_chapters_md(self) -> List[dict]:
+        """Fetch the external chapters on mangadex."""
+        logger.debug(
+            f"Getting {self.extension_name}'s uploaded chapters for manga {self.mangadex_manga_id}."
+        )
+        print(
+            f"Getting {self.extension_name}'s uploaded chapters for manga {self.mangadex_manga_id}."
+        )
+        return get_md_api(
+            "chapter",
+            **{
+                "groups[]": [self.mangadex_group_id],
+                "order[createdAt]": "desc",
+                "manga": self.mangadex_manga_id,
+            },
+        )
 
     def _remove_chapters_not_external(self):
         """Find chapters on MangaDex not on external."""
@@ -74,7 +99,8 @@ class MangaUploaderProcess:
         ]
 
         logger.info(
-            f"{self.__class__.__name__} deleter finder for extensions.{self.extension_name} found: {md_chapters_not_external}"
+            f"{self.__class__.__name__} deleter finder for extensions.{self.extension_name} "
+            f"found: {md_chapters_not_external}"
         )
 
         update_expired_chapter_database(
@@ -99,6 +125,9 @@ class MangaUploaderProcess:
             return
 
         for chapter in self.updated_chapters:
+            if chapter.chapter_volume is not None:
+                continue
+
             for volume in aggregate_chapters:
                 volume_iter = None
                 if volume == "none":
