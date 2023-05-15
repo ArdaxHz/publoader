@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import datetime
 from typing import Dict, List, Optional
 
@@ -76,32 +77,35 @@ class DeleteDuplicatesMD:
     ) -> List[dict]:
         to_check = []
 
-        for chapter in chapters[1:]:
-            current_index = chapters.index(chapter)
-            previous_chapter = chapters[current_index - 1]
+        chapters_to_check = [
+            chapter
+            for chapter in chapters
+            if self.mangadex_group_id in self.filter_group(chapter)
+            and chapter["attributes"]["externalUrl"] is not None
+        ]
+
+        if len(chapters_to_check) <= 1:
+            return
+
+        for chapter in chapters_to_check[1:]:
+            current_index = chapters_to_check.index(chapter)
+            previous_chapter = chapters_to_check[current_index - 1]
 
             current_attributes = chapter["attributes"]
-            current_groups = self.filter_group(chapter)
-
             previous_attributes = previous_chapter["attributes"]
-            previous_groups = self.filter_group(previous_chapter)
 
-            if (
-                self.mangadex_group_id in current_groups
-                and self.mangadex_group_id in previous_groups
+            if previous_attributes["chapter"] == current_attributes["chapter"] and bool(
+                re.search(
+                    previous_attributes["externalUrl"],
+                    current_attributes["externalUrl"],
+                    re.I,
+                )
             ):
-                if (
-                    current_attributes["translatedLanguage"]
-                    == previous_attributes["translatedLanguage"]
-                    and current_attributes["chapter"] == previous_attributes["chapter"]
-                    and current_attributes["externalUrl"]
-                    == previous_attributes["externalUrl"]
-                ):
-                    if chapter not in to_check:
-                        to_check.append(chapter)
+                if chapter not in to_check:
+                    to_check.append(chapter)
 
-                    if previous_chapter not in to_check:
-                        to_check.append(previous_chapter)
+                if previous_chapter not in to_check:
+                    to_check.append(previous_chapter)
 
         if to_check:
             oldest = to_check[0]
@@ -211,6 +215,7 @@ class DeleteDuplicatesMD:
                     continue
 
                 logger.debug(f"Found dupes in manga {manga_id} for language {language}")
+                dupes_found = True
 
                 update_expired_chapter_database(
                     extension_name=self.extension_name,
