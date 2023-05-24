@@ -397,7 +397,7 @@ def run_extensions(extensions: dict, clean_db_override: bool):
 
         PubloaderWebhook(
             extension_name,
-            title=f"Posting updates for {extension_name}",
+            title=f"Reading data from {extension_name}",
             add_timestamp=False,
         ).send()
 
