@@ -1,5 +1,7 @@
 import argparse
+import atexit
 import logging
+import signal
 import traceback
 from typing import List
 
@@ -174,6 +176,20 @@ def open_extensions(
             extensions[site],
             manga_data_local=manga_data_local,
         )
+
+
+def handle_exit(*args):
+    try:
+        print(f"{'-'*10}Program Exit{'-'*10}")
+        logger.info(f"{'-'*10}Program Exit{'-'*10}")
+    except BaseException as exception:
+        print(f"{'-'*10}Error Program Exit{'-'*10}")
+        logger.exception(f"{'-'*10}Error Program Exit{'-'*10}")
+
+
+atexit.register(handle_exit)
+signal.signal(signal.SIGTERM, handle_exit)
+signal.signal(signal.SIGINT, handle_exit)
 
 
 if __name__ == "__main__":
