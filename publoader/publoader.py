@@ -2,6 +2,7 @@ import argparse
 import atexit
 import logging
 import signal
+import sys
 import traceback
 from typing import List
 
@@ -182,9 +183,11 @@ def handle_exit(*args):
     try:
         print(f"{'-'*10}Program Exit{'-'*10}")
         logger.info(f"{'-'*10}Program Exit{'-'*10}")
+        sys.exit(0)
     except BaseException as exception:
         print(f"{'-'*10}Error Program Exit{'-'*10}")
         logger.exception(f"{'-'*10}Error Program Exit{'-'*10}")
+        sys.exit(1)
 
 
 atexit.register(handle_exit)
