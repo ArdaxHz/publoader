@@ -140,14 +140,18 @@ class MangaUploaderProcess:
 
                 if isinstance(volume_iter, dict):
                     volume_chapters = volume_iter.keys()
-                    chapter_number = chapter.chapter_number.split(".", 1)[0]
+                    if chapter.chapter_number is not None:
+                        chapter_number = chapter.chapter_number.split(".", 1)[0]
+                    else:
+                        chapter_number = None
 
                     if chapter_number in volume_chapters:
-                        volume_str = str(volume).lstrip("0")
-                        if volume_str == "" or not volume_str:
-                            volume_str = "0"
+                        if volume is not None:
+                            volume_str = str(volume).lstrip("0")
+                            if volume_str == "" or not volume_str:
+                                volume_str = "0"
 
-                        chapter.chapter_volume = volume_str
+                            chapter.chapter_volume = volume_str
 
     def _check_for_duplicate_chapter_md_list(self, chapter) -> Optional[dict]:
         """Check for duplicate chapters on mangadex."""
