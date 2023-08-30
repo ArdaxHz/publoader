@@ -2,7 +2,7 @@ import configparser
 import json
 import logging
 import time
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from publoader.manga_uploader import MangaUploaderProcess
 from publoader.models.database import update_expired_chapter_database
@@ -21,11 +21,11 @@ class ExtensionUploader:
         extension,
         extension_name: str,
         updates: List[Chapter],
-        all_chapters: List[Chapter],
+        all_chapters: Optional[List[Chapter]],
         untracked_manga: List[Manga],
         tracked_mangadex_ids: List[str],
         mangadex_group_id: str,
-        custom_regexes: dict,
+        override_options: dict,
         extension_languages: list[str],
         clean_db: bool,
         chapters_on_db: List[Chapter],
@@ -42,39 +42,24 @@ class ExtensionUploader:
         self.all_chapters = all_chapters
         self.untracked_manga = untracked_manga
         self.tracked_mangadex_ids = tracked_mangadex_ids
-        self.custom_regexes = custom_regexes
+        self.override_options = override_options
         self.mangadex_group_id = mangadex_group_id
         self.extension_languages = extension_languages
 
-        self.same_chapter_dict: Dict[str, List[str]] = self.custom_regexes.get(
+        self.same_chapter_dict: Dict[str, List[str]] = self.override_options.get(
             "same", {}
         )
 
         self.current_uploaded_chapters: List[Chapter] = []
         self._get_manga_data_md()
 
-        for chapter in self.updates:
-            chapter.extension_name = self.extension_name
-
         self.updated_manga_chapters = self._sort_chapters_by_manga(self.updates)
+        self.all_manga_chapters = self._sort_chapters_by_manga(self.all_chapters)
         self.chapters_on_md = []
 
         self.chapters_for_upload: List[Chapter] = []
         self.chapters_for_skipping: List[Chapter] = []
         self.chapters_for_editing: List[Chapter] = []
-
-    def _delete_extra_chapters(self):
-        """Find chapters on MangaDex not on external."""
-        logger.info(
-            f"{self.__class__.__name__} deleting chapters that don't exist on external."
-        )
-        for manga_id in self.chapters_on_md:
-            if manga_id in self.manga_untracked:
-                update_expired_chapter_database(
-                    extension_name=self.extension_name,
-                    md_chapter=self.chapters_on_md[manga_id],
-                    md_manga_id=manga_id,
-                )
 
     def find_untracked_md_manga(self):
         """Check if any series on MangaDex are not tracked."""
@@ -86,27 +71,66 @@ class ExtensionUploader:
             ][0]
             manga_ids.add(manga_id)
 
-        self.manga_untracked = [
+        manga_untracked = [
             m for m in list(manga_ids) if m not in self.tracked_mangadex_ids
         ]
 
-        logger.info(f"Manga not tracked but on mangadex: {self.manga_untracked}")
-        self._delete_extra_chapters()
+        logger.info(f"Manga not tracked but on mangadex: {manga_untracked}")
 
-    def _get_external_chapters_md(self) -> Dict[str, List[dict]]:
-        logger.debug(f"Getting all {self.extension_name}'s uploaded chapters.")
-        print(f"Getting the {self.extension_name} chapters on mangadex.")
-        chapters_sorted = {}
-        for manga_id in set(self.updated_manga_chapters.keys()):
-            chapters_sorted[manga_id] = get_md_api(
-                "chapter",
-                **{
-                    "groups[]": [self.mangadex_group_id],
-                    "order[createdAt]": "desc",
-                    "manga": manga_id,
-                },
-            )
-        return chapters_sorted
+        logger.info(
+            f"{self.__class__.__name__} deleting chapters of series that don't exist on external, but do on MangaDex."
+        )
+        for manga_id in self.chapters_on_md:
+            if manga_id in manga_untracked:
+                update_expired_chapter_database(
+                    extension_name=self.extension_name,
+                    md_chapter=self.chapters_on_md[manga_id],
+                    md_manga_id=manga_id,
+                )
+
+    def remove_chapters_if_not_external(self):
+        """Remove chapters on MangaDex if they are not on external."""
+        if not self.clean_db:
+            return
+        if self.all_manga_chapters is None:
+            return
+
+        # missing_ids = list(
+        #     set(self.updated_manga_chapters.keys()).difference(
+        #         set(self.all_manga_chapters.keys())
+        #     )
+        # )
+
+        # Manga ids of no chapters from tracked series in updates
+        tracked_ids_no_chapters_external = [
+            m
+            for m in self.tracked_mangadex_ids
+            if m not in self.all_manga_chapters.keys()
+        ]
+
+        # Chapters of tracked_ids_no_chapters_external, if id not available, no chapters
+        tracked_ids_no_chapters_md = self._get_external_chapters_md(
+            tracked_ids_no_chapters_external
+        )
+
+        # Manga ids of chapters from tracked series, chapters on md, no chapters in updates
+        tracked_ids_chapters_md = [
+            m
+            for m in tracked_ids_no_chapters_external
+            if m in tracked_ids_no_chapters_md.keys()
+        ]
+
+        logger.info(
+            f"{self.__class__.__name__} deleting chapters on MangaDex, but not on external: {tracked_ids_chapters_md}"
+        )
+
+        for manga_id in tracked_ids_no_chapters_md:
+            if manga_id in tracked_ids_chapters_md:
+                update_expired_chapter_database(
+                    extension_name=self.extension_name,
+                    md_chapter=tracked_ids_no_chapters_md[manga_id],
+                    md_manga_id=manga_id,
+                )
 
     def _get_manga_data_md(self) -> Dict[str, dict]:
         """Get the manga data from mangadex if needed and sort by manga id."""
@@ -154,12 +178,14 @@ class ExtensionUploader:
 
     def _sort_chapters_by_manga(
         self, updates: List[Chapter]
-    ) -> Dict[str, List[Chapter]]:
+    ) -> Optional[Dict[str, List[Chapter]]]:
         """Sort the chapters by manga id."""
-        chapters_sorted = {}
+        if updates is None:
+            return None
         if not updates:
             return {}
 
+        chapters_sorted = {}
         for chapter in updates:
             md_id = chapter.md_manga_id
             if md_id is None:
@@ -187,17 +213,6 @@ class ExtensionUploader:
             for chapter in self.current_uploaded_chapters
             if chapter.md_chapter_id is not None
         ]
-
-        # if self.clean_db:
-        #     uploaded_chapter_ids.extend(
-        #         [
-        #             chapter.md_chapter_id
-        #             for chapter in self.chapters_on_db
-        #             if chapter.chapter_expire
-        #             >= get_current_datetime()
-        #             and chapter.md_chapter_id. is not None
-        #         ]
-        #     )
 
         uploaded_chapter_ids = list(set(uploaded_chapter_ids))
         if uploaded_chapter_ids:
@@ -234,21 +249,23 @@ class ExtensionUploader:
     def upload_chapters(self):
         """Go through each new chapter and upload it to mangadex."""
         # Sort each chapter by manga
-        all_manga_chapters = self._sort_chapters_by_manga(self.all_chapters)
-
         for index, mangadex_manga_id in enumerate(self.updated_manga_chapters, start=1):
+            all_chapters = None
+            if self.all_manga_chapters is not None:
+                all_chapters = self.all_manga_chapters.get(mangadex_manga_id, [])
+
             manga_uploader = MangaUploaderProcess(
                 extension_name=self.extension_name,
                 clean_db=self.clean_db,
                 updated_chapters=self.updated_manga_chapters.get(mangadex_manga_id, []),
-                all_manga_chapters=all_manga_chapters.get(mangadex_manga_id, []),
+                all_manga_chapters=all_chapters,
                 mangadex_manga_id=mangadex_manga_id,
                 mangadex_group_id=self.mangadex_group_id,
                 total_chapters_on_md=self.chapters_on_md,
                 current_uploaded_chapters=self.current_uploaded_chapters,
+                override_options=self.override_options,
                 same_chapter_dict=self.same_chapter_dict,
                 mangadex_manga_data=self.manga_data_local.get(mangadex_manga_id, {}),
-                custom_language=self.custom_regexes.get("custom_language", {}),
                 chapters_on_db=self.chapters_on_db,
                 languages=self.extension_languages,
                 chapters_for_upload=self.chapters_for_upload,
@@ -264,6 +281,7 @@ class ExtensionUploader:
             self._check_all_chapters_uploaded()
 
         self.find_untracked_md_manga()
+        self.remove_chapters_if_not_external()
 
         PubloaderWebhook(
             self.extension_name,

@@ -26,18 +26,18 @@ def open_manga_id_map(manga_map_path: Path) -> dict:
     return manga_map
 
 
-def open_title_regex(custom_regexes_path: Path) -> dict:
+def open_title_regex(override_options_path: Path) -> dict:
     """Open the custom regexes."""
     try:
-        with open(custom_regexes_path, "r") as title_regex_fp:
-            custom_regexes = json.load(title_regex_fp)
+        with open(override_options_path, "r") as title_regex_fp:
+            override_options = json.load(title_regex_fp)
     except json.JSONDecodeError as e:
         logger.critical("Title regex file is corrupted.")
         return {}
     except FileNotFoundError:
         logger.critical("Title regex file is missing.")
         return {}
-    return custom_regexes
+    return override_options
 
 
 def open_manga_data(manga_data_path: Path) -> Dict[str, dict]:

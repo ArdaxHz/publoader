@@ -1,6 +1,7 @@
 import argparse
 import atexit
 import logging
+import os
 import signal
 import sys
 import traceback
@@ -70,7 +71,7 @@ def run_updates(
     untracked_manga = extension_data["untracked_manga"]
     tracked_mangadex_ids = extension_data["tracked_mangadex_ids"]
     mangadex_group_id = extension_data["mangadex_group_id"]
-    custom_regexes = extension_data["custom_regexes"]
+    override_options = extension_data["override_options"]
     extension_languages = extension_data["extension_languages"]
     clean_db = extension_data["clean_db"]
 
@@ -99,6 +100,8 @@ def run_updates(
                 f"language: {update.chapter_language!r}, "
                 f"title: {update.chapter_title!r}."
             )
+            update.extension_name = extension_name
+            update.chapter_lookup = get_current_datetime()
 
         print(f"Found {len(updated_chapters)} chapters for {normalised_extension_name}")
         PubloaderWebhook(
@@ -125,7 +128,7 @@ def run_updates(
             untracked_manga=untracked_manga,
             tracked_mangadex_ids=tracked_mangadex_ids,
             mangadex_group_id=mangadex_group_id,
-            custom_regexes=custom_regexes,
+            override_options=override_options,
             extension_languages=extension_languages,
             clean_db=clean_db,
             chapters_on_db=posted_chapters_data,
@@ -183,7 +186,7 @@ def handle_exit(*args):
     try:
         print(f"{'-'*10}Program Exit{'-'*10}")
         logger.info(f"{'-'*10}Program Exit{'-'*10}")
-        sys.exit(0)
+        os._exit(1)
     except BaseException as exception:
         print(f"{'-'*10}Error Program Exit{'-'*10}")
         logger.exception(f"{'-'*10}Error Program Exit{'-'*10}")

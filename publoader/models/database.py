@@ -9,7 +9,7 @@ from pymongo import DeleteOne, UpdateOne
 from publoader.models.dataclasses import Chapter
 from publoader.utils.config import config
 from publoader.utils.singleton import Singleton
-from publoader.utils.utils import EXPIRE_TIME
+from publoader.utils.utils import EXPIRE_TIME, get_current_datetime
 
 logger = logging.getLogger("publoader")
 logger_debug = logging.getLogger("debug")
@@ -152,6 +152,7 @@ def update_expired_chapter_database(
         chapters.extend(
             [
                 {
+                    "chapter_lookup": get_current_datetime(),
                     "chapter_timestamp": EXPIRE_TIME,
                     "chapter_expire": EXPIRE_TIME,
                     "chapter_language": md_chap["attributes"]["translatedLanguage"],

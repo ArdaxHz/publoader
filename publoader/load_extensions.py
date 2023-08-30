@@ -18,8 +18,11 @@ logger = logging.getLogger("publoader")
 EXTENSION_NAME_REGEX = re.compile(r"^([a-z0-9_]+)$")
 
 
-def validate_list_chapters(list_to_validate, list_elements_type):
+def validate_list_chapters(list_to_validate, list_elements_type, return_none=False):
     """Check if variable is a list and the contents of the list are of the specified type."""
+    if return_none:
+        return None
+
     if not isinstance(list_to_validate, list):
         raise TypeError("Specified list is not a list.")
 
@@ -40,6 +43,7 @@ def validate_list_chapters(list_to_validate, list_elements_type):
 
     if list_elements_wrong:
         logger.warning(f"Skipping wrong type elements: {list_elements_wrong}")
+
     return list_elements_correct
 
 
@@ -297,7 +301,7 @@ def run_extension(extension: dict, clean_db_override: bool = False):
             extension_name, extension_class, "get_updated_chapters", default=[]
         )
         all_chapters = check_class_has_method(
-            extension_name, extension_class, "get_all_chapters", default=[]
+            extension_name, extension_class, "get_all_chapters", default=None
         )
         untracked_manga = check_class_has_method(
             extension_name, extension_class, "get_updated_manga", default=[]
@@ -308,8 +312,8 @@ def run_extension(extension: dict, clean_db_override: bool = False):
         mangadex_group_id = check_class_has_attribute(
             extension_name, extension_class, "mangadex_group_id"
         )
-        custom_regexes = check_class_has_attribute(
-            extension_name, extension_class, "custom_regexes", default={}
+        override_options = check_class_has_attribute(
+            extension_name, extension_class, "override_options", default={}
         )
         extension_languages = check_class_has_attribute(
             extension_name, extension_class, "extension_languages", default=[]
@@ -334,9 +338,10 @@ def run_extension(extension: dict, clean_db_override: bool = False):
             logger.error(
                 f"{normalised_extension_name} all chapters is not a list, initialising list as empty."
             )
-            all_chapters = []
+            all_chapters = None
 
-        convert_chapters_datetimes(all_chapters)
+        if all_chapters is not None:
+            convert_chapters_datetimes(all_chapters)
 
         try:
             untracked_manga = validate_list_chapters(untracked_manga, Manga)
@@ -362,11 +367,11 @@ def run_extension(extension: dict, clean_db_override: bool = False):
             )
             return
 
-        if not isinstance(custom_regexes, dict):
+        if not isinstance(override_options, dict):
             logger.error(
                 f"{normalised_extension_name} custom regexes is not a dict, initialising as dict."
             )
-            custom_regexes = {}
+            override_options = {}
 
         return {
             "extension": extension_class,
@@ -377,7 +382,7 @@ def run_extension(extension: dict, clean_db_override: bool = False):
             "untracked_manga": untracked_manga,
             "tracked_mangadex_ids": tracked_mangadex_ids,
             "mangadex_group_id": mangadex_group_id,
-            "custom_regexes": custom_regexes,
+            "override_options": override_options,
             "extension_languages": extension_languages,
             "posted_chapters_ids": posted_chapters_ids,
             "clean_db": clean_db,

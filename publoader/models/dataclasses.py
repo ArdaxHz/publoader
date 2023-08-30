@@ -14,6 +14,7 @@ class Manga:
 
 @dataclass()
 class Chapter:
+    chapter_lookup: Optional[datetime] = None
     chapter_timestamp: Optional[datetime] = None
     chapter_language: Optional[str] = None
 

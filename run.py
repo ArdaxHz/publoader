@@ -109,7 +109,7 @@ def restart():
     install_requirements()
 
     print(f"Restarting with args {sys.executable=} {sys.argv=}")
-    os.execv(sys.executable, [sys.executable] + sys.argv)
+    os.execv(sys.executable, [sys.executable, sys.argv[0]])
 
 
 if __name__ == "__main__":

@@ -31,14 +31,14 @@ class MangaUploaderProcess:
         extension_name: str,
         clean_db: bool,
         updated_chapters: List[Chapter],
-        all_manga_chapters: List[Chapter],
+        all_manga_chapters: Optional[List[Chapter]],
         mangadex_manga_id: str,
         mangadex_group_id: str,
         total_chapters_on_md: List[dict],
         current_uploaded_chapters: List[Chapter],
+        override_options: dict,
         same_chapter_dict: Dict[str, List[str]],
         mangadex_manga_data: dict,
-        custom_language: Dict[str, str],
         chapters_on_db: List[Chapter],
         languages: List[str],
         chapters_for_upload: List[Chapter],
@@ -53,15 +53,16 @@ class MangaUploaderProcess:
         self.mangadex_manga_id = mangadex_manga_id
         self.mangadex_group_id = mangadex_group_id
         self.posted_md_updates = current_uploaded_chapters
+        self.override_options = override_options
         self.same_chapter_dict = same_chapter_dict
         self.mangadex_manga_data = mangadex_manga_data
-        self.custom_language = custom_language
         self.chapters_on_db = chapters_on_db
         self.languages = languages
         self.chapters_for_upload = chapters_for_upload
         self.chapters_for_skipping = chapters_for_skipping
         self.chapters_for_editing = chapters_for_editing
         self.total_chapters_on_md = total_chapters_on_md
+        self.custom_language = self.override_options.get("custom_language", {})
 
         self.chapters_on_md = self._get_external_chapters_md()
         self.total_chapters_on_md.extend(self.chapters_on_md)
@@ -92,11 +93,11 @@ class MangaUploaderProcess:
         md_chapters_not_external = [
             c
             for c in self.chapters_on_md
-            if c["attributes"]["chapter"]
-            not in [x.chapter_number for x in self.all_manga_chapters]
-            or c["attributes"]["translatedLanguage"]
+            if c["attributes"]["translatedLanguage"]
             not in list(set(self.languages + list(self.custom_language.values())))
         ]
+
+        print(f"{md_chapters_not_external=}")
 
         logger.info(
             f"{self.__class__.__name__} deleter finder for extensions.{self.extension_name} "
@@ -110,7 +111,7 @@ class MangaUploaderProcess:
         )
 
     def _delete_extra_chapters(self):
-        if not self.all_manga_chapters:
+        if self.all_manga_chapters is None:
             return
 
         self._remove_chapters_not_external()
@@ -157,15 +158,14 @@ class MangaUploaderProcess:
         """Check for duplicate chapters on mangadex."""
         for md_chapter in self.chapters_on_md:
             if (
-                md_chapter["attributes"]["chapter"] == chapter.chapter_number
-                and md_chapter["attributes"]["translatedLanguage"]
-                == chapter.chapter_language
-                and md_chapter["attributes"]["externalUrl"] is not None
+                md_chapter["attributes"]["externalUrl"] is not None
                 and re.search(
                     chapter.chapter_id, md_chapter["attributes"]["externalUrl"]
                 )
                 and chapter.chapter_id
                 not in flatten(list(self.same_chapter_dict.values()))
+                and chapter.chapter_id
+                not in self.override_options.get("multi_chapters", [])
             ):
                 chapter.md_chapter_id = md_chapter["id"]
                 return {"md_chapter": md_chapter, "chapter": chapter}
@@ -175,10 +175,7 @@ class MangaUploaderProcess:
         """Check if chapter id to upload has been uploaded already under a different
         id."""
         same_chapter_list_md = [
-            c["attributes"]["externalUrl"]
-            for c in self.chapters_on_md
-            if c["attributes"]["chapter"] == chapter.chapter_number
-            and c["attributes"]["translatedLanguage"] == chapter.chapter_language
+            c["attributes"]["externalUrl"] for c in self.chapters_on_md
         ]
         same_chapter_list_posted_ids = [
             str(c.chapter_id) for c in self.posted_md_updates
