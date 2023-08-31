@@ -97,8 +97,6 @@ class MangaUploaderProcess:
             not in list(set(self.languages + list(self.custom_language.values())))
         ]
 
-        print(f"{md_chapters_not_external=}")
-
         logger.info(
             f"{self.__class__.__name__} deleter finder for extensions.{self.extension_name} "
             f"found: {md_chapters_not_external}"
@@ -164,9 +162,15 @@ class MangaUploaderProcess:
                 )
                 and chapter.chapter_id
                 not in flatten(list(self.same_chapter_dict.values()))
-                and chapter.chapter_id
-                not in self.override_options.get("multi_chapters", [])
             ):
+                if chapter.chapter_id in self.override_options.get(
+                    "multi_chapters", {}
+                ):
+                    if chapter.chapter_number not in self.override_options.get(
+                        "multi_chapters", {}
+                    ).get(chapter.chapter_id, []):
+                        continue
+
                 chapter.md_chapter_id = md_chapter["id"]
                 return {"md_chapter": md_chapter, "chapter": chapter}
         return

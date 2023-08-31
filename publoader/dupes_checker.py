@@ -25,19 +25,20 @@ class DeleteDuplicatesMD:
         manga_data_local: Dict[str, dict],
         extension_languages: List[str],
         mangadex_group_id: str,
+        override_options: dict,
     ) -> None:
         self.extension_name = extension_name
         self.tracked_mangadex_ids = tracked_mangadex_ids
         self.manga_data_local = manga_data_local
         self.languages = list(set(extension_languages))
         self.mangadex_group_id = mangadex_group_id
+        self.override_options = override_options
         self.to_delete = []
 
     def check_count(self, aggregate_chapters: dict) -> List[dict]:
         to_check = []
         for chapter in iter_aggregate_chapters(aggregate_chapters):
-            if chapter["count"] > 1:
-                to_check.append(chapter)
+            to_check.append(chapter)
         return to_check
 
     def fetch_chapters(self, chapters: List[str]) -> Optional[List[dict]]:
@@ -67,73 +68,122 @@ class DeleteDuplicatesMD:
 
         return {manga_id: {"id": manga_id, "title": manga_title}}
 
-    def filter_group(self, chapter: dict) -> List[str]:
-        return [
-            g["id"] for g in chapter["relationships"] if g["type"] == "scanlation_group"
-        ]
-
     def check_chapters(
         self, chapters: List[dict], dupes_webhook: "PubloaderDupesWebhook"
-    ) -> List[dict]:
-        to_check = []
-
+    ) -> Optional[List[dict]]:
         chapters_to_check = [
             chapter
             for chapter in chapters
-            if self.mangadex_group_id in self.filter_group(chapter)
+            if self.mangadex_group_id
+            in [
+                g["id"]
+                for g in chapter["relationships"]
+                if g["type"] == "scanlation_group"
+            ]
             and chapter["attributes"]["externalUrl"] is not None
         ]
 
         if len(chapters_to_check) <= 1:
             return
 
-        for chapter in chapters_to_check[1:]:
-            current_index = chapters_to_check.index(chapter)
-            previous_chapter = chapters_to_check[current_index - 1]
+        not_dupe = []
+        dupes = []
 
-            current_attributes = chapter["attributes"]
-            previous_attributes = previous_chapter["attributes"]
-
-            if previous_attributes["chapter"] == current_attributes["chapter"] and bool(
-                re.search(
-                    previous_attributes["externalUrl"],
-                    current_attributes["externalUrl"],
-                    re.I,
+        for chapter in chapters_to_check:
+            external_url = chapter["attributes"]["externalUrl"]
+            match_list = list(
+                filter(
+                    lambda x: x
+                    if re.search(external_url, x["attributes"]["externalUrl"])
+                    else None,
+                    not_dupe,
                 )
-            ):
-                if chapter not in to_check:
-                    to_check.append(chapter)
+            )
+            if match_list:
+                dupes.extend([chapter, *match_list])
+            else:
+                not_dupe.append(chapter)
 
-                if previous_chapter not in to_check:
-                    to_check.append(previous_chapter)
+        values = set([x["attributes"]["externalUrl"] for x in dupes])
+        to_check = [
+            list(
+                filter(
+                    lambda x: x
+                    if re.search(x["attributes"]["externalUrl"], y)
+                    else None,
+                    dupes,
+                )
+            )
+            for y in values
+        ]
 
-        if to_check:
-            oldest = to_check[0]
-            for chapter in to_check:
-                if datetime.strptime(
-                    chapter["attributes"]["createdAt"], "%Y-%m-%dT%H:%M:%S%z"
-                ) < datetime.strptime(
-                    oldest["attributes"]["createdAt"], "%Y-%m-%dT%H:%M:%S%z"
-                ):
-                    oldest = chapter
+        checked_to_remove = []
+        for unsorted_dupes in to_check:
+            sorted_chapters = sorted(
+                unsorted_dupes,
+                key=lambda chap_timestamp: datetime.strptime(
+                    chap_timestamp["attributes"]["createdAt"], "%Y-%m-%dT%H:%M:%S%z"
+                ),
+            )
 
-            oldest_id = oldest["id"]
-            try:
-                to_check.remove(oldest)
-            except ValueError:
-                pass
+            chapters_to_remove = []
 
-            if to_check:
-                dupes_webhook.add_chapters(oldest, to_check)
+            multi_chapter_chapters = [
+                {"external_chapter_id": multi_chapter_id, "chapter_to_check": x}
+                for multi_chapter_id in self.override_options.get("multi_chapters", {})
+                for x in list(
+                    filter(
+                        lambda y: y
+                        if bool(
+                            re.search(
+                                multi_chapter_id,
+                                y["attributes"]["externalUrl"],
+                            )
+                        )
+                        else None,
+                        sorted_chapters,
+                    ),
+                )
+            ]
 
-                to_return_ids = list(set([c["id"] for c in to_check]))
-                try:
-                    to_return_ids.remove(oldest_id)
-                except ValueError:
-                    pass
-                print(f"Found dupes of {oldest_id} to delete: {to_return_ids}")
-                logger.info(f"Found dupes of {oldest_id} to delete: {to_return_ids}")
-        return to_check
+            single_chapter_chapters = [
+                x
+                for x in sorted_chapters
+                if x not in [y["chapter_to_check"] for y in multi_chapter_chapters]
+            ]
+
+            multi_chapter_chapters_not_remove = []
+
+            for multi_chap_obj in multi_chapter_chapters:
+                multi_chapter_id = multi_chap_obj["external_chapter_id"]
+                chap = multi_chap_obj["chapter_to_check"]
+                if chap["attributes"]["chapter"] in self.override_options.get(
+                    "multi_chapters", {}
+                ).get(multi_chapter_id, []):
+                    for not_remove_chap in self.override_options.get(
+                        "multi_chapters", {}
+                    ).get(multi_chapter_id, []):
+                        if not_remove_chap not in [
+                            x["attributes"]["chapter"]
+                            for x in multi_chapter_chapters_not_remove
+                        ]:
+                            multi_chapter_chapters_not_remove.append(chap)
+
+            chapters_to_remove = [
+                chap["chapter_to_check"]
+                for chap in multi_chapter_chapters
+                if chap["chapter_to_check"] not in multi_chapter_chapters_not_remove
+            ]
+
+            chapters_to_remove.extend(single_chapter_chapters[1:])
+            checked_to_remove.extend(chapters_to_remove)
+
+        if checked_to_remove:
+            dupes_webhook.add_chapter(checked_to_remove)
+
+        print(f"Found dupes to delete.")
+        logger.info(f"Found dupes to delete: {[x['id'] for x in checked_to_remove]}")
+        return checked_to_remove
 
     def sort_chapters(self, chapters: list):
         sorted_chapters = {}

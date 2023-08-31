@@ -367,6 +367,14 @@ class PubloaderDupesWebhook(WebhookBase):
             }
         )
 
+    def add_chapter(self, chapters: List[dict]):
+        self.chapters.append(
+            {
+                "name": f"Dupes",
+                "value": self.normalise_chapters(chapters),
+            }
+        )
+
     def normalise_chapters(self, chapters: List[dict]) -> str:
         return "\n".join([f'`{chapter["id"]}`' for chapter in chapters])
 

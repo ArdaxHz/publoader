@@ -61,6 +61,24 @@ class ExtensionUploader:
         self.chapters_for_skipping: List[Chapter] = []
         self.chapters_for_editing: List[Chapter] = []
 
+    def _get_external_chapters_md(self, manga_ids) -> Dict[str, List[dict]]:
+        """Get the chapter data of the passed manga ids."""
+        logger.debug(
+            f"Getting {self.extension_name}'s uploaded chapters for series: {manga_ids}"
+        )
+        print(f"Getting {self.extension_name} chapters on mangadex for certain series.")
+        chapters_sorted = {}
+        for manga_id in set(manga_ids):
+            chapters_sorted[manga_id] = get_md_api(
+                "chapter",
+                **{
+                    "groups[]": [self.mangadex_group_id],
+                    "order[createdAt]": "desc",
+                    "manga": manga_id,
+                },
+            )
+        return chapters_sorted
+
     def find_untracked_md_manga(self):
         """Check if any series on MangaDex are not tracked."""
         manga_ids = set()

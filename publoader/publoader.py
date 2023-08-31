@@ -1,9 +1,5 @@
 import argparse
-import atexit
 import logging
-import os
-import signal
-import sys
 import traceback
 from typing import List
 
@@ -146,6 +142,7 @@ def run_updates(
                 manga_data_local=manga_data_local,
                 extension_languages=extension_languages,
                 mangadex_group_id=mangadex_group_id,
+                override_options=override_options,
             )
             dupes_deleter.delete_dupes()
         return True
@@ -180,22 +177,6 @@ def open_extensions(
             extensions[site],
             manga_data_local=manga_data_local,
         )
-
-
-def handle_exit(*args):
-    try:
-        print(f"{'-'*10}Program Exit{'-'*10}")
-        logger.info(f"{'-'*10}Program Exit{'-'*10}")
-        os._exit(1)
-    except BaseException as exception:
-        print(f"{'-'*10}Error Program Exit{'-'*10}")
-        logger.exception(f"{'-'*10}Error Program Exit{'-'*10}")
-        sys.exit(1)
-
-
-atexit.register(handle_exit)
-signal.signal(signal.SIGTERM, handle_exit)
-signal.signal(signal.SIGINT, handle_exit)
 
 
 if __name__ == "__main__":
