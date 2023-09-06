@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import math
+from datetime import datetime
 from typing import Dict, List, Optional
 
 from publoader.models.http import RequestError, http_client
@@ -84,7 +85,12 @@ def get_md_api(route: str, **params: dict) -> List[dict]:
         iteration += 1
         retry = 0
 
-    return chapters
+    return sorted(
+        chapters,
+        key=lambda chap_timestamp: datetime.strptime(
+            chap_timestamp["attributes"]["createdAt"], "%Y-%m-%dT%H:%M:%S%z"
+        ),
+    )
 
 
 def iter_aggregate_chapters(aggregate_chapters: dict):

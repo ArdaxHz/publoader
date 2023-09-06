@@ -88,13 +88,17 @@ class MangaUploaderProcess:
             },
         )
 
-    def _remove_chapters_not_external(self):
-        """Find chapters on MangaDex not on external."""
+    def _delete_extra_chapters(self):
+        if self.all_manga_chapters is None:
+            return
+
         md_chapters_not_external = [
             c
             for c in self.chapters_on_md
             if c["attributes"]["translatedLanguage"]
             not in list(set(self.languages + list(self.custom_language.values())))
+            or c["attributes"]["externalUrl"]
+            not in [x.chapter_url for x in self.all_manga_chapters]
         ]
 
         logger.info(
@@ -107,12 +111,6 @@ class MangaUploaderProcess:
             md_chapter=md_chapters_not_external,
             md_manga_id=self.mangadex_manga_id,
         )
-
-    def _delete_extra_chapters(self):
-        if self.all_manga_chapters is None:
-            return
-
-        self._remove_chapters_not_external()
 
     def get_chapter_volumes(self):
         aggregate_chapters = fetch_aggregate(
@@ -153,7 +151,7 @@ class MangaUploaderProcess:
                             chapter.chapter_volume = volume_str
 
     def _check_for_duplicate_chapter_md_list(self, chapter) -> Optional[dict]:
-        """Check for duplicate chapters on mangadex."""
+        """Check if chapter exists on MangaDex already."""
         for md_chapter in self.chapters_on_md:
             if (
                 md_chapter["attributes"]["externalUrl"] is not None
@@ -166,14 +164,17 @@ class MangaUploaderProcess:
                 if chapter.chapter_id in self.override_options.get(
                     "multi_chapters", {}
                 ):
-                    if chapter.chapter_number not in self.override_options.get(
+                    multi_chapters_list = self.override_options.get(
                         "multi_chapters", {}
-                    ).get(chapter.chapter_id, []):
+                    ).get(chapter.chapter_id, [])
+
+                    if chapter.chapter_number not in multi_chapters_list:
                         continue
 
                 chapter.md_chapter_id = md_chapter["id"]
-                return {"md_chapter": md_chapter, "chapter": chapter}
-        return
+                on_md = {"md_chapter": md_chapter, "chapter": chapter, "exists": True}
+                return on_md
+        return {"chapter": chapter, "exists": False}
 
     def _check_uploaded_different_id(self, chapter) -> bool:
         """Check if chapter id to upload has been uploaded already under a different
@@ -267,10 +268,10 @@ class MangaUploaderProcess:
         chapters_to_upload = [
             chapter
             for chapter in self.updated_chapters
-            if not bool(self._check_for_duplicate_chapter_md_list(chapter))
+            if self._check_for_duplicate_chapter_md_list(chapter)["exists"] is False
             and not self._check_uploaded_different_id(chapter)
         ]
-        dupes = [dupe for dupe in chapters_dupe_checker if dupe is not None]
+        dupes = [dupe for dupe in chapters_dupe_checker if dupe["exists"] is True]
 
         chapters_to_edit = [
             dupe for dupe in map(self.edit_chapter, dupes) if dupe is not None

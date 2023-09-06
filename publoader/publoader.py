@@ -136,15 +136,23 @@ def run_updates(
         )
 
         if clean_db:
-            dupes_deleter = DeleteDuplicatesMD(
-                extension_name=extension_name,
-                tracked_mangadex_ids=tracked_mangadex_ids,
-                manga_data_local=manga_data_local,
-                extension_languages=extension_languages,
-                mangadex_group_id=mangadex_group_id,
-                override_options=override_options,
+            mangadex_manga_ids_for_dupe_remove = tracked_mangadex_ids
+        else:
+            mangadex_manga_ids_for_dupe_remove = (
+                [x.md_manga_id for x in updated_chapters]
+                if updated_chapters
+                else tracked_mangadex_ids
             )
-            dupes_deleter.delete_dupes()
+
+        dupes_deleter = DeleteDuplicatesMD(
+            extension_name=extension_name,
+            tracked_mangadex_ids=mangadex_manga_ids_for_dupe_remove,
+            manga_data_local=manga_data_local,
+            extension_languages=extension_languages,
+            mangadex_group_id=mangadex_group_id,
+            override_options=override_options,
+        )
+        dupes_deleter.delete_dupes()
         return True
     except Exception:
         traceback.print_exc()
