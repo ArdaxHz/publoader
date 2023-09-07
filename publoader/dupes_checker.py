@@ -223,7 +223,7 @@ class DeleteDuplicatesMD:
     def delete_dupes(self):
         print("Looking for chapter dupes.")
 
-        for mang_index, manga_id in enumerate(self.tracked_mangadex_ids, start=1):
+        for mang_index, manga_id in enumerate(set(self.tracked_mangadex_ids), start=1):
             manga_data = self.manga_data_local.get(manga_id)
             dupes_webhook = PubloaderDupesWebhook(self.extension_name, manga_data)
             dupes_found = False

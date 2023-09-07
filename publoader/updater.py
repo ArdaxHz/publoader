@@ -10,6 +10,7 @@ from github.Commit import Commit
 
 from publoader.utils.config import config, resources_path
 from publoader.utils.utils import root_path
+from publoader.webhook import PubloaderWebhook
 
 logger = logging.getLogger("publoader")
 
@@ -124,6 +125,11 @@ class PubloaderUpdater:
             return False, commit_sha_var
 
         logger.info(f"Update found, downloading {latest_remote_commit.sha}")
+        PubloaderWebhook(
+            extension_name=None,
+            title=f"Update found for repo {repo_name}",
+            description=f"SHA: `latest_remote_commit.sha`",
+        ).main()
         failed_download = self.download_content(repo, download_path, "")
         return failed_download, latest_remote_commit.sha
 
@@ -165,9 +171,17 @@ class PubloaderUpdater:
 
         if base_repo_failed or extensions_private_repo_failed or extensions_repo_failed:
             logger.warning(f"Downloading new repo update failed, not updating.")
+            PubloaderWebhook(
+                extension_name=None,
+                title=f"Updating repos failed, not downloading.",
+            ).send()
             shutil.rmtree(self.update_path, ignore_errors=True)
             return
 
+        PubloaderWebhook(
+            extension_name=None,
+            title=f"Update download complete, applying changes.",
+        ).send()
         logger.info("Update download complete, applying changes.")
         self.move_files()
         self._save_commits()
