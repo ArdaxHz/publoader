@@ -43,7 +43,9 @@ def send_untracked_manga_webhook(extension_name, untracked_manga):
         for count, series_list in enumerate(split_series, start=1):
             PubloaderWebhook(
                 extension_name=extension_name,
-                title=f"{len(untracked_manga)} Untracked Manga ({count})",
+                title=f"{len(untracked_manga)} Untracked Manga" + f" ({count})"
+                if count > 1
+                else "",
                 description="\n".join(
                     [
                         f"**{manga.manga_name}**: [{manga.manga_id}]({manga.manga_url})"
@@ -70,12 +72,6 @@ def run_updates(
     override_options = extension_data["override_options"]
     extension_languages = extension_data["extension_languages"]
     clean_db = extension_data["clean_db"]
-
-    PubloaderWebhook(
-        extension_name,
-        title=f"Posting updates for extension {extension_name}",
-        add_timestamp=False,
-    ).main()
 
     try:
         send_untracked_manga_webhook(extension_name, untracked_manga)

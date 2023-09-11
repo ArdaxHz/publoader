@@ -128,7 +128,7 @@ class PubloaderUpdater:
         PubloaderWebhook(
             extension_name=None,
             title=f"Update found for repo {repo_name}",
-            description=f"SHA: `latest_remote_commit.sha`",
+            description=f"SHA: `{latest_remote_commit.sha}`",
         ).main()
         failed_download = self.download_content(repo, download_path, "")
         return failed_download, latest_remote_commit.sha
@@ -178,10 +178,10 @@ class PubloaderUpdater:
             shutil.rmtree(self.update_path, ignore_errors=True)
             return
 
-        PubloaderWebhook(
-            extension_name=None,
-            title=f"Update download complete, applying changes.",
-        ).send()
+        # PubloaderWebhook(
+        #     extension_name=None,
+        #     title=f"Update download complete, applying changes.",
+        # ).send()
         logger.info("Update download complete, applying changes.")
         self.move_files()
         self._save_commits()
