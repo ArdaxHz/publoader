@@ -43,9 +43,8 @@ def send_untracked_manga_webhook(extension_name, untracked_manga):
         for count, series_list in enumerate(split_series, start=1):
             PubloaderWebhook(
                 extension_name=extension_name,
-                title=f"{len(untracked_manga)} Untracked Manga" + f" ({count})"
-                if count > 1
-                else "",
+                title=f"{len(untracked_manga)} Untracked Manga"
+                + (f" ({count})" if count > 1 else ""),
                 description="\n".join(
                     [
                         f"**{manga.manga_name}**: [{manga.manga_id}]({manga.manga_url})"
