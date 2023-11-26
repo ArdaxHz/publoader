@@ -3,8 +3,9 @@ import re
 from datetime import datetime
 from typing import Dict, List, Optional
 
+from publoader.http import http_client
+from publoader.http.properties import RequestError
 from publoader.models.database import update_expired_chapter_database
-from publoader.models.http import RequestError, http_client
 from publoader.utils.config import mangadex_api_url
 from publoader.utils.misc import (
     fetch_aggregate,
@@ -296,6 +297,7 @@ class DeleteDuplicatesMD:
                     extension_name=self.extension_name,
                     md_chapter=chapters_to_delete,
                     md_manga_id=manga_id,
+                    mangadex_manga_data=self.manga_data_local,
                 )
 
             if not dupes_found:

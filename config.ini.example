@@ -1,6 +1,8 @@
 [Credentials]
 MANGADEX_USERNAME=
 MANGADEX_PASSWORD=
+CLIENT_ID=
+CLIENT_SECRET=
 MONGODB_URI=
 MONGODB_DB_NAME=
 
@@ -14,6 +16,7 @@ MAX_LOG_DAYS=30
 
 [Paths]
 MANGADEX_API_URL=https://api.mangadex.org
+MANGADEX_AUTH_URL=https://auth.mangadex.org/realms/mangadex/protocol/openid-connect
 RESOURCES_PATH=resources
 MDAUTH_PATH=.mdauth
 COMMITS_PATH=.commits

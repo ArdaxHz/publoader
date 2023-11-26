@@ -104,6 +104,7 @@ class ExtensionUploader:
                     extension_name=self.extension_name,
                     md_chapter=self.chapters_on_md[manga_id],
                     md_manga_id=manga_id,
+                    mangadex_manga_data=self.manga_data_local,
                 )
 
     def remove_chapters_if_not_external(self):
@@ -148,6 +149,7 @@ class ExtensionUploader:
                     extension_name=self.extension_name,
                     md_chapter=tracked_ids_no_chapters_md[manga_id],
                     md_manga_id=manga_id,
+                    mangadex_manga_data=self.manga_data_local,
                 )
 
     def _get_manga_data_md(self) -> Dict[str, dict]:
@@ -211,6 +213,12 @@ class ExtensionUploader:
                     f"No mangadex id found for {self.extension_name} id {chapter.manga_id}."
                 )
                 continue
+
+            chapter.manga_name = (
+                self.manga_data_local.get(md_id, {}).get("title")
+                if self.manga_data_local.get(md_id, {}).get("title")
+                else chapter.manga_name
+            )
 
             try:
                 chapters_sorted[md_id].append(chapter)

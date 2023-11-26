@@ -7,13 +7,13 @@ from typing import Dict, List, Optional
 import natsort
 from gridfs import GridOut
 
+from publoader.http.properties import RequestError
 from publoader.models.database import (
     database_connection,
     image_filestream,
     update_database,
 )
 from publoader.models.dataclasses import Chapter
-from publoader.models.http import RequestError
 from publoader.utils.config import (
     md_upload_api_url,
     ratelimit_time,

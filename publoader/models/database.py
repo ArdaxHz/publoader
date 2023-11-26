@@ -120,6 +120,7 @@ def update_expired_chapter_database(
     md_manga_id: str,
     md_chapter: Union[List[dict], dict] = None,
     chapter: Union[list, Union[Chapter, dict]] = None,
+    mangadex_manga_data: dict = None,
     **kwargs,
 ):
     """Update a chapter as expired on the database."""
@@ -128,6 +129,9 @@ def update_expired_chapter_database(
 
     if chapter is None:
         chapter = []
+
+    if mangadex_manga_data is None:
+        mangadex_manga_data = {}
 
     if not chapter and not md_chapter:
         logger.info(f"No chapters specified to update expired.")
@@ -162,6 +166,7 @@ def update_expired_chapter_database(
                     "md_chapter_id": md_chap["id"],
                     "chapter_url": md_chap["attributes"]["externalUrl"],
                     "extension_name": extension_name,
+                    "manga_name": mangadex_manga_data.get(md_manga_id, {}).get("title"),
                 }
                 for md_chap in md_chapter
             ]

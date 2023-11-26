@@ -7,6 +7,7 @@ import gridfs.errors
 import pymongo
 from pymongo import UpdateOne
 
+from publoader.http import http_client
 from publoader.models.database import (
     database_connection,
     image_filestream,
@@ -14,7 +15,6 @@ from publoader.models.database import (
     update_expired_chapter_database,
 )
 from publoader.models.dataclasses import Chapter
-from publoader.models.http import http_client
 from publoader.utils.misc import (
     fetch_aggregate,
     find_key_from_list_value,
@@ -56,6 +56,10 @@ class MangaUploaderProcess:
         self.override_options = override_options
         self.same_chapter_dict = same_chapter_dict
         self.mangadex_manga_data = mangadex_manga_data
+
+        if not self.mangadex_manga_data.get("title", None):
+            self.mangadex_manga_data["title"] = "No Title Found"
+
         self.chapters_on_db = chapters_on_db
         self.languages = languages
         self.chapters_for_upload = chapters_for_upload
@@ -110,6 +114,7 @@ class MangaUploaderProcess:
             extension_name=self.extension_name,
             md_chapter=md_chapters_not_external,
             md_manga_id=self.mangadex_manga_id,
+            mangadex_manga_data=self.mangadex_manga_data,
         )
 
     def get_chapter_volumes(self):
@@ -297,7 +302,7 @@ class MangaUploaderProcess:
         ]
 
         print(
-            f"Inserting chapters for manga {self.mangadex_manga_id}: {self.mangadex_manga_data.get('title', 'No title found')}"
+            f"Inserting chapters for manga {self.mangadex_manga_id}: {self.mangadex_manga_data['title']}"
         )
 
         if chapters_to_insert:

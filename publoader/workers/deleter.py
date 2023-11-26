@@ -1,9 +1,9 @@
 import logging
 from typing import Optional
 
+from publoader.http.properties import RequestError
 from publoader.models.database import database_connection
 from publoader.models.dataclasses import Chapter
-from publoader.models.http import RequestError
 from publoader.utils.config import mangadex_api_url
 from publoader.utils.utils import get_current_datetime
 

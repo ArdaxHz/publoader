@@ -13,6 +13,12 @@ def load_config_info(config: configparser.RawConfigParser):
         logger.warning("Mangadex api path empty, using default.")
         config["Paths"]["mangadex_api_url"] = "https://api.mangadex.org"
 
+    if config["Paths"].get("mangadex_auth_url", "") == "":
+        logger.warning("Mangadex auth path empty, using default.")
+        config["Paths"][
+            "mangadex_auth_url"
+        ] = "https://auth.mangadex.org/realms/mangadex/protocol/openid-connect"
+
     if config["Paths"].get("mdauth_path", "") == "":
         logger.info("Mdauth path empty, using default.")
         config["Paths"]["mdauth_path"] = ".mdauth"
@@ -62,7 +68,9 @@ resources_path = root_path.joinpath(config["Paths"]["resources_path"])
 resources_path.mkdir(parents=True, exist_ok=True)
 
 mangadex_api_url = config["Paths"]["mangadex_api_url"]
+mangadex_auth_url = config["Paths"]["mangadex_auth_url"]
 md_upload_api_url = f"{mangadex_api_url}/upload"
+
 
 try:
     ratelimit_time = int(config["Options"].get("mangadex_ratelimit_time", ""))

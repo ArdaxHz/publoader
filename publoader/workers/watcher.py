@@ -7,10 +7,10 @@ import traceback
 
 import pymongo
 
+from publoader.http import http_client
 from publoader.models.database import (
     database_connection,
 )
-from publoader.models.http import http_client
 from publoader.utils.utils import root_path
 from publoader.webhook import PubloaderQueueWebhook
 from publoader.workers import worker as watcher_worker

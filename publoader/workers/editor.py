@@ -1,8 +1,8 @@
 import logging
 
+from publoader.http.properties import RequestError
 from publoader.models.database import database_connection, update_database
 from publoader.models.dataclasses import Chapter
-from publoader.models.http import RequestError
 from publoader.utils.config import mangadex_api_url
 
 logger = logging.getLogger("publoader-editor")

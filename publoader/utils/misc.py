@@ -4,7 +4,8 @@ import math
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from publoader.models.http import RequestError, http_client
+from publoader.http import http_client
+from publoader.http.properties import RequestError
 from publoader.utils.config import mangadex_api_url, upload_retry
 
 logger = logging.getLogger("publoader")

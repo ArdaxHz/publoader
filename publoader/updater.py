@@ -2,6 +2,7 @@ import json
 import logging
 import shutil
 import time
+from pathlib import Path
 
 import github
 import requests
@@ -182,6 +183,7 @@ class PubloaderUpdater:
         #     extension_name=None,
         #     title=f"Update download complete, applying changes.",
         # ).send()
+        Path(config["Paths"]["mdauth_path"]).unlink(missing_ok=True)
         logger.info("Update download complete, applying changes.")
         self.move_files()
         self._save_commits()

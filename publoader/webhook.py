@@ -306,6 +306,12 @@ class PubloaderQueueWebhook(WebhookHelper):
         }
 
     def add_chapter(self, chapter: dict, processed: bool = True):
+        if self.worker_type in ["uploader", "deleter"]:
+            if self.worker_type == "uploader" and not processed:
+                pass
+            else:
+                return
+
         self.fields.append(self.normalise_chapter(chapter, success=processed))
 
         if len(self.fields) >= 6:
