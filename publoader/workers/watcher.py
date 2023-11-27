@@ -19,13 +19,15 @@ logger = logging.getLogger("publoader")
 
 worker_paths = root_path.joinpath("publoader", "workers")
 worker_paths.mkdir(parents=True, exist_ok=True)
-queue = queue.Queue()
+bot_queue = queue.Queue()
 
 
 def worker(worker_type: str, worker_module, http_client, queue_webhook, **kwargs):
     """Run the worker."""
+    queue_size = bot_queue.qsize()
+
     while True:
-        item = queue.get()
+        item = bot_queue.get()
 
         try:
             print(f"----{worker_type.title()}: Working on {item['_id']}----")
@@ -35,9 +37,9 @@ def worker(worker_type: str, worker_module, http_client, queue_webhook, **kwargs
             traceback.print_exc()
             logger.exception(f"{worker_type.title()} raised an error.")
 
-        queue.task_done()
-        if queue.qsize() == 0:
-            queue_webhook.send_queue_finished()
+        bot_queue.task_done()
+        if bot_queue.qsize() == 0:
+            queue_webhook.send_queue_finished(queue_size)
 
             if worker_type == "uploader":
                 worker_module.check_all_chapters_uploaded()
@@ -45,12 +47,12 @@ def worker(worker_type: str, worker_module, http_client, queue_webhook, **kwargs
 
 def setup_thread(worker_type, queue_webhook, worker_module, *args, **kwargs):
     """Start the worker thread."""
-    with queue.mutex:
-        queue.queue.clear()
+    with bot_queue.mutex:
+        bot_queue.queue.clear()
 
     chapters = worker_module.fetch_data_from_database()
     for chapter in chapters:
-        queue.put(chapter)
+        bot_queue.put(chapter)
 
     thread = threading.Thread(
         target=worker,
@@ -101,7 +103,7 @@ def main(
                 [{"$match": {"operationType": "insert"}}]
             ) as stream:
                 for change in stream:
-                    queue.put(change["fullDocument"])
+                    bot_queue.put(change["fullDocument"])
 
                 if not thread.is_alive():
                     if not restart_threads:
@@ -117,5 +119,5 @@ def main(
             print(e)
 
     # Block until all tasks are done.
-    queue.join()
+    bot_queue.join()
     print("All work completed")

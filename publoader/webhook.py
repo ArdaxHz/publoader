@@ -306,8 +306,8 @@ class PubloaderQueueWebhook(WebhookHelper):
         }
 
     def add_chapter(self, chapter: dict, processed: bool = True):
-        if self.worker_type in ["uploader", "deleter"]:
-            if self.worker_type == "uploader" and not processed:
+        if self.worker_type.lower() in ["uploader", "deleter"]:
+            if self.worker_type.lower() == "uploader" and not processed:
                 pass
             else:
                 return
@@ -323,11 +323,11 @@ class PubloaderQueueWebhook(WebhookHelper):
 
             self.fields[:] = []
 
-    def send_queue_finished(self):
+    def send_queue_finished(self, queue_size=0):
         embed = self.make_embed(self.normalise_embed())
         embed_last = self.make_embed(
             {
-                "title": f"{self.worker_type}: Finished all items in queue.",
+                "title": f"{self.worker_type}: Finished {queue_size} items in queue",
                 "color": self.colour,
             }
         )
@@ -417,7 +417,9 @@ class PubloaderNotIndexedWebhook(WebhookHelper):
 
     def main(self):
         title = (
-            f"Chapter ids not indexed:" if self.chapter_ids else f"All chapters indexed"
+            f"Chapter ids not indexed:"
+            if self.chapter_ids
+            else f"All chapters indexed."
         )
         description = (
             "\n".join([f"`{chapter_id}`" for chapter_id in self.chapter_ids])

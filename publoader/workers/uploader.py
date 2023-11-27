@@ -1,7 +1,6 @@
 import logging
 import time
 from collections import deque
-from datetime import datetime
 from typing import Dict, List, Optional
 
 import natsort
@@ -249,13 +248,13 @@ class UploaderProcess:
             else [],
         }
 
-        if (
-            self.chapter.chapter_expire is not None
-            and self.chapter.chapter_expire > datetime.now()
-        ):
-            payload["chapterDraft"]["publishAt"] = self.chapter.chapter_expire.strftime(
-                "%Y-%m-%dT%H:%M:%S"
-            )
+        # if (
+        #     self.chapter.chapter_expire is not None
+        #     and self.chapter.chapter_expire > datetime.now()
+        # ):
+        #     payload["chapterDraft"]["publishAt"] = self.chapter.chapter_expire.strftime(
+        #         "%Y-%m-%dT%H:%M:%S"
+        #     )
 
         logger.info(f"Commit payload: {payload}")
 
