@@ -144,6 +144,15 @@ def find_key_from_list_value(
             return key
 
 
+def find_key_from_value(
+    dict_to_search: Dict[str, str], element_value: str
+) -> Optional[str]:
+    """Get the key from the value in a dictionary."""
+    for key, value in dict_to_search.items():
+        if value == element_value:
+            return key
+
+
 def format_title(manga_data: dict) -> str:
     """Get the MD title from the manga data."""
     attributes = manga_data.get("attributes", None)

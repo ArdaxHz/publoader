@@ -439,6 +439,7 @@ class PubloaderWebhook(WebhookHelper):
         self.embed_title = kwargs.get("title")
         self.embed_description = kwargs.get("description")
         self.embed_colour = kwargs.get("colour")
+        self.footer = kwargs.get("footer")
         self.timestamp = kwargs.get("timestamp", get_current_datetime().isoformat())
         self.add_timestamp = kwargs.get("add_timestamp", True)
 
@@ -447,6 +448,7 @@ class PubloaderWebhook(WebhookHelper):
             title=self.embed_title,
             description=self.embed_description,
             color=self.embed_colour or self.colour,
+            footer=self.footer,
         )
 
         if self.add_timestamp:

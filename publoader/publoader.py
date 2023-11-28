@@ -51,6 +51,7 @@ def send_untracked_manga_webhook(extension_name, untracked_manga):
                         for manga in series_list
                     ]
                 ),
+                footer={"text": f"extensions.{extension_name}"},
             ).send()
 
 
