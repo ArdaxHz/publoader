@@ -37,7 +37,7 @@ def worker(worker_type: str, worker_module, http_client, queue_webhook, **kwargs
 
         bot_queue.task_done()
         if bot_queue.qsize() == 0:
-            queue_webhook.send_queue_finished()
+            # queue_webhook.send_queue_finished()
 
             if worker_type == "uploader":
                 worker_module.check_all_chapters_uploaded()

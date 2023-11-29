@@ -411,8 +411,18 @@ def check_all_chapters_uploaded():
             if chapter_id not in [chapter["id"] for chapter in chapters_on_md]
         ]
 
+        chapters_indexed = [
+            chapter_id
+            for chapter_id in uploaded_chapter_ids
+            if chapter_id not in chapters_not_on_md
+        ]
+
         logger.info(f"Chapters not indexed: {chapters_not_on_md}")
-        PubloaderNotIndexedWebhook(None, chapters_not_on_md).main()
+        PubloaderNotIndexedWebhook(
+            None,
+            chapters_not_indexed=chapters_not_on_md,
+            chapters_indexed=len(chapters_indexed),
+        ).main()
     else:
         logger.info("No uploaded chapter mangadex ids.")
 

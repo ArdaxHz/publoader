@@ -397,9 +397,15 @@ class PubloaderDupesWebhook(WebhookBase):
 
 
 class PubloaderNotIndexedWebhook(WebhookHelper):
-    def __init__(self, extension_name: str, chapter_ids: List[str]) -> None:
+    def __init__(
+        self,
+        extension_name: str,
+        chapters_not_indexed: List[str],
+        chapters_indexed: int,
+    ) -> None:
         super().__init__(extension_name=extension_name)
-        self.chapter_ids = chapter_ids
+        self.chapters_not_indexed = chapters_not_indexed
+        self.chapters_indexed = chapters_indexed
         self.colour = "45539B"
 
     def make_embed(self, **embed_data):
@@ -417,13 +423,13 @@ class PubloaderNotIndexedWebhook(WebhookHelper):
 
     def main(self):
         title = (
-            f"Chapter ids not indexed:"
-            if self.chapter_ids
-            else f"All chapters indexed."
+            f"{len(self.chapters_not_indexed)} chapters not indexed:"
+            if self.chapters_not_indexed
+            else f"{self.chapters_indexed} chapters indexed."
         )
         description = (
-            "\n".join([f"`{chapter_id}`" for chapter_id in self.chapter_ids])
-            if self.chapter_ids
+            "\n".join([f"`{chapter_id}`" for chapter_id in self.chapters_not_indexed])
+            if self.chapters_not_indexed
             else None
         )
 
