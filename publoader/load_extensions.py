@@ -1,12 +1,11 @@
-import datetime
 import importlib.util
 import logging
 import re
 import sys
 import traceback
-from datetime import time, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Union
 
 from publoader.models.database import database_connection
 from publoader.models.dataclasses import Chapter, Manga
@@ -99,12 +98,16 @@ def convert_chapters_datetimes(chapters: List[Chapter]):
             chapter.chapter_expire = chapter.chapter_expire.astimezone(tz=timezone.utc)
 
 
-def check_run_in_range(time_to_run):
+def check_run_in_range(time_to_run: datetime):
     """Return true if time_to_run is in the range +- 5 minutes from now."""
     now = get_current_datetime()
     start = (now - timedelta(minutes=5)).time()
     end = (now + timedelta(minutes=5)).time()
-    return (time_to_run.hour == now.hour) and (start <= time_to_run <= end)
+    return (
+        (time_to_run.day == now.day)
+        and (time_to_run.hour == now.hour)
+        and (start <= time_to_run <= end)
+    )
 
 
 def check_extension_run(
@@ -114,19 +117,27 @@ def check_extension_run(
     current_time = get_current_datetime()
     current_day = get_current_datetime().weekday()
     days_to_run = []
-    time_to_run = check_class_has_method(extension_name, extension_class, "run_at")
+    time_to_run: Union[time, datetime] = check_class_has_method(
+        extension_name, extension_class, "run_at"
+    )
     daily_check_run = check_class_has_method(
         extension_name, extension_class, "daily_check_run", default=False
     )
 
-    if not isinstance(time_to_run, time):
-        time_to_run = DEFAULT_TIME
+    if isinstance(time_to_run, time):
+        time_to_run = datetime.combine(date.today(), time_to_run)
+
+    if not isinstance(time_to_run, (time, datetime)):
+        time_to_run = datetime.combine(date.today(), DEFAULT_TIME)
 
     time_to_run_datetime = current_time.replace(
-        hour=time_to_run.hour, minute=time_to_run.minute, tzinfo=time_to_run.tzinfo
+        day=time_to_run.day,
+        hour=time_to_run.hour,
+        minute=time_to_run.minute,
+        tzinfo=time_to_run.tzinfo,
     )
     time_to_run_datetime.astimezone(tz=timezone.utc)
-    time_to_run = time_to_run_datetime.time()
+    time_to_run = time_to_run_datetime
 
     days_to_clean_unsanitised = check_class_has_method(
         extension_name, extension_class, "clean_at"
@@ -155,7 +166,8 @@ def check_extension_run(
     run_extension = check_run_in_range(time_to_run)
 
     day_to_run = current_day in days_to_run
-    time_to_clean = check_run_in_range(CLEAN_TIME)
+    clean_time = current_time.replace(hour=CLEAN_TIME.hour, minute=CLEAN_TIME.minute)
+    time_to_clean = check_run_in_range(clean_time)
     clean = time_to_clean and day_to_run
 
     if time_to_clean:
@@ -219,8 +231,8 @@ def load_extension(extension: Path, clean_db: bool = False, general_run: bool = 
         )
         if not run_extension and not clean_db:
             print(
-                f"{normalised_extension_name} is not scheduled to run now: "
-                f"{datetime.datetime.now()}"
+                f"{normalised_extension_name} is not scheduled to run now, it runs on: "
+                f"{run_at}"
             )
             return
 

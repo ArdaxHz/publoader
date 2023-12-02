@@ -17,7 +17,7 @@ from publoader.utils.config import (
     daily_run_time_daily_hour,
     daily_run_time_daily_minute,
 )
-from publoader.utils.utils import root_path
+from publoader.utils.utils import get_current_datetime, root_path
 from publoader.workers import worker
 
 logger = logging.getLogger("publoader")
@@ -51,11 +51,16 @@ def schedule_extensions():
     """Add the timings to the scheduler."""
     same = []
     timings = open_timings()
+    now = get_current_datetime()
 
     for timing in timings:
         extension_timings = timings[timing]
+        day = extension_timings.get("day")
         hour = extension_timings.get("hour", daily_run_time_daily_hour)
         minute = extension_timings.get("minute", daily_run_time_daily_minute)
+
+        if day is not None and day != now.day:
+            continue
 
         # Join extensions to run together if they are scheduled to run within seven minutes of each other
         for in_same in same:
