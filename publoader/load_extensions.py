@@ -101,8 +101,8 @@ def convert_chapters_datetimes(chapters: List[Chapter]):
 def check_run_in_range(time_to_run: datetime):
     """Return true if time_to_run is in the range +- 5 minutes from now."""
     now = get_current_datetime()
-    start = (now - timedelta(minutes=5)).time()
-    end = (now + timedelta(minutes=5)).time()
+    start = now - timedelta(minutes=5)
+    end = now + timedelta(minutes=5)
     return (
         (time_to_run.day == now.day)
         and (time_to_run.hour == now.hour)
