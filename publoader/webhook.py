@@ -428,7 +428,7 @@ class PubloaderNotIndexedWebhook(WebhookHelper):
             else f"{self.chapters_indexed} chapters indexed."
         )
         description = (
-            "\n".join([f"`{chapter_id}`" for chapter_id in self.chapters_not_indexed])
+            "```" + "\n".join(self.chapters_not_indexed) + "```"
             if self.chapters_not_indexed
             else None
         )
