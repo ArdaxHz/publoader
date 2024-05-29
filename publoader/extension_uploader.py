@@ -208,7 +208,7 @@ class ExtensionUploader:
         chapters_sorted = {}
         for chapter in updates:
             md_id = chapter.md_manga_id
-            if md_id is None:
+            if not md_id:
                 logger.warning(
                     f"No mangadex id found for {self.extension_name} id {chapter.manga_id}."
                 )

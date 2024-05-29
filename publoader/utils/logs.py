@@ -92,6 +92,11 @@ _logger = logging.getLogger("publoader")
 
 def clear_old_logs(folder_path: Path):
     for log_file in folder_path.rglob("*.log"):
+        if log_file.stat().st_size < 0:
+            _logger.debug(f"{log_file.name} is empty, deleting.")
+            log_file.unlink()
+            continue
+
         file_date = datetime.fromtimestamp(log_file.stat().st_mtime).date()
         if file_date < last_date_keep_logs:
             _logger.debug(f"{log_file.name} is over {max_log_days} days old, deleting.")

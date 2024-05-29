@@ -2,6 +2,7 @@ import logging
 import re
 import traceback
 from typing import Dict, List, Optional
+from urllib.parse import urlparse
 
 import gridfs.errors
 import pymongo
@@ -48,7 +49,11 @@ class MangaUploaderProcess:
     ):
         self.extension_name = extension_name
         self.clean_db = clean_db
-        self.updated_chapters = updated_chapters
+        self.updated_chapters = [
+            updated_chapter
+            for updated_chapter in updated_chapters
+            if updated_chapter.md_manga_id is not None
+        ]
         self.all_manga_chapters = all_manga_chapters
         self.mangadex_manga_id = mangadex_manga_id
         self.mangadex_group_id = mangadex_group_id
@@ -155,14 +160,27 @@ class MangaUploaderProcess:
 
                             chapter.chapter_volume = volume_str
 
+    def _check_chapter_url_same(self, md_external_url, chapter_id):
+        """Check if the chapter id is present in the chapter"""
+        parsed_url = urlparse(md_external_url)
+        path = parsed_url.path.strip("/")
+        path_segments = path.split("/")
+        variable = chapter_id.strip("/")
+        variable_segments = variable.split("/")
+
+        path_match = any(segment in path_segments for segment in variable_segments)
+        return path_match
+
     def _check_for_duplicate_chapter_md_list(self, chapter) -> Optional[dict]:
         """Check if chapter exists on MangaDex already."""
         for md_chapter in self.chapters_on_md:
+            path_match = self._check_chapter_url_same(
+                md_chapter["attributes"]["externalUrl"], chapter.chapter_id
+            )
+
             if (
                 md_chapter["attributes"]["externalUrl"] is not None
-                and re.search(
-                    chapter.chapter_id, md_chapter["attributes"]["externalUrl"]
-                )
+                and path_match
                 and chapter.chapter_id
                 not in flatten(list(self.same_chapter_dict.values()))
             ):
@@ -261,7 +279,7 @@ class MangaUploaderProcess:
                 "payload": data_to_post,
             }
         else:
-            logger.info(f"Nothing to edit for chapter {md_id}")
+            logger.debug(f"Nothing to edit for chapter {md_id}")
         return
 
     def start_manga_uploading_process(self, last_manga: bool):
