@@ -278,7 +278,7 @@ class DeleteDuplicatesMD:
 
             chapters_md_sorted = self.sort_chapters(chapters_md_unsorted)
 
-            if not bool(dupes_webhook.manga):
+            if not dupes_webhook.manga:
                 manga_data = self.sort_manga_data(chapters_md_unsorted)
                 dupes_webhook.init_manga(manga_data)
 

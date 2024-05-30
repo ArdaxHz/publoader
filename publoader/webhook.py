@@ -194,8 +194,8 @@ class WebhookBase(WebhookHelper):
         super().__init__(extension_name=extension_name)
         self.manga = manga
         logger.debug(f"Making embed for manga {self.manga}")
-        self.manga_id = manga["id"]
-        self.manga_title = manga["title"]
+        self.manga_id = manga.get("id", "Manga id not found")
+        self.manga_title = manga.get("title", "Manga title not found")
         self.mangadex_manga_url = self.mangadex_manga_url.format(self.manga_id)
 
 
