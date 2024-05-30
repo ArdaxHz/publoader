@@ -3,6 +3,7 @@ import logging
 import math
 from datetime import datetime
 from typing import Dict, List, Optional
+from urllib.parse import urlparse
 
 from publoader.http import http_client
 from publoader.http.properties import RequestError
@@ -179,3 +180,18 @@ def create_new_event_loop():
             return loop
         else:
             raise
+
+
+def check_chapter_url_same(md_external_url: str, chapter_id: str) -> bool:
+    """Check if the chapter id is present in the chapter"""
+    try:
+        parsed_url = urlparse(md_external_url)
+        path = parsed_url.path.strip("/")
+        path_segments = path.split("/")
+        variable = chapter_id.strip("/")
+        variable_segments = variable.split("/")
+    except ValueError:
+        return False
+
+    path_match = any(segment in path_segments for segment in variable_segments)
+    return path_match

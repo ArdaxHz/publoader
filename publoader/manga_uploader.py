@@ -2,7 +2,6 @@ import logging
 import re
 import traceback
 from typing import Dict, List, Optional
-from urllib.parse import urlparse
 
 import gridfs.errors
 import pymongo
@@ -17,6 +16,7 @@ from publoader.models.database import (
 )
 from publoader.models.dataclasses import Chapter
 from publoader.utils.misc import (
+    check_chapter_url_same,
     fetch_aggregate,
     find_key_from_list_value,
     flatten,
@@ -160,46 +160,33 @@ class MangaUploaderProcess:
 
                             chapter.chapter_volume = volume_str
 
-    def _check_chapter_url_same(self, md_external_url, chapter_id):
-        """Check if the chapter id is present in the chapter"""
-        try:
-            parsed_url = urlparse(md_external_url)
-            path = parsed_url.path.strip("/")
-            path_segments = path.split("/")
-            variable = chapter_id.strip("/")
-            variable_segments = variable.split("/")
-        except ValueError:
-            return False
-
-        path_match = any(segment in path_segments for segment in variable_segments)
-        return path_match
-
     def _check_for_duplicate_chapter_md_list(self, chapter) -> Optional[dict]:
         """Check if chapter exists on MangaDex already."""
         for md_chapter in self.chapters_on_md:
-            path_match = self._check_chapter_url_same(
+            if not md_chapter["attributes"][
+                "externalUrl"
+            ] or chapter.chapter_id in flatten(list(self.same_chapter_dict.values())):
+                continue
+
+            # Chapter id is not in the external url
+            path_match = check_chapter_url_same(
                 md_chapter["attributes"]["externalUrl"], chapter.chapter_id
             )
 
-            if (
-                md_chapter["attributes"]["externalUrl"] is not None
-                and path_match
-                and chapter.chapter_id
-                not in flatten(list(self.same_chapter_dict.values()))
-            ):
-                if chapter.chapter_id in self.override_options.get(
+            if not path_match:
+                continue
+
+            if chapter.chapter_id in self.override_options.get("multi_chapters", {}):
+                multi_chapters_list = self.override_options.get(
                     "multi_chapters", {}
-                ):
-                    multi_chapters_list = self.override_options.get(
-                        "multi_chapters", {}
-                    ).get(chapter.chapter_id, [])
+                ).get(chapter.chapter_id, [])
 
-                    if chapter.chapter_number not in multi_chapters_list:
-                        continue
+                if chapter.chapter_number not in multi_chapters_list:
+                    continue
 
-                chapter.md_chapter_id = md_chapter["id"]
-                on_md = {"md_chapter": md_chapter, "chapter": chapter, "exists": True}
-                return on_md
+            chapter.md_chapter_id = md_chapter["id"]
+            on_md = {"md_chapter": md_chapter, "chapter": chapter, "exists": True}
+            return on_md
         return {"chapter": chapter, "exists": False}
 
     def _check_uploaded_different_id(self, chapter) -> bool:

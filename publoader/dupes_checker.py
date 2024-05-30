@@ -8,6 +8,7 @@ from publoader.http.properties import RequestError
 from publoader.models.database import update_expired_chapter_database
 from publoader.utils.config import mangadex_api_url
 from publoader.utils.misc import (
+    check_chapter_url_same,
     fetch_aggregate,
     format_title,
     get_md_api,
@@ -72,7 +73,6 @@ class DeleteDuplicatesMD:
     def check_chapters(
         self,
         chapters: List[dict],
-        language: "str",
         dupes_webhook: "PubloaderDupesWebhook",
     ) -> Optional[List[dict]]:
 
@@ -86,8 +86,7 @@ class DeleteDuplicatesMD:
                 for g in chapter["relationships"]
                 if g["type"] == "scanlation_group"
             ]
-            and chapter["attributes"]["externalUrl"] is not None
-            and chapter["attributes"]["translatedLanguage"] == language
+            and chapter["attributes"]["externalUrl"]
         ]
 
         # No chapters found
@@ -152,11 +151,8 @@ class DeleteDuplicatesMD:
                 for x in list(
                     filter(
                         lambda y: y
-                        if bool(
-                            re.search(
-                                multi_chapter_id,
-                                y["attributes"]["externalUrl"],
-                            )
+                        if check_chapter_url_same(
+                            y["attributes"]["externalUrl"], multi_chapter_id
                         )
                         else None,
                         sorted_chapters,
@@ -276,29 +272,26 @@ class DeleteDuplicatesMD:
                     )
                 )
 
-            chapters_md_sorted = self.sort_chapters(chapters_md_unsorted)
-
             if not dupes_webhook.manga:
                 manga_data = self.sort_manga_data(chapters_md_unsorted)
                 dupes_webhook.init_manga(manga_data)
 
-            for language in chapters_md_sorted:
-                chapters_to_delete = self.check_chapters(
-                    chapters_md_sorted[language], language, dupes_webhook
-                )
+            chapters_to_delete = self.check_chapters(
+                chapters_md_unsorted, dupes_webhook
+            )
 
-                if not chapters_to_delete:
-                    continue
+            if not chapters_to_delete:
+                continue
 
-                logger.debug(f"Found dupes in manga {manga_id} for language {language}")
-                dupes_found = True
+            logger.debug(f"Found dupes in manga {manga_id}")
+            dupes_found = True
 
-                update_expired_chapter_database(
-                    extension_name=self.extension_name,
-                    md_chapter=chapters_to_delete,
-                    md_manga_id=manga_id,
-                    mangadex_manga_data=self.manga_data_local,
-                )
+            update_expired_chapter_database(
+                extension_name=self.extension_name,
+                md_chapter=chapters_to_delete,
+                md_manga_id=manga_id,
+                mangadex_manga_data=self.manga_data_local,
+            )
 
             if not dupes_found:
                 print(f"Didn't find any dupes in manga: {manga_id}")
