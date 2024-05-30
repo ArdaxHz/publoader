@@ -150,37 +150,46 @@ def run_updates(
         )
         dupes_deleter.delete_dupes()
         return True
-    except Exception:
+    except Exception as e:
         traceback.print_exc()
         logger.exception(f"{normalised_extension_name} raised an error.")
-        return False
+        raise e
 
 
 def open_extensions(
     names: List[str] = None, clean_db: bool = False, general_run: bool = False
 ):
     """Run multiple extensions."""
-    extensions_data = load_extensions(names, clean_db, general_run)
-    if not extensions_data:
-        return
+    try:
+        extensions_data = load_extensions(names, clean_db, general_run)
+        if not extensions_data:
+            return
 
-    if clean_db:
-        PubloaderWebhook(
-            extension_name=None, title="Bot Clean Run Cycle", colour="256ef5"
-        ).send()
+        if clean_db:
+            PubloaderWebhook(
+                extension_name=None, title="Bot Clean Run Cycle", colour="256ef5"
+            ).send()
 
-    extensions = run_extensions(extensions_data, clean_db)
-    if not extensions:
-        return
+        extensions = run_extensions(extensions_data, clean_db)
+        if not extensions:
+            return
 
-    manga_data_local = open_manga_data(
-        resources_path.joinpath(config["Paths"]["manga_data_path"])
-    )
-    for site in extensions:
-        run_updates(
-            extensions[site],
-            manga_data_local=manga_data_local,
+        manga_data_local = open_manga_data(
+            resources_path.joinpath(config["Paths"]["manga_data_path"])
         )
+        for site in extensions:
+            run_updates(
+                extensions[site],
+                manga_data_local=manga_data_local,
+            )
+    except Exception as e:
+        traceback.print_exc()
+        logger.exception(f"Error raised.")
+        PubloaderWebhook(
+            "publoader run",
+            title="Critial Run Error",
+            description=str(e),
+        ).send()
 
 
 if __name__ == "__main__":
