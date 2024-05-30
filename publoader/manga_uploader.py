@@ -162,11 +162,14 @@ class MangaUploaderProcess:
 
     def _check_chapter_url_same(self, md_external_url, chapter_id):
         """Check if the chapter id is present in the chapter"""
-        parsed_url = urlparse(md_external_url)
-        path = parsed_url.path.strip("/")
-        path_segments = path.split("/")
-        variable = chapter_id.strip("/")
-        variable_segments = variable.split("/")
+        try:
+            parsed_url = urlparse(md_external_url)
+            path = parsed_url.path.strip("/")
+            path_segments = path.split("/")
+            variable = chapter_id.strip("/")
+            variable_segments = variable.split("/")
+        except ValueError:
+            return False
 
         path_match = any(segment in path_segments for segment in variable_segments)
         return path_match
@@ -266,6 +269,10 @@ class MangaUploaderProcess:
 
         if chapter.chapter_title != chapter_attrs["title"]:
             data_to_post["title"] = chapter.chapter_title
+            changed = True
+
+        if chapter.chapter_language != chapter_attrs["translatedLanguage"]:
+            data_to_post["translatedLanguage"] = chapter.chapter_language
             changed = True
 
         if changed:
