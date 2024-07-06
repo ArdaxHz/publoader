@@ -224,6 +224,8 @@ class ExtensionUploader:
                 chapters_sorted[md_id].append(chapter)
             except (KeyError, ValueError, AttributeError):
                 chapters_sorted[md_id] = [chapter]
+
+        del chapters_sorted["None"]
         return chapters_sorted
 
     def _check_all_chapters_uploaded(self):
