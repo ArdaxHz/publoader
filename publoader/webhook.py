@@ -27,6 +27,7 @@ class WebhookHelper:
         self.colour = kwargs.get("colour") or COLOUR
         self.mangadex_chapter_url = "https://mangadex.org/chapter/{}"
         self.mangadex_manga_url = "https://mangadex.org/manga/{}"
+        self.footer = f"extensions.{self.extension_name}"
 
     def _format_link(
         self,
@@ -84,6 +85,9 @@ class WebhookHelper:
         embed = DiscordEmbed(**embed_data)
         embed.set_title(embed_data.get("title", None))
         embed.set_description(embed_data.get("description", None))
+
+        if self.extension_name:
+            embed.set_footer(text=self.footer)
         logger.debug(f"Made embed: {embed.title}, {embed.description}")
         return embed
 
@@ -425,7 +429,7 @@ class PubloaderNotIndexedWebhook(WebhookHelper):
         title = (
             f"{len(self.chapters_not_indexed)} chapters not indexed:"
             if self.chapters_not_indexed
-            else f"{self.chapters_indexed} chapters indexed."
+            else f"{self.chapters_indexed} chapters indexed"
         )
         description = (
             "```" + "\n".join(self.chapters_not_indexed) + "```"

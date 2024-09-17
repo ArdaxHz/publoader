@@ -84,6 +84,7 @@ def run_updates(
             ).send()
             return False
 
+        updated_chapters[:] = [x for x in updated_chapters if x.md_manga_id]
         for update in updated_chapters:
             print(
                 f"--Found manga {update.manga_name} - {update.manga_id}, "
