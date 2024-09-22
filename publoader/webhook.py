@@ -86,7 +86,7 @@ class WebhookHelper:
         embed.set_title(embed_data.get("title", None))
         embed.set_description(embed_data.get("description", None))
 
-        if self.extension_name:
+        if self.extension_name is not None:
             embed.set_footer(text=self.footer)
         logger.debug(f"Made embed: {embed.title}, {embed.description}")
         return embed
