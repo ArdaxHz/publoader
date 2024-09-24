@@ -249,6 +249,8 @@ class PubloaderUpdatesWebhook(WebhookBase):
     def format_embed(self, chapters_to_use: List[List[dict]]):
         for chapter_list in chapters_to_use:
             embed = self.make_embed(self.normalised_manga)
+            if self.extension_name:
+                embed.footer = {"text": f"extensions.{self.extension_name}"}
             self.add_fields_to_embed(embed, chapter_list)
 
             if chapter_list:
