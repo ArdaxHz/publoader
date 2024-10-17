@@ -27,7 +27,11 @@ class WebhookHelper:
         self.colour = kwargs.get("colour") or COLOUR
         self.mangadex_chapter_url = "https://mangadex.org/chapter/{}"
         self.mangadex_manga_url = "https://mangadex.org/manga/{}"
-        self.footer = f"extensions.{self.extension_name}"
+        self.footer = (
+            {"text": f"extensions.{self.extension_name}"}
+            if self.extension_name is not None
+            else None
+        )
 
     def _format_link(
         self,
@@ -82,12 +86,9 @@ class WebhookHelper:
         ]
 
     def make_embed(self, embed_data: Optional[dict] = None) -> DiscordEmbed:
-        embed = DiscordEmbed(**embed_data)
+        embed = DiscordEmbed(**embed_data, footer=self.footer)
         embed.set_title(embed_data.get("title", None))
         embed.set_description(embed_data.get("description", None))
-
-        if self.extension_name is not None:
-            embed.set_footer(text=self.footer)
         logger.debug(f"Made embed: {embed.title}, {embed.description}")
         return embed
 
@@ -121,7 +122,7 @@ class WebhookHelper:
     def _make_multiple_embeds(self, embed: dict, list_fields: List[List[dict]]):
         new_embeds = []
         for fields in list_fields:
-            new_embed = DiscordEmbed()
+            new_embed = DiscordEmbed(footer=self.footer)
             new_embed.__dict__.update(embed)
             new_embed.fields = fields
 
@@ -422,6 +423,7 @@ class PubloaderNotIndexedWebhook(WebhookHelper):
                 "color": self.colour,
                 "timestamp": get_current_datetime().isoformat(),
             },
+            footer=self.footer,
         )
 
         logger.debug(f"Made embed: {embed.title}, {embed.description}")
@@ -451,7 +453,7 @@ class PubloaderWebhook(WebhookHelper):
         self.embed_title = kwargs.get("title")
         self.embed_description = kwargs.get("description")
         self.embed_colour = kwargs.get("colour")
-        self.footer = kwargs.get("footer")
+        self.footer = kwargs.get("footer", self.footer)
         self.timestamp = kwargs.get("timestamp", get_current_datetime().isoformat())
         self.add_timestamp = kwargs.get("add_timestamp", True)
 

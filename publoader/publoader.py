@@ -151,10 +151,18 @@ def run_updates(
         )
         dupes_deleter.delete_dupes()
         return True
-    except Exception as e:
+    except BaseException as e:
         traceback.print_exc()
         logger.exception(f"{normalised_extension_name} raised an error.")
-        raise e
+
+        PubloaderWebhook(
+            extension_name=extension_name,
+            title=f"Error in {normalised_extension_name}",
+            description=f"An exception occurred:\n```\n{str(e)}\n```",
+            colour="FF0000",
+        ).send()
+
+        return False
 
 
 def open_extensions(
@@ -183,13 +191,14 @@ def open_extensions(
                 extensions[site],
                 manga_data_local=manga_data_local,
             )
-    except Exception as e:
+    except BaseException as e:
         traceback.print_exc()
         logger.exception(f"Error raised.")
         PubloaderWebhook(
             "publoader run",
             title="Critial Run Error",
             description=str(e),
+            colour="FF0000",
         ).send()
 
 

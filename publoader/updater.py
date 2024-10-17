@@ -179,10 +179,10 @@ class PubloaderUpdater:
             shutil.rmtree(self.update_path, ignore_errors=True)
             return
 
-        # PubloaderWebhook(
-        #     extension_name=None,
-        #     title=f"Update download complete, applying changes.",
-        # ).send()
+        PubloaderWebhook(
+            extension_name=None,
+            title=f"Update download complete, applying changes.",
+        ).send()
         Path(config["Paths"]["mdauth_path"]).unlink(missing_ok=True)
         logger.info("Update download complete, applying changes.")
         self.move_files()

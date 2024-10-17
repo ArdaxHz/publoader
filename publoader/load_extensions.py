@@ -243,9 +243,15 @@ def load_extension(extension: Path, clean_db: bool = False, general_run: bool = 
             "extension_name": normalised_extension_name,
             "run_at": run_at,
         }
-    except Exception:
+    except BaseException as e:
         traceback.print_exc()
         logger.exception(f"------{normalised_extension_name} raised an error.")
+        PubloaderWebhook(
+            extension_name=normalised_extension_name,
+            title=f"Error in {normalised_extension_name}",
+            description=f"An exception occurred:\n```\n{str(e)}\n```",
+            colour="FF0000",
+        ).send()
         return
 
 
@@ -291,6 +297,7 @@ def run_extension(extension: dict, clean_db_override: bool = False):
 
         name = check_class_has_attribute(extension_name, extension_class, "name")
         validate_extension_name(name)
+        normalised_extension_name = f"extensions.{name}"
 
         posted_chapters_ids = list(
             database_connection["uploaded_ids"].find({"extension_name": {"$eq": name}})
@@ -308,7 +315,6 @@ def run_extension(extension: dict, clean_db_override: bool = False):
         else:
             update_posted_chapter_ids(posted_chapters_ids, clean_db)
 
-        normalised_extension_name = f"extensions.{name}"
         updated_chapters = check_class_has_method(
             extension_name, extension_class, "get_updated_chapters", default=[]
         )
@@ -399,9 +405,15 @@ def run_extension(extension: dict, clean_db_override: bool = False):
             "posted_chapters_ids": posted_chapters_ids,
             "clean_db": clean_db,
         }
-    except Exception:
+    except BaseException as e:
         traceback.print_exc()
         logger.exception(f"------{extension_name} raised an error.")
+        PubloaderWebhook(
+            extension_name=extension_name,
+            title=f"Error in {extension_name}",
+            description=f"An exception occurred:\n```\n{str(e)}\n```",
+            colour="FF0000",
+        ).send()
         return
 
 
@@ -420,9 +432,15 @@ def run_extensions(extensions: dict, clean_db_override: bool):
 
         try:
             data = run_extension(extension, clean_db_override=clean_db_override)
-        except TypeError as e:
+        except BaseException as e:
             traceback.print_exc()
-            logger.exception(f"Error when running {extension_name}.")
+            logger.exception(f"------{extension_name} raised an error.")
+            PubloaderWebhook(
+                extension_name=extension_name,
+                title=f"Error in {extension_name}",
+                description=f"An exception occurred:\n```\n{str(e)}\n```",
+                colour="FF0000",
+            ).send()
             continue
 
         if data is not None and data:
