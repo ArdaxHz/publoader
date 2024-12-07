@@ -272,6 +272,12 @@ class DeleteDuplicatesMD:
                     )
                 )
 
+            if not chapters_md_unsorted:
+                logger.info(
+                    f"No unsorted chapters found for {manga_id} in languages {self.languages}"
+                )
+                continue
+
             if not dupes_webhook.manga:
                 manga_data = self.sort_manga_data(chapters_md_unsorted)
                 dupes_webhook.init_manga(manga_data)
