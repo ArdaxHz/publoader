@@ -4,7 +4,7 @@ services:
   publoader:
     image: ardax/publoader:latest
     container_name: publoader
-    restart: always
+    restart: unless-stopped
     ports:
       - "8080:8080"
     labels:
@@ -13,10 +13,9 @@ services:
       - extensions:/app/publoader/extensions
 
   publoader-extensions:
-    build:
-      context: ./publoader-extensions
+    image: ardax/publoader-extensions:latest
     container_name: publoader-extensions
-    restart: always
+    restart: unless-stopped
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
     volumes:
@@ -25,7 +24,7 @@ services:
   watchtower:
     image: containrrr/watchtower:latest
     container_name: watchtower
-    restart: always
+    restart: unless-stopped
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
@@ -38,7 +37,7 @@ services:
   prometheus:
     image: prom/prometheus:latest
     container_name: prometheus
-    restart: always
+    restart: unless-stopped
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
     ports:
@@ -50,7 +49,7 @@ services:
   alertmanager:
     image: prom/alertmanager:latest
     container_name: alertmanager
-    restart: always
+    restart: unless-stopped
     volumes:
       - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml
     ports:
@@ -59,7 +58,7 @@ services:
   grafana:
     image: grafana/grafana:latest
     container_name: grafana
-    restart: always
+    restart: unless-stopped
     ports:
       - "3000:3000"
     volumes:
@@ -70,7 +69,7 @@ services:
   cloudflared:
     image: cloudflare/cloudflared:latest
     container_name: cloudflared
-    restart: always
+    restart: unless-stopped
     environment:
       - TUNNEL_HOSTNAME=grafana.example.com
       - TUNNEL_CREDENTIALS_FILE=/etc/cloudflared/tunnel.json
