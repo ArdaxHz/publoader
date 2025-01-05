@@ -71,7 +71,7 @@ services:
     container_name: cloudflared
     restart: unless-stopped
     environment:
-      - TUNNEL_HOSTNAME=grafana.example.com
+      - TUNNEL_HOSTNAME=publoader.fuyu.bot
       - TUNNEL_CREDENTIALS_FILE=/etc/cloudflared/tunnel.json
     volumes:
       - ./cloudflared:/etc/cloudflared
