@@ -1,0 +1,85 @@
+version: '3.8'
+
+services:
+  publoader:
+    image: ardax/publoader:latest
+    container_name: publoader
+    restart: always
+    ports:
+      - "8080:8080"
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+    volumes:
+      - extensions:/app/publoader/extensions
+
+  publoader-extensions:
+    build:
+      context: ./publoader-extensions
+    container_name: publoader-extensions
+    restart: always
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+    volumes:
+      - extensions:/shared/publoader/extensions
+
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: watchtower
+    restart: always
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_SCHEDULE=0 1 * * * # 1am GMT daily
+    depends_on:
+      - publoader
+      - publoader-extensions
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    restart: always
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    depends_on:
+      - publoader
+      - publoader-extensions
+
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: alertmanager
+    restart: always
+    volumes:
+      - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml
+    ports:
+      - "9093:9093"
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: always
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    depends_on:
+      - prometheus
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared
+    restart: always
+    environment:
+      - TUNNEL_HOSTNAME=grafana.example.com
+      - TUNNEL_CREDENTIALS_FILE=/etc/cloudflared/tunnel.json
+    volumes:
+      - ./cloudflared:/etc/cloudflared
+    command: tunnel --no-autoupdate run grafana-tunnel
+    depends_on:
+      - grafana
+
+volumes:
+  grafana_data:
+  extensions:

@@ -1,0 +1,14 @@
+global:
+  resolve_timeout: 5m
+
+receivers:
+  - name: 'discord-webhook'
+    webhook_configs:
+      - url: 'https://discord.com/api/webhooks/1149351816698548336/PwC9ryl3u9iQ2ki5SO6xEkUtNwQEvNWRn-HIRYeX178XXkJQrgqJ759P9_aK_0BwQxR7?thread_id=1149316739100852274'
+
+route:
+  receiver: 'discord-webhook'
+  group_by: ['alertname', 'container_name']
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 1h

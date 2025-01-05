@@ -1,0 +1,20 @@
+groups:
+  - name: container_alerts
+    rules:
+      - alert: ContainerRestarted
+        expr: container_last_seen_seconds_since_last_start > 0
+        for: 10s
+        labels:
+          severity: warning
+        annotations:
+          summary: "Container Restarted"
+          description: "The container {{ $labels.container_name }} was restarted."
+
+      - alert: ContainerDown
+        expr: container_last_seen_seconds_since_last_start == 0
+        for: 10s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Container Down"
+          description: "The container {{ $labels.container_name }} is down."

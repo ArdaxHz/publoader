@@ -1,0 +1,7 @@
+tunnel: grafana-tunnel
+credentials-file: /etc/cloudflared/tunnel.json
+
+ingress:
+  - hostname: grafana.example.com
+    service: http://grafana:3000  # Make sure this points to your Grafana container
+  - service: http_status:404
