@@ -1,7 +1,0 @@
-tunnel: grafana-tunnel
-credentials-file: /etc/cloudflared/tunnel.json
-
-ingress:
-  - hostname: publoader.fuyu.bot
-    service: http://grafana:3000
-  - service: http_status:404

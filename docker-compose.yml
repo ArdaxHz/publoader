@@ -71,11 +71,8 @@ services:
     container_name: cloudflared
     restart: unless-stopped
     environment:
-      - TUNNEL_HOSTNAME=publoader.fuyu.bot
-      - TUNNEL_CREDENTIALS_FILE=/etc/cloudflared/tunnel.json
-    volumes:
-      - ./cloudflared:/etc/cloudflared
-    command: tunnel --no-autoupdate run grafana-tunnel
+      - TUNNEL_TOKEN=${CLOUDFLARE_PUBLOADER_TUNNEL_TOKEN}
+    command: tunnel run
     depends_on:
       - grafana
 

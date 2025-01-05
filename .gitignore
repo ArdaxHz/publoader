@@ -11,3 +11,4 @@ manga_data.json
 extensions
 .commits
 temp
+.env
