@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   publoader:
     image: ardax/publoader:latest
@@ -10,6 +8,8 @@ services:
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
     volumes:
+      - ./config.ini:/app/config.ini
+      - ./logs:/app/logs
       - extensions:/app/publoader/extensions
 
   publoader-extensions:
