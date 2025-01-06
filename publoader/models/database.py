@@ -19,17 +19,23 @@ class DatabaseConnector(metaclass=Singleton):
     def __init__(self):
         self.database_uri = config["Credentials"]["mongodb_uri"]
         self.database_name = config["Credentials"]["mongodb_db_name"]
-        self.database = self.connect_db()
-        self.database_connection = self.database[self.database_name]
+        self.database_connection = None
 
     def connect_db(self):
-        client = pymongo.MongoClient(self.database_uri)
-        return client
+        if self.database_connection is None:
+            client = pymongo.MongoClient(self.database_uri)
+            self.database_connection = client[self.database_name]
+        return self.database_connection
 
 
 database = DatabaseConnector()
-database_connection = database.database_connection
-image_filestream = gridfs.GridFS(database_connection, "images")
+
+
+def get_database_connection():
+    return database.connect_db()
+
+
+image_filestream = gridfs.GridFS(get_database_connection(), "images")
 
 
 def convert_model_dict(chapter):
@@ -66,7 +72,7 @@ def update_database(chapter: Union[list, Union[Chapter, dict]], **kwargs):
         return
 
     try:
-        result = database_connection["uploaded"].bulk_write(
+        result = get_database_connection()["uploaded"].bulk_write(
             [
                 UpdateOne(
                     {"md_chapter_id": {"$eq": chap["md_chapter_id"]}},
@@ -91,7 +97,7 @@ def update_database(chapter: Union[list, Union[Chapter, dict]], **kwargs):
         )
 
     try:
-        database_connection["uploaded_ids"].bulk_write(
+        get_database_connection()["uploaded_ids"].bulk_write(
             [
                 UpdateOne(
                     {"chapter_id": {"$eq": chap["chapter_id"]}},
@@ -173,7 +179,7 @@ def update_expired_chapter_database(
         )
 
     try:
-        result = database_connection["to_delete"].bulk_write(
+        result = get_database_connection()["to_delete"].bulk_write(
             [
                 UpdateOne(
                     {"md_chapter_id": {"$eq": chap["md_chapter_id"]}},
@@ -197,7 +203,7 @@ def update_expired_chapter_database(
             f"Added {result.upserted_count} chapters to delete: {result.upserted_ids}"
         )
     try:
-        deleted_result = database_connection["uploaded"].bulk_write(
+        deleted_result = get_database_connection()["uploaded"].bulk_write(
             [
                 DeleteOne(
                     {"md_chapter_id": {"$eq": chap["md_chapter_id"]}},

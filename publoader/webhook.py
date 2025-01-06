@@ -441,7 +441,7 @@ class PubloaderNotIndexedWebhook(WebhookHelper):
             else None
         )
 
-        description = "\n" + description
+        description = "\n" + description if description else None
 
         embed = self.make_embed(title=title, description=description)
         webhook.add_embed(embed)

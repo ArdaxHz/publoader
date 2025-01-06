@@ -8,9 +8,7 @@ import traceback
 import pymongo
 
 from publoader.http import http_client
-from publoader.models.database import (
-    database_connection,
-)
+from publoader.models.database import get_database_connection
 from publoader.utils.utils import root_path
 from publoader.webhook import PubloaderQueueWebhook
 from publoader.workers import worker as watcher_worker
@@ -84,6 +82,8 @@ def main(
     queue_webhook = PubloaderQueueWebhook(
         worker_type=worker_type, colour=webhook_colour
     )
+    database_connection = get_database_connection()
+
     worker_module = open_worker_module(worker_type)
 
     # Turn-on the worker thread.

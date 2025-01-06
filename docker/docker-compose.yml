@@ -11,11 +11,14 @@ services:
       - ./config.ini:/app/config.ini
       - ./logs:/app/logs
       - extensions:/app/publoader/extensions
+      - ./entrypoint.sh:/app/entrypoint.sh
+    entrypoint: [ "/app/entrypoint.sh" ]
+    command: [ "python", "run.py" ]
 
   publoader-extensions:
     image: ardax/publoader-extensions:latest
     container_name: publoader-extensions
-    restart: unless-stopped
+    restart: "no"
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
     volumes:
