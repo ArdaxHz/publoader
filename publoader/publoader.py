@@ -185,7 +185,7 @@ def open_extensions(
                 extension_name=None, title="Bot Clean Run Cycle", colour="256ef5"
             ).send()
 
-        extensions = run_extensions(extensions_data, clean_db)
+        extensions = run_extensions(database_connection, extensions_data, clean_db)
         if not extensions:
             return
 
