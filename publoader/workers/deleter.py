@@ -2,7 +2,6 @@ import logging
 from typing import Optional
 
 from publoader.http.properties import RequestError
-from publoader.models.database import get_database_connection
 from publoader.models.dataclasses import Chapter
 from publoader.utils.config import mangadex_api_url
 from publoader.utils.utils import get_current_datetime
@@ -48,10 +47,9 @@ class DeleteProcess:
         return False
 
 
-def run(item, http_client, queue_webhook, **kwargs):
+def run(item, http_client, queue_webhook, database_connection, **kwargs):
     chapter_deleter = DeleteProcess(item, http_client)
     deleted = chapter_deleter.delete_chapter()
-    database_connection = get_database_connection()
 
     queue_webhook.add_chapter(item, processed=deleted)
     if deleted:
@@ -61,9 +59,8 @@ def run(item, http_client, queue_webhook, **kwargs):
         database_connection["deleted"].insert_one(item)
 
 
-def fetch_data_from_database():
+def fetch_data_from_database(database_connection):
     chapters = []
-    database_connection = get_database_connection()
 
     chapters.extend([chap for chap in database_connection["to_delete"].find()])
     chapters.extend(

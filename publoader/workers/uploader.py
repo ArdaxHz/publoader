@@ -4,12 +4,11 @@ from collections import deque
 from typing import Dict, List, Optional
 
 import natsort
+import gridfs
 from gridfs import GridOut
 
 from publoader.http.properties import RequestError
 from publoader.models.database import (
-    get_database_connection,
-    image_filestream,
     update_database,
 )
 from publoader.models.dataclasses import Chapter
@@ -329,8 +328,9 @@ class UploaderProcess:
         return True
 
 
-def run(item, http_client, queue_webhook, **kwargs):
+def run(item, http_client, queue_webhook, database_connection, **kwargs):
     if "images" in item:
+        image_filestream = gridfs.GridFS(database_connection, "images")
         images = image_filestream.find({"_id": {"$in": item["images"]}})
         image_ids = list(natsort.natsorted(images, key=lambda x: x.filename))
     else:
@@ -344,7 +344,6 @@ def run(item, http_client, queue_webhook, **kwargs):
     item["md_chapter_id"] = successful_upload_id
 
     queue_webhook.add_chapter(item, processed=uploaded)
-    database_connection = get_database_connection()
 
     database_connection["to_upload"].delete_one({"_id": {"$eq": item["_id"]}})
     if uploaded:
@@ -360,11 +359,10 @@ def run(item, http_client, queue_webhook, **kwargs):
 
         if successful_upload_id is not None:
             uploaded_list.append(successful_upload_id)
-            update_database(item)
+            update_database(database_connection, item)
 
 
-def fetch_data_from_database():
-    database_connection = get_database_connection()
+def fetch_data_from_database(database_connection):
     return [chapter for chapter in database_connection["to_upload"].find()]
 
 

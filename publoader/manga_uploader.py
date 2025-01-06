@@ -3,14 +3,13 @@ import re
 import traceback
 from typing import Dict, List, Optional
 
+import gridfs
 import gridfs.errors
 import pymongo
 from pymongo import UpdateOne
 
 from publoader.http import http_client
 from publoader.models.database import (
-    get_database_connection,
-    image_filestream,
     update_database,
     update_expired_chapter_database,
 )
@@ -29,6 +28,7 @@ logger = logging.getLogger("publoader")
 class MangaUploaderProcess:
     def __init__(
         self,
+        database_connection,
         extension_name: str,
         clean_db: bool,
         updated_chapters: List[Chapter],
@@ -47,6 +47,7 @@ class MangaUploaderProcess:
         chapters_for_editing: List[Chapter],
         **kwargs,
     ):
+        self.database_connection = database_connection
         self.extension_name = extension_name
         self.clean_db = clean_db
         self.updated_chapters = [
@@ -72,8 +73,6 @@ class MangaUploaderProcess:
         self.chapters_for_editing = chapters_for_editing
         self.total_chapters_on_md = total_chapters_on_md
         self.custom_language = self.override_options.get("custom_language", {})
-
-        self.database_connection = get_database_connection()
 
         self.chapters_on_md = self._get_external_chapters_md()
         self.total_chapters_on_md.extend(self.chapters_on_md)
@@ -118,6 +117,7 @@ class MangaUploaderProcess:
         )
 
         update_expired_chapter_database(
+            database_connection=self.database_connection,
             extension_name=self.extension_name,
             md_chapter=md_chapters_not_external,
             md_manga_id=self.mangadex_manga_id,
@@ -321,6 +321,8 @@ class MangaUploaderProcess:
 
         if chapters_to_insert:
             try:
+                image_filestream = gridfs.GridFS(self.database_connection, "images")
+
                 for chap in chapters_to_insert:
                     images = []
                     images_length = 0
@@ -416,5 +418,8 @@ class MangaUploaderProcess:
             logger.debug(f"Chapters to edit: {dupes_for_editing}")
             print(edited_chapters_message)
 
-        update_database(chapter=dupes_for_editing + chapters_skipped)
+        update_database(
+            database_connection=self.database_connection,
+            chapter=dupes_for_editing + chapters_skipped,
+        )
         return

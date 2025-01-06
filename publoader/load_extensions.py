@@ -7,7 +7,6 @@ from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional, Union
 
-from publoader.models.database import get_database_connection
 from publoader.models.dataclasses import Chapter, Manga
 from publoader.utils.config import CLEAN_TIME, DEFAULT_CLEAN_DAY, DEFAULT_TIME
 from publoader.utils.utils import get_current_datetime, root_path
@@ -283,7 +282,9 @@ def load_extensions(names=None, clean_db: bool = False, general_run: bool = Fals
     return updates
 
 
-def run_extension(extension: dict, clean_db_override: bool = False):
+def run_extension(
+    database_connection, extension: dict, clean_db_override: bool = False
+):
     """Run a single extension."""
     extension_class = extension["extension"]
     clean_db = extension["clean_db"]
@@ -298,8 +299,6 @@ def run_extension(extension: dict, clean_db_override: bool = False):
         name = check_class_has_attribute(extension_name, extension_class, "name")
         validate_extension_name(name)
         normalised_extension_name = f"extensions.{name}"
-
-        database_connection = get_database_connection()
 
         posted_chapters_ids = list(
             database_connection["uploaded_ids"].find({"extension_name": {"$eq": name}})
@@ -419,7 +418,7 @@ def run_extension(extension: dict, clean_db_override: bool = False):
         return
 
 
-def run_extensions(extensions: dict, clean_db_override: bool):
+def run_extensions(database_connection, extensions: dict, clean_db_override: bool):
     """Run the extensions to get the updates."""
     updates = {}
     for site in extensions:
@@ -433,7 +432,9 @@ def run_extensions(extensions: dict, clean_db_override: bool):
         ).send()
 
         try:
-            data = run_extension(extension, clean_db_override=clean_db_override)
+            data = run_extension(
+                database_connection, extension, clean_db_override=clean_db_override
+            )
         except BaseException as e:
             traceback.print_exc()
             logger.exception(f"------{extension_name} raised an error.")

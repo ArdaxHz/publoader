@@ -56,6 +56,7 @@ def send_untracked_manga_webhook(extension_name, untracked_manga):
 
 
 def run_updates(
+    database_connection,
     extension_data: dict,
     manga_data_local: dict,
 ):
@@ -102,8 +103,6 @@ def run_updates(
             title=f"Found {len(updated_chapters)} chapters for {normalised_extension_name}",
         ).send()
 
-        database_connection = get_database_connection()
-
         # Get already posted chapters for the extension
         posted_chapters_data = list(
             database_connection["uploaded"].find(
@@ -115,6 +114,7 @@ def run_updates(
         logger.info("Retrieved posted chapters from database.")
 
         ExtensionUploader(
+            database_connection=database_connection,
             config=config,
             extension=extension_data,
             extension_name=extension_name,
@@ -144,6 +144,7 @@ def run_updates(
             )
 
         dupes_deleter = DeleteDuplicatesMD(
+            database_connection=database_connection,
             extension_name=extension_name,
             tracked_mangadex_ids=mangadex_manga_ids_for_dupe_remove,
             manga_data_local=manga_data_local,
@@ -168,7 +169,10 @@ def run_updates(
 
 
 def open_extensions(
-    names: List[str] = None, clean_db: bool = False, general_run: bool = False
+    database_connection,
+    names: List[str] = None,
+    clean_db: bool = False,
+    general_run: bool = False,
 ):
     """Run multiple extensions."""
     try:
@@ -190,6 +194,7 @@ def open_extensions(
         )
         for site in extensions:
             run_updates(
+                database_connection,
                 extensions[site],
                 manga_data_local=manga_data_local,
             )
@@ -231,9 +236,10 @@ if __name__ == "__main__":
     )
 
     vargs = vars(parser.parse_args())
+    database_connection = get_database_connection()
 
     try:
-        worker.main(restart_threads=False)
+        worker.main(database_connection, restart_threads=False)
 
         if vargs["extension"] is None:
             extension_to_run = None
@@ -243,7 +249,10 @@ if __name__ == "__main__":
             ]
 
         open_extensions(
-            names=extension_to_run, clean_db=vargs["clean"], general_run=vargs["force"]
+            database_connection=database_connection,
+            names=extension_to_run,
+            clean_db=vargs["clean"],
+            general_run=vargs["force"],
         )
     except KeyboardInterrupt:
         worker.kill()
