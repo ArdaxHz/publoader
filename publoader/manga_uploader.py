@@ -9,7 +9,7 @@ from pymongo import UpdateOne
 
 from publoader.http import http_client
 from publoader.models.database import (
-    database_connection,
+    get_database_connection,
     image_filestream,
     update_database,
     update_expired_chapter_database,
@@ -72,6 +72,8 @@ class MangaUploaderProcess:
         self.chapters_for_editing = chapters_for_editing
         self.total_chapters_on_md = total_chapters_on_md
         self.custom_language = self.override_options.get("custom_language", {})
+
+        self.database_connection = get_database_connection()
 
         self.chapters_on_md = self._get_external_chapters_md()
         self.total_chapters_on_md.extend(self.chapters_on_md)
@@ -340,7 +342,7 @@ class MangaUploaderProcess:
                     chap.pop("images")
                     chap["images"] = images if images_length == len(images) else []
 
-                upload_insertion = database_connection["to_upload"].bulk_write(
+                upload_insertion = self.database_connection["to_upload"].bulk_write(
                     [
                         UpdateOne(
                             {
@@ -368,7 +370,7 @@ class MangaUploaderProcess:
 
         if chapters_to_edit:
             try:
-                edit_insertion = database_connection["to_edit"].bulk_write(
+                edit_insertion = self.database_connection["to_edit"].bulk_write(
                     [
                         UpdateOne(
                             {"md_chapter_id": {"$eq": chap["md_chapter_id"]}},

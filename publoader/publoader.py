@@ -19,7 +19,7 @@ from publoader.load_extensions import (
 )
 from publoader.utils.config import config, resources_path
 from publoader.models.database import (
-    database_connection,
+    get_database_connection,
 )
 from publoader.models.dataclasses import Chapter
 from publoader.utils.utils import get_current_datetime, open_manga_data
@@ -101,6 +101,8 @@ def run_updates(
             extension_name,
             title=f"Found {len(updated_chapters)} chapters for {normalised_extension_name}",
         ).send()
+
+        database_connection = get_database_connection()
 
         # Get already posted chapters for the extension
         posted_chapters_data = list(

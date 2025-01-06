@@ -8,7 +8,7 @@ from gridfs import GridOut
 
 from publoader.http.properties import RequestError
 from publoader.models.database import (
-    database_connection,
+    get_database_connection,
     image_filestream,
     update_database,
 )
@@ -243,9 +243,9 @@ class UploaderProcess:
                 "translatedLanguage": self.chapter.chapter_language,
                 "externalUrl": self.chapter.chapter_url,
             },
-            "pageOrder": self.images_to_upload_ids
-            if not self.failed_image_upload
-            else [],
+            "pageOrder": (
+                self.images_to_upload_ids if not self.failed_image_upload else []
+            ),
         }
 
         # if (
@@ -344,6 +344,8 @@ def run(item, http_client, queue_webhook, **kwargs):
     item["md_chapter_id"] = successful_upload_id
 
     queue_webhook.add_chapter(item, processed=uploaded)
+    database_connection = get_database_connection()
+
     database_connection["to_upload"].delete_one({"_id": {"$eq": item["_id"]}})
     if uploaded:
         database_connection["to_upload"].delete_one({"_id": {"$eq": item["_id"]}})
@@ -362,6 +364,7 @@ def run(item, http_client, queue_webhook, **kwargs):
 
 
 def fetch_data_from_database():
+    database_connection = get_database_connection()
     return [chapter for chapter in database_connection["to_upload"].find()]
 
 

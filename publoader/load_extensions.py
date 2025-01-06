@@ -7,7 +7,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import List, Optional, Union
 
-from publoader.models.database import database_connection
+from publoader.models.database import get_database_connection
 from publoader.models.dataclasses import Chapter, Manga
 from publoader.utils.config import CLEAN_TIME, DEFAULT_CLEAN_DAY, DEFAULT_TIME
 from publoader.utils.utils import get_current_datetime, root_path
@@ -298,6 +298,8 @@ def run_extension(extension: dict, clean_db_override: bool = False):
         name = check_class_has_attribute(extension_name, extension_class, "name")
         validate_extension_name(name)
         normalised_extension_name = f"extensions.{name}"
+
+        database_connection = get_database_connection()
 
         posted_chapters_ids = list(
             database_connection["uploaded_ids"].find({"extension_name": {"$eq": name}})
