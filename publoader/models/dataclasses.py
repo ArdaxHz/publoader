@@ -50,7 +50,9 @@ class Chapter:
         "extension_name",
         mode="before",
     )
-    def transform_id_to_str(cls, value) -> str:
+    def transform_id_to_str(cls, value) -> Optional[str]:
+        if value is None:
+            return None
         return str(value)
 
     def __hash__(self):
