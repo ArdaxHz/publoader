@@ -241,9 +241,9 @@ class UploaderProcess:
                 "chapter": self.chapter.chapter_number,
                 "title": self.chapter.chapter_title,
                 "translatedLanguage": self.chapter.chapter_language,
-                "externalUrl": self.chapter.chapter_url,
-                "termsAccepted": True
+                "externalUrl": self.chapter.chapter_url
             },
+            "termsAccepted": True,
             "pageOrder": self.images_to_upload_ids
             if not self.failed_image_upload
             else [],
