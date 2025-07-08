@@ -75,7 +75,6 @@ class DeleteDuplicatesMD:
         chapters: List[dict],
         dupes_webhook: "PubloaderDupesWebhook",
     ) -> Optional[List[dict]]:
-
         # Chapters that are from the extension's group
         chapters_to_check = [
             chapter
