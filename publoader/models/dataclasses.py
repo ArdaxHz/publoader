@@ -1,6 +1,7 @@
 from datetime import datetime
 from typing import List, Optional
 
+from pydantic import field_validator
 from pydantic.dataclasses import dataclass
 
 
@@ -35,6 +36,24 @@ class Chapter:
     extension_name: Optional[str] = None
 
     images: Optional[List[bytes]] = None
+
+    @field_validator(
+        "chapter_language",
+        "chapter_number",
+        "chapter_title",
+        "chapter_id",
+        "chapter_url",
+        "md_chapter_id",
+        "manga_id",
+        "manga_name",
+        "manga_url",
+        "extension_name",
+        mode="before",
+    )
+    def transform_id_to_str(cls, value) -> Optional[str]:
+        if value is None:
+            return None
+        return str(value)
 
     def __hash__(self):
         return hash(

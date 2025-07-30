@@ -245,6 +245,7 @@ class UploaderProcess:
             "pageOrder": (
                 self.images_to_upload_ids if not self.failed_image_upload else []
             ),
+            "termsAccepted": True
         }
 
         # if (
