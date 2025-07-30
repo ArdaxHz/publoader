@@ -1,0 +1,33 @@
+groups:
+  - name: container-alerts
+    interval: 30s
+    rules:
+      - alert: ContainerStarted
+        expr: increase(container_last_seen{container=~".+"}[1m]) > 0
+        for: 1m
+        labels:
+          severity: info
+          container: '{{ $labels.container }}'
+        annotations:
+          summary: 'Container Started ({{ $labels.container }})'
+          description: 'The container {{ $labels.container }} was started on instance {{ $labels.instance }}.'
+
+      - alert: ContainerStopped
+        expr: absent(container_last_seen{container=~".+"})
+        for: 1m
+        labels:
+          severity: warning
+          container: '{{ $labels.container }}'
+        annotations:
+          summary: 'Container Stopped ({{ $labels.container }})'
+          description: 'The container {{ $labels.container }} is no longer running on instance {{ $labels.instance }}.'
+
+      - alert: ContainerRestarted
+        expr: rate(container_restart_count{container=~".+"}[1m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+          container: '{{ $labels.container }}'
+        annotations:
+          summary: 'Container Restart Detected ({{ $labels.container }})'
+          description: 'The container {{ $labels.container }} was restarted on instance {{ $labels.instance }}.'

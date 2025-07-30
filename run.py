@@ -18,18 +18,27 @@ from publoader.utils.config import (
     daily_run_time_daily_minute,
 )
 from publoader.utils.utils import get_current_datetime, root_path
+from publoader.models.database import get_database_connection
 from publoader.workers import worker
 
 logger = logging.getLogger("publoader")
 
 
-def main(extension_names: list[str] = None, general_run=False, clean_db=False):
+def main(
+    database_connection,
+    extension_names: list[str] = None,
+    general_run=False,
+    clean_db=False,
+):
     """Call the main function of the publoader bot."""
     from publoader import publoader
 
     reload(publoader)
     publoader.open_extensions(
-        names=extension_names, general_run=general_run, clean_db=clean_db
+        database_connection,
+        names=extension_names,
+        general_run=general_run,
+        clean_db=clean_db,
     )
 
 
@@ -47,7 +56,7 @@ def open_timings():
     return timings
 
 
-def schedule_extensions():
+def schedule_extensions(database_connection):
     """Add the timings to the scheduler."""
     same = []
     timings = open_timings()
@@ -88,7 +97,10 @@ def schedule_extensions():
             weight=1,
             alias=", ".join(fixed_timing["extensions"]),
             tags=fixed_timing["extensions"],
-            kwargs={"extension_names": list(fixed_timing["extensions"])},
+            kwargs={
+                "database_connection": database_connection,
+                "extension_names": list(fixed_timing["extensions"]),
+            },
         )
 
 
@@ -156,7 +168,8 @@ if __name__ == "__main__":
     if vargs["update"]:
         restart()
 
-    worker.main()
+    database_connection = get_database_connection()
+    worker.main(database_connection)
 
     if vargs["extension"] is None:
         extension_to_run = None
@@ -165,6 +178,7 @@ if __name__ == "__main__":
 
     if vargs["force"] or vargs["clean"]:
         main(
+            database_connection,
             extension_names=extension_to_run,
             general_run=vargs["force"],
             clean_db=vargs["clean"],
@@ -195,8 +209,11 @@ if __name__ == "__main__":
         weight=8,
         alias="daily_checker",
         tags={"daily_checker"},
+        kwargs={
+            "database_connection": database_connection,
+        },
     )
-    schedule_extensions()
+    schedule_extensions(database_connection)
     print(schedule)
 
     try:

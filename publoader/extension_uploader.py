@@ -17,6 +17,7 @@ logger = logging.getLogger("publoader")
 class ExtensionUploader:
     def __init__(
         self,
+        database_connection,
         config: configparser.RawConfigParser,
         extension,
         extension_name: str,
@@ -31,6 +32,7 @@ class ExtensionUploader:
         chapters_on_db: List[Chapter],
         manga_data_local: Dict[str, dict],
     ):
+        self.database_connection = database_connection
         self.config = config
         self.extension = extension
         self.clean_db = clean_db
@@ -101,6 +103,7 @@ class ExtensionUploader:
         for manga_id in self.chapters_on_md:
             if manga_id in manga_untracked:
                 update_expired_chapter_database(
+                    database_connection=self.database_connection,
                     extension_name=self.extension_name,
                     md_chapter=self.chapters_on_md[manga_id],
                     md_manga_id=manga_id,
@@ -146,6 +149,7 @@ class ExtensionUploader:
         for manga_id in tracked_ids_no_chapters_md:
             if manga_id in tracked_ids_chapters_md:
                 update_expired_chapter_database(
+                    database_connection=self.database_connection,
                     extension_name=self.extension_name,
                     md_chapter=tracked_ids_no_chapters_md[manga_id],
                     md_manga_id=manga_id,
@@ -284,6 +288,7 @@ class ExtensionUploader:
                 all_chapters = self.all_manga_chapters.get(mangadex_manga_id, [])
 
             manga_uploader = MangaUploaderProcess(
+                database_connection=self.database_connection,
                 extension_name=self.extension_name,
                 clean_db=self.clean_db,
                 updated_chapters=self.updated_manga_chapters.get(mangadex_manga_id, []),

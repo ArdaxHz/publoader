@@ -22,6 +22,7 @@ logger = logging.getLogger("publoader")
 class DeleteDuplicatesMD:
     def __init__(
         self,
+        database_connection,
         extension_name: str,
         tracked_mangadex_ids: List[str],
         manga_data_local: Dict[str, dict],
@@ -29,6 +30,7 @@ class DeleteDuplicatesMD:
         mangadex_group_id: str,
         override_options: dict,
     ) -> None:
+        self.database_connection = database_connection
         self.extension_name = extension_name
         self.tracked_mangadex_ids = tracked_mangadex_ids
         self.manga_data_local = manga_data_local
@@ -101,9 +103,11 @@ class DeleteDuplicatesMD:
             # List of chapters that have similar external url as current element
             match_list = list(
                 filter(
-                    lambda x: x
-                    if re.search(external_url, x["attributes"]["externalUrl"])
-                    else None,
+                    lambda x: (
+                        x
+                        if re.search(external_url, x["attributes"]["externalUrl"])
+                        else None
+                    ),
                     not_dupe,
                 )
             )
@@ -120,9 +124,9 @@ class DeleteDuplicatesMD:
         to_check = [
             list(
                 filter(
-                    lambda x: x
-                    if re.search(x["attributes"]["externalUrl"], y)
-                    else None,
+                    lambda x: (
+                        x if re.search(x["attributes"]["externalUrl"], y) else None
+                    ),
                     dupes,
                 )
             )
@@ -149,11 +153,13 @@ class DeleteDuplicatesMD:
                 for multi_chapter_id in self.override_options.get("multi_chapters", {})
                 for x in list(
                     filter(
-                        lambda y: y
-                        if check_chapter_url_same(
-                            y["attributes"]["externalUrl"], multi_chapter_id
-                        )
-                        else None,
+                        lambda y: (
+                            y
+                            if check_chapter_url_same(
+                                y["attributes"]["externalUrl"], multi_chapter_id
+                            )
+                            else None
+                        ),
                         sorted_chapters,
                     ),
                 )
@@ -292,6 +298,7 @@ class DeleteDuplicatesMD:
             dupes_found = True
 
             update_expired_chapter_database(
+                database_connection=self.database_connection,
                 extension_name=self.extension_name,
                 md_chapter=chapters_to_delete,
                 md_manga_id=manga_id,

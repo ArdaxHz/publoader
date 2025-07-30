@@ -3,14 +3,13 @@ import re
 import traceback
 from typing import Dict, List, Optional
 
+import gridfs
 import gridfs.errors
 import pymongo
 from pymongo import UpdateOne
 
 from publoader.http import http_client
 from publoader.models.database import (
-    database_connection,
-    image_filestream,
     update_database,
     update_expired_chapter_database,
 )
@@ -29,6 +28,7 @@ logger = logging.getLogger("publoader")
 class MangaUploaderProcess:
     def __init__(
         self,
+        database_connection,
         extension_name: str,
         clean_db: bool,
         updated_chapters: List[Chapter],
@@ -47,6 +47,7 @@ class MangaUploaderProcess:
         chapters_for_editing: List[Chapter],
         **kwargs,
     ):
+        self.database_connection = database_connection
         self.extension_name = extension_name
         self.clean_db = clean_db
         self.updated_chapters = [
@@ -116,6 +117,7 @@ class MangaUploaderProcess:
         )
 
         update_expired_chapter_database(
+            database_connection=self.database_connection,
             extension_name=self.extension_name,
             md_chapter=md_chapters_not_external,
             md_manga_id=self.mangadex_manga_id,
@@ -319,6 +321,8 @@ class MangaUploaderProcess:
 
         if chapters_to_insert:
             try:
+                image_filestream = gridfs.GridFS(self.database_connection, "images")
+
                 for chap in chapters_to_insert:
                     images = []
                     images_length = 0
@@ -340,7 +344,7 @@ class MangaUploaderProcess:
                     chap.pop("images")
                     chap["images"] = images if images_length == len(images) else []
 
-                upload_insertion = database_connection["to_upload"].bulk_write(
+                upload_insertion = self.database_connection["to_upload"].bulk_write(
                     [
                         UpdateOne(
                             {
@@ -368,7 +372,7 @@ class MangaUploaderProcess:
 
         if chapters_to_edit:
             try:
-                edit_insertion = database_connection["to_edit"].bulk_write(
+                edit_insertion = self.database_connection["to_edit"].bulk_write(
                     [
                         UpdateOne(
                             {"md_chapter_id": {"$eq": chap["md_chapter_id"]}},
@@ -414,5 +418,8 @@ class MangaUploaderProcess:
             logger.debug(f"Chapters to edit: {dupes_for_editing}")
             print(edited_chapters_message)
 
-        update_database(chapter=dupes_for_editing + chapters_skipped)
+        update_database(
+            database_connection=self.database_connection,
+            chapter=dupes_for_editing + chapters_skipped,
+        )
         return

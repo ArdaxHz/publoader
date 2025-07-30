@@ -3,7 +3,7 @@ import multiprocessing
 from publoader.workers import watcher
 
 
-def main(restart_threads=True):
+def main(database_connection, restart_threads=True):
     """Initialise watcher processes."""
     try:
         watchers = [
@@ -19,6 +19,7 @@ def main(restart_threads=True):
                     "table_name": worker["table"],
                     "webhook_colour": worker["colour"],
                     "restart_threads": restart_threads,
+                    "database_connection": database_connection,
                 },
             )
             process.start()
