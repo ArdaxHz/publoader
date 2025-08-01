@@ -5,8 +5,6 @@ services:
     restart: unless-stopped
     ports:
       - "8080:8080"
-    labels:
-      - "com.centurylinklabs.watchtower.enable=true"
     volumes:
       - ./config.ini:/app/config.ini
       - ./logs:/app/logs
@@ -19,55 +17,10 @@ services:
     image: ardax/publoader-extensions:latest
     container_name: publoader-extensions
     restart: "no"
-    labels:
-      - "com.centurylinklabs.watchtower.enable=true"
     volumes:
       - extensions:/shared/publoader/extensions
-
-  watchtower:
-    image: containrrr/watchtower:latest
-    container_name: watchtower
-    restart: unless-stopped
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-    environment:
-      - WATCHTOWER_CLEANUP=true
-      - WATCHTOWER_SCHEDULE=0 1 * * * # 1am GMT daily
-    depends_on:
-      - publoader
-      - publoader-extensions
-
-  prometheus:
-    image: prom/prometheus:latest
-    container_name: prometheus
-    restart: unless-stopped
-    volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml
-    ports:
-      - "9090:9090"
-    depends_on:
-      - publoader
-      - publoader-extensions
-
-  alertmanager:
-    image: prom/alertmanager:latest
-    container_name: alertmanager
-    restart: unless-stopped
-    volumes:
-      - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml
-    ports:
-      - "9093:9093"
-
-  grafana:
-    image: grafana/grafana:latest
-    container_name: grafana
-    restart: unless-stopped
-    ports:
-      - "3000:3000"
-    volumes:
-      - grafana_data:/var/lib/grafana
-    depends_on:
-      - prometheus
+    # This ensures the container stays running to maintain the volume
+    command: ["tail", "-f", "/dev/null"]
 
   cloudflared:
     image: cloudflare/cloudflared:latest
@@ -76,9 +29,6 @@ services:
     command: tunnel run
     environment:
       - TUNNEL_TOKEN=${CLOUDFLARE_PUBLOADER_TUNNEL_TOKEN}
-    depends_on:
-      - grafana
 
 volumes:
-  grafana_data:
   extensions:
