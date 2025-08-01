@@ -22,6 +22,19 @@ services:
     # This ensures the container stays running to maintain the volume
     command: ["tail", "-f", "/dev/null"]
 
+  watchtower:
+    image: containrrr/watchtower:latest
+    container_name: watchtower
+    restart: unless-stopped
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - WATCHTOWER_CLEANUP=true
+      - WATCHTOWER_SCHEDULE=0 1 * * *
+    depends_on:
+      - publoader
+      - publoader-extensions
+
   cloudflared:
     image: cloudflare/cloudflared:latest
     container_name: cloudflared
