@@ -19,17 +19,18 @@ class DatabaseConnector(metaclass=Singleton):
     def __init__(self):
         self.database_uri = config["Credentials"]["mongodb_uri"]
         self.database_name = config["Credentials"]["mongodb_db_name"]
-        self.database = self.connect_db()
-        self.database_connection = self.database[self.database_name]
+        self.database_connection = None
 
     def connect_db(self):
-        client = pymongo.MongoClient(self.database_uri)
-        return client
+        if self.database_connection is None:
+            client = pymongo.MongoClient(self.database_uri)
+            self.database_connection = client[self.database_name]
+        return self.database_connection
 
 
-database = DatabaseConnector()
-database_connection = database.database_connection
-image_filestream = gridfs.GridFS(database_connection, "images")
+def get_database_connection():
+    database = DatabaseConnector()
+    return database.connect_db()
 
 
 def convert_model_dict(chapter):
@@ -38,7 +39,9 @@ def convert_model_dict(chapter):
     return chapter
 
 
-def update_database(chapter: Union[list, Union[Chapter, dict]], **kwargs):
+def update_database(
+    database_connection, chapter: Union[list, Union[Chapter, dict]], **kwargs
+):
     """Update the database with the new chapter."""
     if isinstance(chapter, Chapter):
         chapter = vars(chapter)
@@ -116,6 +119,7 @@ def update_database(chapter: Union[list, Union[Chapter, dict]], **kwargs):
 
 
 def update_expired_chapter_database(
+    database_connection,
     extension_name: str,
     md_manga_id: str,
     md_chapter: Union[List[dict], dict] = None,
