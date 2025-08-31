@@ -1,4 +1,5 @@
 #!/bin/bash
+set -e
 
 echo "Installing Python dependencies from requirements.txt files..."
 
@@ -7,5 +8,10 @@ find /app -name "requirements.txt" -exec pip install -r {} \;
 
 echo "Python dependencies installed."
 
-# Execute the main command passed to the container
-exec python run.py "$@"
+# If no args were passed to the container, run the default app.
+# If args were passed, execute them (so `docker run ... python run.py` works).
+if [ "$#" -eq 0 ]; then
+  exec python run.py
+else
+  exec "$@"
+fi
