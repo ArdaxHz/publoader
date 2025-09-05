@@ -47,7 +47,7 @@ def send_untracked_manga_webhook(extension_name, untracked_manga):
                 + (f" ({count})" if count > 1 else ""),
                 description="\n".join(
                     [
-                        f"**{manga.manga_name}**: [{manga.manga_id}]({manga.manga_url})"
+                        f"**{manga.manga_name}** ({manga.manga_language}): [{manga.manga_id}]({manga.manga_url})"
                         for manga in series_list
                     ]
                 ),
