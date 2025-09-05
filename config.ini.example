@@ -24,7 +24,7 @@ WEBHOOK_URL=
 MANGA_DATA_PATH=manga_data.json
 
 [Repo]
-REPO_OWNER=ArdaxHz
+REPO_OWNER=publoader
 BASE_REPO_PATH=publoader
 EXTENSIONS_REPO_PATH=publoader-extensions
 GITHUB_ACCESS_TOKEN=
