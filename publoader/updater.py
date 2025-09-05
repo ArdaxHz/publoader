@@ -3,6 +3,7 @@ import logging
 import shutil
 import time
 from pathlib import Path
+from typing import Tuple
 
 import github
 import requests
@@ -109,12 +110,12 @@ class PubloaderUpdater:
 
         return failed_download
 
-    def fetch_repo(self, repo_name, commit_sha_var, download_path):
+    def fetch_repo(self, repo_name, commit_sha_var, download_path) -> Tuple[bool, bool, str]:
         try:
             repo = self.github.get_repo(f"{self.repo_owner}/{repo_name}")
         except github.UnknownObjectException:
             logger.exception(f"Error fetching repo {repo_name}")
-            return False, commit_sha_var
+            return False, False, commit_sha_var
 
         logger.info(f"Checking for update in: {repo}")
 
@@ -123,7 +124,7 @@ class PubloaderUpdater:
             logger.info(
                 f"No new commit, not updating. Latest commit: {latest_remote_commit.sha}"
             )
-            return False, commit_sha_var
+            return False, False, commit_sha_var
 
         logger.info(f"Update found, downloading {latest_remote_commit.sha}")
         PubloaderWebhook(
@@ -132,7 +133,7 @@ class PubloaderUpdater:
             description=f"SHA: `{latest_remote_commit.sha}`",
         ).main()
         failed_download = self.download_content(repo, download_path, "")
-        return failed_download, latest_remote_commit.sha
+        return True, failed_download, latest_remote_commit.sha
 
     def move_files(self):
         shutil.copytree(
@@ -147,15 +148,17 @@ class PubloaderUpdater:
         print(f"Looking for new updates.")
         extensions_path = self.update_path.joinpath(self.extensions_path)
 
-        base_repo_failed, self.latest_commit_sha = self.fetch_repo(
+        base_repo_success, base_repo_failed, self.latest_commit_sha = self.fetch_repo(
             self.base_repo, self.latest_commit_sha, self.update_path
         )
 
         time.sleep(8)
+        extensions_private_repo_success = False
         extensions_private_repo_failed = False
 
         if self.extensions_private_repo is not None:
             (
+                extensions_private_repo_success,
                 extensions_private_repo_failed,
                 self.latest_extension_private_sha,
             ) = self.fetch_repo(
@@ -166,7 +169,7 @@ class PubloaderUpdater:
 
             time.sleep(8)
 
-        extensions_repo_failed, self.latest_extension_sha = self.fetch_repo(
+        extensions_repo_success, extensions_repo_failed, self.latest_extension_sha = self.fetch_repo(
             self.extensions_repo, self.latest_extension_sha, extensions_path
         )
 
@@ -179,15 +182,16 @@ class PubloaderUpdater:
             shutil.rmtree(self.update_path, ignore_errors=True)
             return
 
-        PubloaderWebhook(
-            extension_name=None,
-            title=f"Update download complete, applying changes.",
-        ).send()
-        Path(config["Paths"]["mdauth_path"]).unlink(missing_ok=True)
-        logger.info("Update download complete, applying changes.")
-        self.move_files()
-        self._save_commits()
-        print(f"Finished looking for new updates.")
+        if base_repo_success or extensions_private_repo_success or extensions_repo_failed:
+            PubloaderWebhook(
+                extension_name=None,
+                title=f"Update download complete, applying changes.",
+            ).send()
+            Path(config["Paths"]["mdauth_path"]).unlink(missing_ok=True)
+            logger.info("Update download complete, applying changes.")
+            self.move_files()
+            self._save_commits()
+            print(f"Finished looking for new updates.")
 
 
 if __name__ == "__main__":
